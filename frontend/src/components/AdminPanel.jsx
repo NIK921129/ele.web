@@ -84,7 +84,6 @@ export default function AdminPanel({ user, onLogout }) {
                     <th style={{ padding: '14px 16px' }}>Type</th>
                     <th style={{ padding: '14px 16px' }}>Full Name</th>
                     <th style={{ padding: '14px 16px' }}>Contact</th>
-                    <th style={{ padding: '14px 16px' }}>Password Hash</th>
                     <th style={{ padding: '14px 16px' }}>Live Location</th>
                     <th style={{ padding: '14px 16px' }}>Active Service</th>
                     <th style={{ padding: '14px 16px' }}>Payment Details</th>
@@ -101,7 +100,6 @@ export default function AdminPanel({ user, onLogout }) {
                       </td>
                       <td style={{ padding: '14px 16px', fontWeight: 500 }}>{row.name}</td>
                       <td style={{ padding: '14px 16px' }}>{row.phone}</td>
-                      <td style={{ padding: '14px 16px', fontFamily: 'monospace', color: 'var(--danger)', fontSize: '0.8rem' }}>{row.pass}</td>
                       <td style={{ padding: '14px 16px' }}><i className="fas fa-map-marker-alt" style={{ color: 'var(--text-muted)' }}></i> {row.location}</td>
                       <td style={{ padding: '14px 16px' }}>{row.service}</td>
                       <td style={{ padding: '14px 16px' }}>{row.payment}</td>

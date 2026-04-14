@@ -71,7 +71,7 @@ io.on('connection', (socket) => {
       // Ensure jobId is a valid Mongo ID (ignores 'MOCK_JOB_123' during frontend prototyping)
       if (mongoose.Types.ObjectId.isValid(data.jobId)) {
         await Job.findByIdAndUpdate(data.jobId, {
-          $push: { chatHistory: { sender: data.sender, text: data.text, time: data.time } }
+          $push: { chatHistory: { sender: data.senderId, text: data.text, time: data.time } } // Store senderId
         });
       }
     } catch (err) {

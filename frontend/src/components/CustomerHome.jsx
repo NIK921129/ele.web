@@ -111,6 +111,7 @@ export default function CustomerHome({ user }) {
     if (!chatInput.trim()) return;
     const msgData = {
       jobId: activeJobId,
+      senderId: user._id, // Send the actual user ID
       sender: user?.name || 'Customer',
       text: chatInput,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })

@@ -21,8 +21,8 @@ const jobSchema = new mongoose.Schema({
   estimatedPrice: { type: Number, required: true },
   finalPrice: { type: Number },
   jobOTP: { type: String }, // 4-digit PIN for starting the job
-  
-  chatHistory: [{ sender: String, text: String, time: String }]
+
+  chatHistory: [{ sender: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, text: String, time: String }]
 }, { timestamps: true });
 
 // Database Indexes for Performance Optimization

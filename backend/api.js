@@ -5,21 +5,6 @@ const Job = require('../models/Job');
 
 const router = express.Router();
 
-// Authentication Middleware
-const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).json({ message: 'Unauthorized: Missing token' });
-
-  const token = authHeader.split(' ')[1];
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'super_secret_fallback_key');
-    req.user = decoded; // Attach the decoded payload to the request object
-    next();
-  } catch (err) {
-    return res.status(401).json({ message: 'Unauthorized: Invalid or expired token' });
-  }
-};
-
 // POST /api/login
 router.post('/login', async (req, res) => {
   try {
@@ -38,8 +23,8 @@ router.post('/login', async (req, res) => {
 
     // Generate a secure JWT for session management
     const token = jwt.sign(
-      { userId: user._id, role: user.role },
-      process.env.JWT_SECRET || 'super_secret_fallback_key',
+      { userId: user._id, role: user.role }, // Use user._id directly
+      JWT_SECRET,
       { expiresIn: '7d' }
     );
 
@@ -55,8 +40,15 @@ router.post('/login', async (req, res) => {
 });
 
 // POST /api/jobs - Create a new booking
-router.post('/jobs', authenticateToken, async (req, res) => {
+router.post('/jobs', async (req, res) => {
   try {
+    // Authenticate the user from the token
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ message: 'Unauthorized' });
+    
+    const token = authHeader.split(' ')[1];
+    const decoded = jwt.verify(token, JWT_SECRET);
+
     const { serviceType, address, coordinates, estimatedPrice } = req.body;
 
     if (!serviceType || !address) {
@@ -64,7 +56,7 @@ router.post('/jobs', authenticateToken, async (req, res) => {
     }
 
     const newJob = new Job({
-      customer: req.user.userId,
+      customer: decoded.userId,
       serviceType,
       address,
       location: { type: 'Point', coordinates: coordinates || [0, 0] },
@@ -94,15 +86,21 @@ router.get('/jobs/available', async (req, res) => {
 });
 
 // PUT /api/jobs/:id/accept - Electrician accepts a job
-router.put('/jobs/:id/accept', authenticateToken, async (req, res) => {
+router.put('/jobs/:id/accept', async (req, res) => {
   try {
-    if (req.user.role !== 'electrician' && req.user.role !== 'admin') {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ message: 'Unauthorized' });
+
+    const token = authHeader.split(' ')[1];
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'super_secret_fallback_key');
+
+    if (decoded.role !== 'electrician' && decoded.role !== 'admin') {
       return res.status(403).json({ message: 'Forbidden: Only electricians can accept jobs' });
     }
 
     const job = await Job.findOneAndUpdate(
       { _id: req.params.id, status: 'searching' },
-      { status: 'assigned', electrician: req.user.userId },
+      { status: 'assigned', electrician: decoded.userId },
       { new: true }
     );
 
@@ -118,10 +116,17 @@ router.put('/jobs/:id/accept', authenticateToken, async (req, res) => {
 });
 
 // PUT /api/jobs/:id/cancel - Customer cancels a job
-router.put('/jobs/:id/cancel', authenticateToken, async (req, res) => {
+router.put('/jobs/:id/cancel', async (req, res) => {
   try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ message: 'Unauthorized' });
+
+    const token = authHeader.split(' ')[1];
+    const decoded = jwt.verify(token, JWT_SECRET);
+
+    // Only allow cancelling if it's the customer's job and no electrician has accepted it yet
     const job = await Job.findOneAndUpdate(
-      { _id: req.params.id, customer: req.user.userId, status: 'searching' },
+      { _id: req.params.id, customer: decoded.userId, status: 'searching' },
       { status: 'cancelled' },
       { new: true }
     );
@@ -138,14 +143,20 @@ router.put('/jobs/:id/cancel', authenticateToken, async (req, res) => {
 });
 
 // PUT /api/jobs/:id/complete - Electrician marks a job as completed
-router.put('/jobs/:id/complete', authenticateToken, async (req, res) => {
+router.put('/jobs/:id/complete', async (req, res) => {
   try {
-    if (req.user.role !== 'electrician' && req.user.role !== 'admin') {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ message: 'Unauthorized' });
+
+    const token = authHeader.split(' ')[1];
+    const decoded = jwt.verify(token, JWT_SECRET);
+
+    if (decoded.role !== 'electrician' && decoded.role !== 'admin') {
       return res.status(403).json({ message: 'Forbidden: Only electricians can complete jobs' });
     }
 
     const job = await Job.findOneAndUpdate(
-      { _id: req.params.id, electrician: req.user.userId, status: { $in: ['assigned', 'in_progress', 'payment'] } },
+      { _id: req.params.id, electrician: decoded.userId, status: { $in: ['assigned', 'in_progress', 'payment'] } },
       { status: 'completed' },
       { new: true }
     );
@@ -162,8 +173,14 @@ router.put('/jobs/:id/complete', authenticateToken, async (req, res) => {
 });
 
 // POST /api/users/:id/rate - Rate an electrician
-router.post('/users/:id/rate', authenticateToken, async (req, res) => {
+router.post('/users/:id/rate', async (req, res) => {
   try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ message: 'Unauthorized' });
+    
+    // Validate token
+    jwt.verify(authHeader.split(' ')[1], JWT_SECRET);
+
     const { rating } = req.body;
     if (!rating || rating < 1 || rating > 5) {
       return res.status(400).json({ message: 'A valid rating between 1 and 5 is required' });

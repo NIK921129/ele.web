@@ -91,7 +91,7 @@
       animation: fadeIn 0.5s 0.1s forwards;
     }
 
-    /* Bottom Navigation (App-like feel) */
+    /* Bottom Navigation (App-like feel) - Mobile First */
     .bottom-nav {
       display: flex; gap: 8px; margin-top: 16px;
       background: var(--surface); border-radius: var(--radius-btn);
@@ -102,7 +102,7 @@
       color: var(--text-muted); font-weight: 600; font-size: 0.9rem; transition: all 0.2s;
     }
     .nav-item.active { background: var(--primary-light); color: var(--primary); }
-
+    
     /* Header / Navigation */
     .navbar {
       display: flex;
@@ -110,6 +110,7 @@
       justify-content: space-between;
       padding: 8px 0 20px;
       flex-wrap: wrap;
+      gap: 15px; /* Add gap for wrapping elements */
       animation: slideDown 0.5s forwards;
     }
 
@@ -177,6 +178,7 @@
       align-items: center;
       gap: 12px;
     }
+
     .notification-icon {
       background: var(--surface);
       width: 42px;
@@ -203,7 +205,7 @@
     /* Main grid */
     .dashboard-grid {
       display: grid;
-      grid-template-columns: 1fr 340px;
+      grid-template-columns: 1fr; /* Default to single column for mobile */
       gap: 24px;
       margin-top: 8px;
     }
@@ -247,7 +249,7 @@
     /* Service Grid */
     .service-grid {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(2, 1fr); /* Default to 2 columns for mobile */
       gap: 14px;
       margin: 12px 0 4px;
     }
@@ -274,6 +276,7 @@
       box-shadow: var(--shadow-sm);
       margin-bottom: 8px;
       transition: all 0.2s;
+      font-size: 1.2rem; /* Adjust icon size for mobile */
     }
     .service-item span {
       font-weight: 600;
@@ -294,6 +297,7 @@
       align-items: center;
       justify-content: space-between;
       margin: 16px 0 12px;
+      font-size: 0.9rem; /* Adjust font size for mobile */
     }
     .address-bar i { color: var(--primary); margin-right: 8px; }
     .address-input {
@@ -302,7 +306,7 @@
       font-size: 1rem;
       width: 70%;
       outline: none;
-      font-weight: 500;
+      font-weight: 500; /* Ensure text is readable */
       color: var(--text-main);
     }
 
@@ -372,6 +376,7 @@
     .form-control:focus { border-color: var(--primary); background: var(--surface); }
     
     /* Invoice Table */
+    /* Existing invoice-table styles are fine, but ensure it scrolls horizontally on small screens */
     .invoice-table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.95rem; }
     .invoice-table th, .invoice-table td { padding: 10px; text-align: left; border-bottom: 1px solid var(--border-light); color: var(--text-main); }
     .invoice-table th { color: var(--text-muted); font-weight: 500; }
@@ -379,6 +384,7 @@
 
     /* Review Stars */
     .star-rating { display: flex; gap: 8px; font-size: 2rem; color: var(--border-light); cursor: pointer; justify-content: center; margin: 16px 0; transition: color 0.2s; }
+    .star-rating i { font-size: 2.2rem; } /* Slightly larger for better touch target */
     .star-rating i.active { color: var(--gold); }
     .star-rating i:hover { transform: scale(1.1); }
 
@@ -404,6 +410,7 @@
       padding: 22px;
     }
 
+    /* Inline Stats */
     .inline-stats {
       display: flex;
       gap: 20px;
@@ -411,6 +418,7 @@
 
     /* chart container */
     .chart-container { height: 150px; margin: 10px 0; position: relative; }
+    
 
     /* status badges */
     .badge {
@@ -431,6 +439,7 @@
       text-align: center;
       min-height: 80vh;
     }
+
     .login-card {
       background: var(--surface);
       padding: 40px;
@@ -439,6 +448,7 @@
       max-width: 400px;
       width: 100%;
       animation: fadeInUp 0.6s 0.2s forwards;
+      margin: 0 16px; /* Add horizontal margin for mobile */
       opacity: 0;
     }
     .login-card h1 { font-size: 2rem; margin-bottom: 8px; }
@@ -468,6 +478,7 @@
       max-width: 500px;
       transform: scale(0.95) translateY(20px);
       transition: all 0.3s ease;
+      margin: 0 16px; /* Add horizontal margin for mobile */
     }
     .modal-overlay.visible .modal-content { transform: scale(1) translateY(0); }
     .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
@@ -475,6 +486,7 @@
     .modal-body { max-height: 70vh; overflow-y: auto; padding-right: 4px; }
 
     /* Chat Widget */
+    /* This is a fixed position element, ensure it doesn't overlap crucial content on mobile */
     .chat-widget {
       position: fixed;
       bottom: 20px;
@@ -486,6 +498,7 @@
       z-index: 999;
       overflow: hidden;
       transform: translateY(20px);
+      width: calc(100% - 40px); /* Full width minus padding on mobile */
       opacity: 0;
       animation: fadeInUp 0.5s forwards;
     }
@@ -516,13 +529,17 @@
     }
 
     /* responsiveness */
-    @media (max-width: 780px) {
-      .dashboard-grid { grid-template-columns: 1fr; }
-      .service-grid { grid-template-columns: repeat(2,1fr); }
-      .navbar { flex-direction: column; gap: 15px; align-items: stretch; }
-      .role-switch { justify-content: center; }
+    @media (min-width: 768px) { /* Tablet and larger */
+      .app-container { max-width: 1200px; padding: 16px 0 32px; }
+      .dashboard-grid { grid-template-columns: 1fr 340px; }
+      .service-grid { grid-template-columns: repeat(4, 1fr); }
+      .navbar { flex-direction: row; align-items: center; gap: 0; }
+      .role-switch { justify-content: flex-start; }
+      .login-card { margin: 0 auto; }
+      .modal-content { margin: 0 auto; }
+      .chat-widget { width: 320px; }
     }
-
+    
     /* animations */
     @keyframes fadeIn { to { opacity: 1; } }
     @keyframes slideDown {
