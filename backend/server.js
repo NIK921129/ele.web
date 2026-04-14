@@ -5,7 +5,7 @@ const { Server } = require('socket.io');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
-const apiRoutes = require('./routes/api');
+const apiRoutes = require('./api');
 const Job = require('./models/Job');
 
 const app = express();
