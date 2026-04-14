@@ -168,18 +168,19 @@ export default function CustomerHome({ user }) {
   return (
     <div className="dashboard-grid">
       <div>
-        <div className="promo-banner" style={{ background: 'linear-gradient(135deg, var(--primary), #3b82f6)', color: 'white', padding: '20px', borderRadius: 'var(--radius-card)', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: 'var(--shadow-md)' }}>
+        <div className="promo-banner" style={{ background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)', color: 'white', padding: '24px', borderRadius: 'var(--radius-card)', marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: 'var(--shadow-lg)', border: '1px solid #334155' }}>
           <div>
-            <h3 style={{ margin: 0, color: 'white' }}><i className="fas fa-percent"></i> Summer Special Offer</h3>
-            <p style={{ margin: '4px 0 0 0', opacity: 0.9, fontSize: '0.9rem' }}>Get 20% off on all AC Servicing & Repairs this month.</p>
+            <span className="badge" style={{ background: 'rgba(255,255,255,0.1)', color: '#60a5fa', marginBottom: '8px', display: 'inline-block' }}>SUMMER SALE</span>
+            <h2 style={{ margin: 0, color: 'white', fontSize: '1.5rem' }}>20% Off AC Servicing</h2>
+            <p style={{ margin: '4px 0 0 0', color: '#94a3b8', fontSize: '0.95rem' }}>Beat the heat with verified cooling experts.</p>
           </div>
-          <button className="btn" style={{ background: 'white', color: 'var(--primary)', fontWeight: 'bold', boxShadow: 'none' }}>Claim Offer</button>
+          <button className="btn" style={{ background: 'white', color: '#0f172a', fontWeight: 'bold', boxShadow: 'none', padding: '12px 20px' }}>Claim Offer</button>
         </div>
 
         <div className="card">
           <div className="card-header">
-            <h3><i className="fas fa-hand-sparkles" style={{ marginRight: '8px', color: 'var(--primary)' }}></i>Hello, {user?.name}</h3>
-            <span className="badge" style={{ background: 'var(--primary-light)', color: 'var(--primary)' }}>
+            <h3 style={{ fontSize: '1.4rem' }}><i className="fas fa-hand-sparkles" style={{ marginRight: '8px', color: 'var(--warning)' }}></i> Hello, {user?.name.split(' ')[0]}</h3>
+            <span className="badge" style={{ background: 'var(--gold)', color: '#854d0e', padding: '6px 12px' }}>
               <i className="fas fa-gem"></i> Premium
             </span>
           </div>

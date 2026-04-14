@@ -45,24 +45,31 @@ export default function Login({ onLoginSuccess }) {
 
   return (
     <div className="login-container">
-      <div className="logo-area" style={{ justifyContent: 'center', marginBottom: '20px' }}>
+      <div className="logo-area" style={{ justifyContent: 'center', marginBottom: '32px', transform: 'scale(1.2)' }}>
         <div className="logo-icon"><i className="fas fa-bolt-lightning"></i></div>
         <div className="logo-text">Volt<span>Flow</span></div>
       </div>
       <div className="login-card">
         <h1>Your Electrician, On Demand.</h1>
-        <p>Reliable, verified electricians at your doorstep in minutes.</p>
+        <p>Top-rated, verified professionals at your doorstep in under 30 minutes.</p>
         
         {error && <div style={{ color: 'red', marginBottom: '12px' }}>{error}</div>}
         
-        <button className="btn btn-block" onClick={() => handleLogin('customer')} disabled={loadingRole !== null}>
+        <button className="btn btn-block" style={{ padding: '16px' }} onClick={() => handleLogin('customer')} disabled={loadingRole !== null}>
           <i className="fas fa-user"></i> {loadingRole === 'customer' ? 'Loading...' : 'Continue as Customer'}
         </button>
-        <button className="btn btn-outline btn-block" style={{ marginTop: '12px' }} onClick={() => handleLogin('electrician')} disabled={loadingRole !== null}>
+        
+        <div style={{ display: 'flex', alignItems: 'center', margin: '20px 0', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+          <div style={{ flex: 1, height: '1px', background: 'var(--border-light)' }}></div>
+          <span style={{ padding: '0 10px' }}>or</span>
+          <div style={{ flex: 1, height: '1px', background: 'var(--border-light)' }}></div>
+        </div>
+
+        <button className="btn btn-outline btn-block" style={{ padding: '16px', color: 'var(--text-main)' }} onClick={() => handleLogin('electrician')} disabled={loadingRole !== null}>
           <i className="fas fa-helmet-safety"></i> {loadingRole === 'electrician' ? 'Loading...' : "I'm an Electrician"}
         </button>
         
-        <div style={{ marginTop: '24px', fontSize: '0.85rem' }}>
+        <div style={{ marginTop: '32px', fontSize: '0.85rem' }}>
           <a href="#!" onClick={(e) => { e.preventDefault(); handleAdminAccess(); }} style={{ color: 'var(--text-muted)', textDecoration: 'none' }}><i className="fas fa-lock"></i> Master Admin Portal</a>
         </div>
       </div>

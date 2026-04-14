@@ -128,37 +128,39 @@ export default function ElectricianHome({ user }) {
       <div>
         <div className="card">
           <div className="card-header">
-            <h3><i className="fas fa-toolbox"></i> Welcome back, {user?.name}</h3>
+            <h3 style={{ fontSize: '1.4rem' }}><i className="fas fa-toolbox" style={{ color: 'var(--primary)' }}></i> Welcome back, {user?.name.split(' ')[0]}</h3>
             <button className={`btn ${isOnline ? '' : 'btn-outline'}`} onClick={() => setIsOnline(!isOnline)}>
               {isOnline ? <><span className="pulse-dot" style={{ marginRight: '8px' }}></span>Online</> : 'Go Online'}
             </button>
           </div>
           <div className="inline-stats" style={{ display: 'flex', gap: '20px', marginTop: '16px' }}>
             <div style={{ flex: 1, padding: '16px', background: 'var(--secondary)', borderRadius: '16px' }}>
-              <span style={{ color: 'var(--text-muted)' }}>Today's Earnings</span>
-              <h2 style={{ color: 'var(--success)' }}>₹0</h2>
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600, textTransform: 'uppercase' }}>TODAY'S EARNINGS</span>
+              <h2 style={{ color: 'var(--success)', fontSize: '2.2rem', margin: '4px 0 0 0' }}>₹0</h2>
             </div>
             <div style={{ flex: 1, padding: '16px', background: 'var(--secondary)', borderRadius: '16px' }}>
-              <span style={{ color: 'var(--text-muted)' }}>Jobs Completed</span>
-              <h2>0</h2>
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600, textTransform: 'uppercase' }}>JOBS COMPLETED</span>
+              <h2 style={{ color: 'var(--text-main)', fontSize: '2.2rem', margin: '4px 0 0 0' }}>0</h2>
             </div>
           </div>
         </div>
 
         {isOnline && !isTracking && (
-          <div className="card" style={{ animationDelay: '0.1s', border: '2px dashed var(--primary)' }}>
-            <div style={{ textAlign: 'center', padding: '20px' }}>
-              <i className="fas fa-radar fa-spin fa-3x" style={{ color: 'var(--primary)', marginBottom: '16px' }}></i>
+          <div className="card" style={{ animationDelay: '0.1s', border: 'none', background: 'var(--primary-light)', boxShadow: 'none' }}>
+            <div style={{ textAlign: 'center', padding: '30px 20px' }}>
+              <div style={{ width: '80px', height: '80px', background: 'var(--surface)', borderRadius: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px', boxShadow: '0 0 0 10px rgba(255,255,255,0.5)' }}>
+                <i className="fas fa-radar fa-spin fa-2x" style={{ color: 'var(--primary)' }}></i>
+              </div>
               <h4>Searching for nearby jobs...</h4>
               {!availableJob ? (
                 <p style={{ color: 'var(--text-muted)' }}>We are matching you with customers within a 10km radius.</p>
               ) : (
-                <div style={{ marginTop: '16px', padding: '16px', background: 'var(--surface)', borderRadius: '12px', border: '2px solid var(--success)' }}>
-                  <h5 style={{ color: 'var(--success)', margin: '0 0 8px 0', fontSize: '1.1rem' }}>New Job Available!</h5>
+                <div style={{ marginTop: '24px', padding: '20px', background: 'var(--surface)', borderRadius: '16px', border: '2px solid var(--success)', boxShadow: 'var(--shadow-lg)' }}>
+                  <span className="badge" style={{ background: '#dcfce7', color: '#166534', marginBottom: '12px', display: 'inline-block' }}>NEW MATCH FOUND</span>
                   <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-main)' }}><strong>Service:</strong> {availableJob.serviceType}</p>
                   <p style={{ margin: '4px 0 12px 0', fontSize: '0.9rem', color: 'var(--text-main)' }}><strong>Location:</strong> {availableJob.address}</p>
                   <p style={{ margin: '4px 0 12px 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>Job ID: <span style={{ fontFamily: 'monospace' }}>{availableJob._id}</span></p>
-                  <button className="btn" style={{ width: '100%' }} onClick={handleAcceptJob}>
+                  <button className="btn" style={{ width: '100%', background: 'var(--success)', marginTop: '8px' }} onClick={handleAcceptJob}>
                     Accept Job & Start Tracking
                   </button>
                 </div>
