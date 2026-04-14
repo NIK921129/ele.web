@@ -8,9 +8,12 @@ const { Server } = require('socket.io');
 const app = express();
 const server = http.createServer(app);
 
+// Remove trailing slash if it exists to prevent strict CORS mismatches
+const FRONTEND_URL = (process.env.FRONTEND_URL || '*').replace(/\/$/, '');
+
 // Configure Socket.io and CORS
-const io = new Server(server, { cors: { origin: '*' } });
-app.use(cors());
+const io = new Server(server, { cors: { origin: FRONTEND_URL } });
+app.use(cors({ origin: FRONTEND_URL }));
 app.use(express.json());
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_fallback_key';
