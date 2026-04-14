@@ -128,7 +128,7 @@ export default function ElectricianHome({ user }) {
       <div>
         <div className="card">
           <div className="card-header">
-            <h3 style={{ fontSize: '1.4rem' }}><i className="fas fa-toolbox" style={{ color: 'var(--primary)' }}></i> Welcome back, {user?.name.split(' ')[0]}</h3>
+            <h3 style={{ fontSize: '1.4rem' }}><i className="fas fa-toolbox" style={{ color: 'var(--primary)' }}></i> Welcome back, {user?.name?.split(' ')[0] || 'User'}</h3>
             <button className={`btn ${isOnline ? '' : 'btn-outline'}`} onClick={() => setIsOnline(!isOnline)}>
               {isOnline ? <><span className="pulse-dot" style={{ marginRight: '8px' }}></span>Online</> : 'Go Online'}
             </button>

@@ -179,7 +179,7 @@ export default function CustomerHome({ user }) {
 
         <div className="card">
           <div className="card-header">
-            <h3 style={{ fontSize: '1.4rem' }}><i className="fas fa-hand-sparkles" style={{ marginRight: '8px', color: 'var(--warning)' }}></i> Hello, {user?.name.split(' ')[0]}</h3>
+            <h3 style={{ fontSize: '1.4rem' }}><i className="fas fa-hand-sparkles" style={{ marginRight: '8px', color: 'var(--warning)' }}></i> Hello, {user?.name?.split(' ')[0] || 'User'}</h3>
             <span className="badge" style={{ background: 'var(--gold)', color: '#854d0e', padding: '6px 12px' }}>
               <i className="fas fa-gem"></i> Premium
             </span>
