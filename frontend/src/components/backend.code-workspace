@@ -1,0 +1,19 @@
+{
+	"folders": [
+		{
+			"path": "../../../backend"
+		},
+		{
+			"path": "../../../backend/models"
+		},
+		{
+			"path": "../.."
+		},
+		{
+			"path": ".."
+		},
+		{
+			"path": "."
+		}
+	]
+}

@@ -1,0 +1,20 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"path": "."
+		},
+		{
+			"path": "../../frontend"
+		},
+		{
+			"path": "../../frontend/src"
+		},
+		{
+			"path": "../../frontend/src/components"
+		}
+	],
+	"settings": {}
+}
