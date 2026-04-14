@@ -1,0 +1,16 @@
+{
+  "name": "voltflow-backend",
+  "version": "1.0.0",
+  "description": "Backend for Voltflow app",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.0",
+    "mongoose": "^8.0.0",
+    "socket.io": "^4.7.0"
+  }
+}
