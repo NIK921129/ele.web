@@ -592,6 +592,925 @@
 </head>
 <body>
   <div id="root"></div>
-  <script type="module" src="/src/main.jsx"></script>
+
+  <!-- React & Dependencies via CDN -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+    
+    // ==========================================
+    // 1. API & SOCKET UTILITIES
+    // ==========================================
+    
+    // IMPORTANT: Change this URL when you deploy your backend to Render!
+    const API_BASE_URL = 'http://localhost:5000/api';
+    const socket = io('http://localhost:5000', { autoConnect: false });
+
+    async function fetchJson(url, options = {}) {
+      const token = localStorage.getItem('token');
+      const headers = {
+        'Content-Type': 'application/json',
+        ...options.headers,
+      };
+
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      try {
+        const response = await fetch(`${API_BASE_URL}${url}`, {
+          headers,
+          ...options,
+          body: options.body && typeof options.body !== 'string' ? JSON.stringify(options.body) : options.body,
+        });
+        if (!response.ok) {
+          let errorMessage = 'Something went wrong';
+          try {
+            const errorData = await response.json();
+            errorMessage = errorData.message || errorMessage;
+          } catch (parseError) {
+            errorMessage = `HTTP Error ${response.status}: ${response.statusText}`;
+          }
+          throw new Error(errorMessage);
+        }
+        
+        const text = await response.text();
+        try {
+          return text ? JSON.parse(text) : {};
+        } catch (parseError) {
+          return { data: text };
+        }
+      } catch (error) {
+        throw error;
+      }
+    }
+
+    // ==========================================
+    // 2. COMPONENTS
+    // ==========================================
+
+    // --- Navbar Component ---
+    function Navbar({ user, onLogout }) {
+      return (
+        <div className="navbar">
+          <div className="logo-area">
+            <div className="logo-icon"><i className="fas fa-bolt-lightning"></i></div>
+            <div className="logo-text">Volt<span>Flow</span></div>
+          </div>
+          <div className="profile-badge">
+            <div className="notification-icon"><i className="far fa-bell"></i></div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ fontWeight: 600 }}>{user?.name}</span>
+              <div style={{ background: 'var(--surface)', width: '42px', height: '42px', borderRadius: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border-light)' }}>
+                <i className="fas fa-user-circle" style={{ fontSize: '28px', color: 'var(--primary)' }}></i>
+              </div>
+            </div>
+            <button className="btn btn-outline" style={{ padding: '6px 12px', marginLeft: '10px' }} onClick={onLogout}>Logout</button>
+          </div>
+        </div>
+      );
+    }
+
+    // --- Login Component ---
+    function Login({ onLoginSuccess }) {
+      const [loadingRole, setLoadingRole] = useState(null);
+      const [error, setError] = useState(null);
+
+      const handleLogin = async (role) => {
+        setLoadingRole(role);
+        setError(null);
+        try {
+          const name = role === 'customer' ? 'Rahul Sharma' : 'Rajesh Electrician';
+          const phone = role === 'customer' ? '9876543210' : '9988776655';
+
+          const userData = await fetchJson('/login', {
+            method: 'POST',
+            body: { name, phone, role }
+          });
+
+          if (userData && userData.token && userData.user) {
+            localStorage.setItem('token', userData.token);
+            onLoginSuccess({ ...userData.user, id: userData.user?._id }, role);
+          } else {
+            throw new Error('Invalid response from server: Missing token or user data');
+          }
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setLoadingRole(null);
+        }
+      };
+
+      const handleAdminAccess = () => {
+        const key = prompt("Enter Master Admin Key:");
+        if (key === "79827") {
+          localStorage.setItem('token', 'admin-super-secret-token-for-demo');
+          onLoginSuccess({ name: 'Super Admin', role: 'admin', id: 'admin-001' }, 'admin');
+        } else if (key !== null) {
+          alert("Access Denied: Invalid Master Key");
+        }
+      };
+
+      return (
+        <div className="login-container">
+          <div className="logo-area" style={{ justifyContent: 'center', marginBottom: '32px', transform: 'scale(1.2)' }}>
+            <div className="logo-icon"><i className="fas fa-bolt-lightning"></i></div>
+            <div className="logo-text">Volt<span>Flow</span></div>
+          </div>
+          <div className="login-card">
+            <h1>Your Electrician, On Demand.</h1>
+            <p>Top-rated, verified professionals at your doorstep in under 30 minutes.</p>
+            
+            {error && <div style={{ color: 'red', marginBottom: '12px' }}>{error}</div>}
+            
+            <button className="btn btn-block" style={{ padding: '16px' }} onClick={() => handleLogin('customer')} disabled={loadingRole !== null}>
+              <i className="fas fa-user"></i> {loadingRole === 'customer' ? 'Loading...' : 'Continue as Customer'}
+            </button>
+            
+            <div style={{ display: 'flex', alignItems: 'center', margin: '20px 0', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+              <div style={{ flex: 1, height: '1px', background: 'var(--border-light)' }}></div>
+              <span style={{ padding: '0 10px' }}>or</span>
+              <div style={{ flex: 1, height: '1px', background: 'var(--border-light)' }}></div>
+            </div>
+
+            <button className="btn btn-outline btn-block" style={{ padding: '16px', color: 'var(--text-main)' }} onClick={() => handleLogin('electrician')} disabled={loadingRole !== null}>
+              <i className="fas fa-helmet-safety"></i> {loadingRole === 'electrician' ? 'Loading...' : "I'm an Electrician"}
+            </button>
+            
+            <div style={{ marginTop: '32px', fontSize: '0.85rem' }}>
+              <a href="#!" onClick={(e) => { e.preventDefault(); handleAdminAccess(); }} style={{ color: 'var(--text-muted)', textDecoration: 'none' }}><i className="fas fa-lock"></i> Master Admin Portal</a>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // --- Customer Dashboard Component ---
+    const SERVICES = [
+      { id: 'wiring', name: 'Wiring Issue', icon: 'fa-plug-circle-bolt' },
+      { id: 'fan', name: 'Fan Repair', icon: 'fa-fan' },
+      { id: 'switch', name: 'Switchboard', icon: 'fa-toggle-on' },
+      { id: 'install', name: 'Installation', icon: 'fa-screwdriver-wrench' },
+      { id: 'ac', name: 'AC Servicing', icon: 'fa-snowflake' },
+      { id: 'ev', name: 'EV Charger', icon: 'fa-car-battery' },
+      { id: 'smart', name: 'Smart Home', icon: 'fa-house-signal' },
+      { id: 'inverter', name: 'Inverter/UPS', icon: 'fa-battery-full' }
+    ];
+
+    function CustomerHome({ user }) {
+      const [selectedService, setSelectedService] = useState('wiring');
+      const [address, setAddress] = useState('');
+      const [coordinates, setCoordinates] = useState([77.5946, 12.9716]); 
+      const [liveLocation, setLiveLocation] = useState(null);
+      const [messages, setMessages] = useState([]);
+      const [chatInput, setChatInput] = useState('');
+      const [activeJobId, setActiveJobId] = useState(null);
+      const [isBooking, setIsBooking] = useState(false);
+      const [assignedElectrician, setAssignedElectrician] = useState(null);
+      const [jobCompleted, setJobCompleted] = useState(false);
+      const [showRating, setShowRating] = useState(false);
+      const [rating, setRating] = useState(0);
+      const [hoverRating, setHoverRating] = useState(0);
+      const chatContainerRef = useRef(null);
+
+      useEffect(() => {
+        if (!activeJobId) return;
+        socket.connect();
+        socket.emit('joinJobRoom', activeJobId);
+
+        socket.on('electricianLocationChanged', (data) => {
+          setLiveLocation(data);
+        });
+        socket.on('receiveMessage', (data) => {
+          setMessages((prev) => [...prev, { ...data, sender: 'other' }]);
+        });
+        socket.on('jobAccepted', (data) => {
+          setAssignedElectrician(data.electrician);
+        });
+        socket.on('jobCompleted', () => {
+          setJobCompleted(true);
+        });
+
+        return () => {
+          socket.off('electricianLocationChanged');
+          socket.off('receiveMessage');
+          socket.off('jobAccepted');
+          socket.off('jobCompleted');
+          socket.disconnect();
+        };
+      }, [activeJobId]);
+
+      useEffect(() => {
+        if (chatContainerRef.current) {
+          chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+        }
+      }, [messages]);
+
+      const handleBookJob = async () => {
+        if (!address) return alert('Please enter your full address to book a service.');
+        setIsBooking(true);
+        try {
+          const job = await fetchJson('/jobs', {
+            method: 'POST',
+            body: { serviceType: selectedService, address: address, coordinates: coordinates, estimatedPrice: 349 }
+          });
+          setActiveJobId(job._id);
+          alert(`Job created successfully! DB ID: ${job._id}`);
+          setJobCompleted(false);
+        } catch (error) {
+          alert(error.message);
+        } finally {
+          setIsBooking(false);
+        }
+      };
+
+      const handleCancelJob = async () => {
+        try {
+          await fetchJson(`/jobs/${activeJobId}/cancel`, { method: 'PUT' });
+          setActiveJobId(null);
+          setAssignedElectrician(null);
+          setLiveLocation(null);
+          setMessages([]);
+          setJobCompleted(false);
+          setShowRating(false);
+          setRating(0);
+        } catch (error) {
+          alert(error.message);
+        }
+      };
+
+      const handleSendMessage = () => {
+        if (!chatInput.trim()) return;
+        const msgData = {
+          jobId: activeJobId,
+          senderId: user.id || user._id,
+          sender: user?.name || 'Customer',
+          text: chatInput,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        };
+        socket.emit('sendMessage', msgData);
+        setMessages((prev) => [...prev, { ...msgData, sender: 'self' }]);
+        setChatInput('');
+      };
+
+      const handleLocateMe = () => {
+        if ('geolocation' in navigator) {
+          navigator.geolocation.getCurrentPosition(
+            (position) => {
+              setAddress(`Lat: ${position.coords.latitude.toFixed(4)}, Lng: ${position.coords.longitude.toFixed(4)}`);
+              setCoordinates([position.coords.longitude, position.coords.latitude]);
+            },
+            (error) => {
+              alert('Could not detect your location. Please check browser permissions.');
+            }
+          );
+        } else {
+          alert('Geolocation is not supported by your browser.');
+        }
+      };
+
+      const handlePayment = () => {
+        alert('Payment Processed! Thank you for using VoltFlow.');
+        setShowRating(true);
+      };
+
+      const handleSubmitRating = async () => {
+        try {
+          const electricianId = assignedElectrician.id || assignedElectrician._id;
+          await fetchJson(`/users/${electricianId}/rate`, {
+            method: 'POST',
+            body: { rating }
+          });
+          alert(`Thank you for your ${rating}-star feedback!`);
+        } catch (error) {
+          alert(error.message);
+        }
+        setActiveJobId(null);
+        setAssignedElectrician(null);
+        setLiveLocation(null);
+        setJobCompleted(false);
+        setMessages([]);
+        setShowRating(false);
+        setRating(0);
+      };
+
+      return (
+        <div className="dashboard-grid">
+          <div>
+            <div className="promo-banner" style={{ background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)', color: 'white', padding: '24px', borderRadius: 'var(--radius-card)', marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: 'var(--shadow-lg)', border: '1px solid #334155' }}>
+              <div>
+                <span className="badge" style={{ background: 'rgba(255,255,255,0.1)', color: '#60a5fa', marginBottom: '8px', display: 'inline-block' }}>SUMMER SALE</span>
+                <h2 style={{ margin: 0, color: 'white', fontSize: '1.5rem' }}>20% Off AC Servicing</h2>
+                <p style={{ margin: '4px 0 0 0', color: '#94a3b8', fontSize: '0.95rem' }}>Beat the heat with verified cooling experts.</p>
+              </div>
+              <button className="btn" style={{ background: 'white', color: '#0f172a', fontWeight: 'bold', boxShadow: 'none', padding: '12px 20px' }}>Claim Offer</button>
+            </div>
+
+            <div className="card">
+              <div className="card-header">
+                <h3 style={{ fontSize: '1.4rem' }}><i className="fas fa-hand-sparkles" style={{ marginRight: '8px', color: 'var(--warning)' }}></i> Hello, {user?.name?.split(' ')[0] || 'User'}</h3>
+                <span className="badge" style={{ background: 'var(--gold)', color: '#854d0e', padding: '6px 12px' }}>
+                  <i className="fas fa-gem"></i> Premium
+                </span>
+              </div>
+              <p style={{ color: 'var(--text-muted)', marginBottom: '16px' }}>What do you need help with today? Choose from our expanded catalog.</p>
+              
+              <div className="service-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px' }}>
+                {SERVICES.map(s => (
+                  <div 
+                    key={s.id} 
+                    className={`service-item ${selectedService === s.id ? 'active' : ''}`} 
+                    onClick={() => setSelectedService(s.id)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setSelectedService(s.id);
+                      }
+                    }}
+                  >
+                    <i className={`fas ${s.icon}`}></i><span>{s.name}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="address-bar">
+                <i className="fas fa-location-dot"></i>
+                <input type="text" className="address-input" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Enter your full address..." />
+                <button className="btn" style={{ padding: '10px 20px' }} onClick={handleLocateMe} title="Detect Location"><i className="fas fa-crosshairs"></i></button>
+              </div>
+
+              {!activeJobId ? (
+                <button className="btn btn-block" style={{ marginTop: '16px' }} onClick={handleBookJob} disabled={isBooking}>
+                  <i className="fas fa-bolt"></i> {isBooking ? 'Creating Job...' : 'Find Electricians Near Me'}
+                </button>
+              ) : !assignedElectrician ? (
+                <div style={{ marginTop: '16px', padding: '16px', background: 'var(--secondary)', borderRadius: '12px', textAlign: 'center', border: '1px dashed var(--primary)' }}>
+                  <i className="fas fa-spinner fa-spin" style={{ color: 'var(--primary)', marginBottom: '8px', fontSize: '1.5rem' }}></i>
+                  <div style={{ fontWeight: 'bold' }}>Searching for nearby electricians...</div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Tracking Job ID: <span style={{ fontFamily: 'monospace' }}>{activeJobId}</span></div>
+                  <button className="btn btn-outline" style={{ marginTop: '12px', borderColor: 'var(--danger)', color: 'var(--danger)', padding: '6px 12px', fontSize: '0.85rem' }} onClick={handleCancelJob}>
+                    Cancel Search
+                  </button>
+                </div>
+              ) : (
+                <div style={{ marginTop: '16px', padding: '16px', background: '#ecfdf5', borderRadius: '12px', textAlign: 'center', border: '1px solid var(--success)' }}>
+                  <i className="fas fa-check-circle" style={{ color: 'var(--success)', marginBottom: '8px', fontSize: '1.5rem' }}></i>
+                  <div style={{ fontWeight: 'bold', color: 'var(--success)' }}>Job Accepted!</div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-main)' }}>{assignedElectrician.name} is preparing to depart.</div>
+                </div>
+              )}
+
+              {jobCompleted ? (
+                showRating ? (
+                  <div style={{ marginTop: '16px', padding: '24px', background: 'var(--surface)', borderRadius: '12px', border: '2px solid var(--primary)', textAlign: 'center', boxShadow: 'var(--shadow-md)' }}>
+                    <h3 style={{ color: 'var(--text-main)', margin: '0 0 8px 0' }}>Rate your Experience</h3>
+                    <p style={{ color: 'var(--text-muted)', marginBottom: '16px' }}>How was your service with <strong>{assignedElectrician?.name}</strong>?</p>
+                    <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', fontSize: '2.5rem', marginBottom: '24px' }}>
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <i 
+                          key={star} 
+                          className="fas fa-star" 
+                          style={{ cursor: 'pointer', color: star <= (hoverRating || rating) ? 'var(--gold)' : 'var(--border-light)', transition: 'color 0.2s, transform 0.2s' }}
+                          onMouseEnter={() => setHoverRating(star)}
+                          onMouseLeave={() => setHoverRating(0)}
+                          onClick={() => setRating(star)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setRating(star); } }}
+                        ></i>
+                      ))}
+                    </div>
+                    <button className="btn btn-block" onClick={handleSubmitRating} disabled={rating === 0}>
+                      Submit Feedback
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ marginTop: '16px', padding: '24px', background: 'var(--surface)', borderRadius: '12px', border: '2px solid var(--primary)', textAlign: 'center', boxShadow: 'var(--shadow-md)' }}>
+                    <h3 style={{ color: 'var(--primary)', margin: '0 0 8px 0' }}><i className="fas fa-file-invoice-dollar"></i> Invoice Summary</h3>
+                    <p style={{ color: 'var(--text-muted)', marginBottom: '16px' }}>Service completed by <strong>{assignedElectrician?.name}</strong>.</p>
+                    <h2 style={{ fontSize: '2.5rem', color: 'var(--text-main)', margin: '0 0 20px 0' }}>₹349</h2>
+                    <button className="btn btn-block" onClick={handlePayment}>
+                      <i className="fas fa-credit-card"></i> Pay & Rate
+                    </button>
+                  </div>
+                )
+              ) : (assignedElectrician || liveLocation) && (
+                <React.Fragment>
+                  {liveLocation && (
+                    <div style={{ marginTop: '16px', padding: '16px', background: 'var(--primary-light)', border: '1px solid var(--primary)', borderRadius: '12px' }}>
+                      <h4 style={{ color: 'var(--primary)', margin: '0 0 8px 0' }}>
+                        <i className="fas fa-map-marker-alt" style={{ animation: 'pulse 1.5s infinite' }}></i> Electrician is on the way!
+                      </h4>
+                      <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-main)' }}>
+                        <strong>Distance:</strong> {liveLocation.distance} km <br />
+                        <strong>ETA:</strong> {liveLocation.eta} mins <br />
+                      </p>
+                    </div>
+                  )}
+                  
+                  <div style={{ marginTop: '16px', background: 'var(--surface)', border: '1px solid var(--border-light)', borderRadius: '12px', overflow: 'hidden' }}>
+                    <div style={{ background: 'var(--primary)', color: 'white', padding: '10px 16px', fontWeight: 'bold' }}>
+                      <i className="fas fa-comments"></i> Message Electrician
+                    </div>
+                    <div ref={chatContainerRef} style={{ padding: '16px', height: '200px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', background: 'var(--secondary)' }}>
+                      {messages.map((m, i) => (
+                        <div key={i} style={{ alignSelf: m.sender === 'self' ? 'flex-end' : 'flex-start', background: m.sender === 'self' ? 'var(--primary)' : 'var(--surface)', color: m.sender === 'self' ? 'white' : 'var(--text-main)', padding: '8px 12px', borderRadius: '12px', maxWidth: '80%', border: m.sender === 'self' ? 'none' : '1px solid var(--border-light)' }}>
+                          <div style={{ fontSize: '0.9rem' }}>{m.text}</div>
+                          <div style={{ fontSize: '0.7rem', opacity: 0.8, textAlign: 'right', marginTop: '4px' }}>{m.time}</div>
+                        </div>
+                      ))}
+                      {messages.length === 0 && <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem', margin: 'auto' }}>No messages yet. Say hi!</div>}
+                    </div>
+                    <div style={{ padding: '10px', display: 'flex', gap: '8px', borderTop: '1px solid var(--border-light)' }}>
+                      <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()} placeholder="Type a message..." style={{ flex: 1, padding: '10px', borderRadius: '20px', border: '1px solid var(--border-light)', outline: 'none' }} />
+                      <button className="btn" style={{ padding: '10px 16px', borderRadius: '20px' }} onClick={handleSendMessage}><i className="fas fa-paper-plane"></i></button>
+                    </div>
+                  </div>
+                </React.Fragment>
+              )}
+            </div>
+          </div>
+          
+          <div>
+            <div className="card">
+              <h4><i className="fas fa-star" style={{ color: 'var(--warning)' }}></i> Personalized For You</h4>
+              <div style={{ marginTop: '12px', padding: '12px', background: 'var(--secondary)', borderRadius: '12px' }}>
+                <p style={{ fontSize: '0.9rem', margin: 0 }}><strong>Seasonal Recommendation:</strong> It's getting hot! Book an AC servicing before the summer rush begins to ensure your unit is efficient.</p>
+              </div>
+            </div>
+            <div className="card" style={{ animationDelay: '0.15s' }}>
+              <h4><i className="fas fa-shield-halved" style={{ color: 'var(--success)' }}></i> Trust & Safety</h4>
+              <ul style={{ marginTop: '12px', paddingLeft: '20px', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                <li>100% Background verified professionals</li>
+                <li>Up to ₹10,000 property damage protection</li>
+                <li>30-day post-service warranty guarantee</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // --- Electrician Dashboard Component ---
+    function ElectricianHome({ user }) {
+      const [isOnline, setIsOnline] = useState(false);
+      const [isTracking, setIsTracking] = useState(false);
+      const [messages, setMessages] = useState([]);
+      const [chatInput, setChatInput] = useState('');
+      const [activeJobId, setActiveJobId] = useState(null);
+      const [availableJob, setAvailableJob] = useState(null);
+      const chatContainerRef = useRef(null);
+
+      useEffect(() => {
+        if (isOnline) {
+          socket.connect();
+          socket.on('receiveMessage', (data) => {
+            setMessages((prev) => [...prev, { ...data, sender: 'other' }]);
+          });
+        } else {
+          setIsTracking(false);
+          socket.disconnect();
+        }
+        return () => {
+          socket.off('receiveMessage');
+          socket.disconnect();
+        };
+      }, [isOnline]);
+
+      useEffect(() => {
+        if (isOnline && activeJobId) {
+          socket.emit('joinJobRoom', activeJobId);
+        }
+      }, [isOnline, activeJobId]);
+
+      useEffect(() => {
+        let pollInterval;
+        if (isOnline && !isTracking) {
+          const checkJobs = async () => {
+            try {
+              const job = await fetchJson('/jobs/available?latitude=12.9716&longitude=77.5946&maxDistance=15');
+              setAvailableJob(job);
+              if (job && job._id) setActiveJobId(job._id);
+            } catch (e) {
+              console.error('Failed to fetch jobs:', e);
+            }
+          };
+          checkJobs();
+          pollInterval = setInterval(checkJobs, 5000);
+        }
+        return () => clearInterval(pollInterval);
+      }, [isOnline, isTracking]);
+
+      useEffect(() => {
+        if (chatContainerRef.current) {
+          chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+        }
+      }, [messages]);
+
+      useEffect(() => {
+        let interval;
+        if (isTracking) {
+          let currentDist = 3.5;
+          let currentEta = 12;
+          interval = setInterval(() => {
+            currentDist = Math.max(0, currentDist - 0.5);
+            currentEta = Math.max(0, currentEta - 2);
+            socket.emit('updateLocation', {
+              jobId: activeJobId,
+              coordinates: [77.5946, 12.9716],
+              distance: currentDist.toFixed(1),
+              eta: currentEta
+            });
+            if (currentDist <= 0) setIsTracking(false);
+          }, 3000);
+        }
+        return () => clearInterval(interval);
+      }, [isTracking]);
+
+      const handleSendMessage = () => {
+        if (!chatInput.trim()) return;
+        const msgData = {
+          jobId: activeJobId,
+          senderId: user.id || user._id,
+          sender: user?.name || 'Electrician',
+          text: chatInput,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        };
+        socket.emit('sendMessage', msgData);
+        setMessages((prev) => [...prev, { ...msgData, sender: 'self' }]);
+        setChatInput('');
+      };
+
+      const handleAcceptJob = async () => {
+        try {
+          await fetchJson(`/jobs/${availableJob._id}/accept`, { method: 'PUT' });
+          setIsTracking(true);
+          setAvailableJob(null);
+        } catch (error) {
+          alert(error.message);
+        }
+      };
+
+      const handleCompleteJob = async () => {
+        try {
+          await fetchJson(`/jobs/${activeJobId}/complete`, { method: 'PUT' });
+          setIsTracking(false);
+          setActiveJobId(null);
+          setMessages([]);
+          alert('Job successfully marked as completed!');
+        } catch (error) {
+          alert(error.message);
+        }
+      };
+
+      return (
+        <div className="dashboard-grid">
+          <div>
+            <div className="card">
+              <div className="card-header">
+                <h3 style={{ fontSize: '1.4rem' }}><i className="fas fa-toolbox" style={{ color: 'var(--primary)' }}></i> Welcome back, {user?.name?.split(' ')[0] || 'User'}</h3>
+                <button className={`btn ${isOnline ? '' : 'btn-outline'}`} onClick={() => setIsOnline(!isOnline)}>
+                  {isOnline ? <React.Fragment><span className="pulse-dot" style={{ marginRight: '8px' }}></span>Online</React.Fragment> : 'Go Online'}
+                </button>
+              </div>
+              <div className="inline-stats" style={{ display: 'flex', gap: '20px', marginTop: '16px' }}>
+                <div style={{ flex: 1, padding: '16px', background: 'var(--secondary)', borderRadius: '16px' }}>
+                  <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600, textTransform: 'uppercase' }}>TODAY'S EARNINGS</span>
+                  <h2 style={{ color: 'var(--success)', fontSize: '2.2rem', margin: '4px 0 0 0' }}>₹0</h2>
+                </div>
+                <div style={{ flex: 1, padding: '16px', background: 'var(--secondary)', borderRadius: '16px' }}>
+                  <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600, textTransform: 'uppercase' }}>JOBS COMPLETED</span>
+                  <h2 style={{ color: 'var(--text-main)', fontSize: '2.2rem', margin: '4px 0 0 0' }}>0</h2>
+                </div>
+              </div>
+            </div>
+
+            {isOnline && !isTracking && (
+              <div className="card" style={{ animationDelay: '0.1s', border: 'none', background: 'var(--primary-light)', boxShadow: 'none' }}>
+                <div style={{ textAlign: 'center', padding: '30px 20px' }}>
+                  <div style={{ width: '80px', height: '80px', background: 'var(--surface)', borderRadius: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px', boxShadow: '0 0 0 10px rgba(255,255,255,0.5)' }}>
+                    <i className="fas fa-radar fa-spin fa-2x" style={{ color: 'var(--primary)' }}></i>
+                  </div>
+                  <h4>Searching for nearby jobs...</h4>
+                  {!availableJob ? (
+                    <p style={{ color: 'var(--text-muted)' }}>We are matching you with customers within a 10km radius.</p>
+                  ) : (
+                    <div style={{ marginTop: '24px', padding: '20px', background: 'var(--surface)', borderRadius: '16px', border: '2px solid var(--success)', boxShadow: 'var(--shadow-lg)' }}>
+                      <span className="badge" style={{ background: '#dcfce7', color: '#166534', marginBottom: '12px', display: 'inline-block' }}>NEW MATCH FOUND</span>
+                      <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-main)' }}><strong>Service:</strong> {availableJob.serviceType}</p>
+                      <p style={{ margin: '4px 0 12px 0', fontSize: '0.9rem', color: 'var(--text-main)' }}><strong>Location:</strong> {availableJob.address}</p>
+                      <p style={{ margin: '4px 0 12px 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>Job ID: <span style={{ fontFamily: 'monospace' }}>{availableJob._id}</span></p>
+                      <button className="btn" style={{ width: '100%', background: 'var(--success)', marginTop: '8px' }} onClick={handleAcceptJob}>
+                        Accept Job & Start Tracking
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {isTracking && (
+              <div className="card" style={{ animationDelay: '0.1s', border: '2px solid var(--success)', background: '#ecfdf5' }}>
+                <div style={{ textAlign: 'center', padding: '20px' }}>
+                  <i className="fas fa-location-arrow fa-fade fa-3x" style={{ color: 'var(--success)', marginBottom: '16px' }}></i>
+                  <h4 style={{ color: 'var(--success)' }}>En Route to Customer</h4>
+                  <p style={{ color: 'var(--text-main)' }}>Live location sharing is active. The customer is seeing your approach!</p>
+                  <button className="btn btn-outline" style={{ marginTop: '16px', borderColor: 'var(--danger)', color: 'var(--danger)' }} onClick={() => setIsTracking(false)}>
+                    Stop Tracking (Arrived)
+                  </button>
+                  <button className="btn" style={{ marginTop: '16px', marginLeft: '12px', background: 'var(--success)' }} onClick={handleCompleteJob}>
+                    <i className="fas fa-check-circle"></i> Mark as Completed
+                  </button>
+                </div>
+            
+            <div style={{ marginTop: '16px', background: 'var(--surface)', border: '1px solid var(--border-light)', borderRadius: '12px', overflow: 'hidden' }}>
+              <div style={{ background: 'var(--primary)', color: 'white', padding: '10px 16px', fontWeight: 'bold' }}>
+                <i className="fas fa-comments"></i> Message Customer
+              </div>
+              <div ref={chatContainerRef} style={{ padding: '16px', height: '200px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', background: 'var(--secondary)' }}>
+                {messages.map((m, i) => (
+                  <div key={i} style={{ alignSelf: m.sender === 'self' ? 'flex-end' : 'flex-start', background: m.sender === 'self' ? 'var(--primary)' : 'var(--surface)', color: m.sender === 'self' ? 'white' : 'var(--text-main)', padding: '8px 12px', borderRadius: '12px', maxWidth: '80%', border: m.sender === 'self' ? 'none' : '1px solid var(--border-light)' }}>
+                    <div style={{ fontSize: '0.9rem' }}>{m.text}</div>
+                    <div style={{ fontSize: '0.7rem', opacity: 0.8, textAlign: 'right', marginTop: '4px' }}>{m.time}</div>
+                  </div>
+                ))}
+                {messages.length === 0 && <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem', margin: 'auto' }}>No messages yet. Send an update!</div>}
+              </div>
+              <div style={{ padding: '10px', display: 'flex', gap: '8px', borderTop: '1px solid var(--border-light)' }}>
+                <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()} placeholder="Type a message..." style={{ flex: 1, padding: '10px', borderRadius: '20px', border: '1px solid var(--border-light)', outline: 'none' }} />
+                <button className="btn" style={{ padding: '10px 16px', borderRadius: '20px' }} onClick={handleSendMessage}><i className="fas fa-paper-plane"></i></button>
+              </div>
+            </div>
+              </div>
+            )}
+
+            <div className="card" style={{ animationDelay: '0.2s' }}>
+              <h4><i className="fas fa-book-open"></i> Work Manual & Safety Guidelines</h4>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '12px' }}>Review these personalized protocols before starting your assigned jobs today.</p>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ padding: '12px', borderLeft: '4px solid var(--danger)', background: 'var(--secondary)', borderRadius: '0 8px 8px 0' }}>
+                  <strong>High Voltage Safety</strong>
+                  <p style={{ fontSize: '0.85rem', margin: 0, color: 'var(--text-muted)' }}>Always use a non-contact voltage tester before touching exposed wires. Wear Class 0 rubber gloves for panels up to 1,000V.</p>
+                </div>
+                <div style={{ padding: '12px', borderLeft: '4px solid var(--primary)', background: 'var(--secondary)', borderRadius: '0 8px 8px 0' }}>
+                  <strong>EV Charger Installation Prep</strong>
+                  <p style={{ fontSize: '0.85rem', margin: 0, color: 'var(--text-muted)' }}>Verify home load capacity before quoting. Ensure minimum 8 AWG copper wire is used for standard 40A breakers.</p>
+                </div>
+                <div style={{ padding: '12px', borderLeft: '4px solid var(--warning)', background: 'var(--secondary)', borderRadius: '0 8px 8px 0' }}>
+                  <strong>Customer Etiquette</strong>
+                  <p style={{ fontSize: '0.85rem', margin: 0, color: 'var(--text-muted)' }}>Always wear protective shoe covers when entering a home. Clearly explain the issue and price breakdown before starting repairs.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div className="earnings-card" style={{ animationDelay: '0.15s' }}>
+              <i className="fas fa-wallet"></i> <strong>Weekly Payout Tracker</strong>
+              <h3 style={{ margin: '8px 0' }}>₹4,250</h3>
+              <p style={{ fontSize: '0.8rem', opacity: 0.8 }}>Next payout processing on Friday.</p>
+              <button className="btn btn-block" style={{ background: 'rgba(255,255,255,0.2)', color: 'white', marginTop: '12px' }}>Withdraw to Bank</button>
+            </div>
+            
+            <div className="card" style={{ animationDelay: '0.2s', marginTop: '20px' }}>
+              <h4><i className="fas fa-certificate"></i> Your Active Skills</h4>
+              <div className="tag-container" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '12px' }}>
+                <span className="review-tag selected">Wiring Repair</span>
+                <span className="review-tag selected">AC Servicing</span>
+                <span className="review-tag selected">Smart Home Setup</span>
+              </div>
+              <button className="btn-outline btn btn-block" style={{ marginTop: '16px', fontSize: '0.9rem' }}>+ Add New Certification</button>
+            </div>
+
+            <div className="card" style={{ animationDelay: '0.25s', marginTop: '20px' }}>
+              <h4><i className="fas fa-calendar-check" style={{ color: 'var(--primary)' }}></i> Upcoming Schedule</h4>
+              <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '12px', background: 'var(--secondary)', borderRadius: '12px' }}>
+                  <div style={{ background: 'var(--primary-light)', color: 'var(--primary)', padding: '10px', borderRadius: '8px', textAlign: 'center', minWidth: '55px' }}>
+                    <strong style={{ display: 'block', fontSize: '1.1rem' }}>14</strong>
+                    <small style={{ fontSize: '0.7rem', textTransform: 'uppercase', fontWeight: 'bold' }}>Aug</small>
+                  </div>
+                  <div>
+                    <strong style={{ display: 'block', color: 'var(--text-main)' }}>AC Installation</strong>
+                    <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'block', marginTop: '4px' }}><i className="far fa-clock"></i> 10:00 AM - 12:00 PM</span>
+                    <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}><i className="fas fa-map-marker-alt"></i> Koramangala, BLR</span>
+                  </div>
+                </div>
+                <button className="btn-outline btn btn-block" style={{ fontSize: '0.9rem' }}>View Full Calendar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // --- Admin Dashboard Components ---
+    const mockDB = [
+      { id: 'USR-1001', type: 'Customer', name: 'Rahul Sharma', phone: '+91 9876543210', pass: 'bcrypt_$2a$12$Kx...', location: 'Koramangala, BLR', service: 'Wiring Issue', payment: '₹349 (Paid)', status: 'Active' },
+      { id: 'ELC-2041', type: 'Electrician', name: 'Rajesh Kumar', phone: '+91 9988776655', pass: 'bcrypt_$2a$12$Lp...', location: 'HSR Layout, BLR', service: 'N/A', payment: '₹1250 (Earned)', status: 'Online' },
+      { id: 'USR-1002', type: 'Customer', name: 'Anita Desai', phone: '+91 9123456780', pass: 'bcrypt_$2a$12$Zq...', location: 'Indiranagar, BLR', service: 'AC Servicing', payment: '₹950 (Pending)', status: 'Searching' },
+    ];
+
+    const mockLogs = [
+      { time: '10:42:01 AM', level: 'INFO', src: 'AuthService', event: 'User Login', details: 'ELC-2041 authenticated successfully.' },
+      { time: '10:45:12 AM', level: 'WARN', src: 'GeoTracker', event: 'High Latency', details: 'Location tracking API response > 500ms' }
+    ];
+
+    function MetricCard({ icon, title, value, trend, color }) {
+      return (
+        <div style={{ background: 'var(--surface)', padding: '20px', borderRadius: '16px', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border-light)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div>
+              <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 500 }}>{title}</p>
+              <h2 style={{ margin: '8px 0', color: 'var(--text-main)', fontSize: '1.8rem' }}>{value}</h2>
+              <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.8rem' }}>{trend}</p>
+            </div>
+            <div style={{ width: '45px', height: '45px', borderRadius: '12px', background: `${color}20`, color: color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem' }}>
+              <i className={`fas ${icon}`}></i>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function TabButton({ active, onClick, icon, label }) {
+      return (
+        <button 
+          onClick={onClick}
+          style={{
+            padding: '10px 20px',
+            background: active ? 'var(--primary)' : 'var(--surface)',
+            color: active ? 'white' : 'var(--text-main)',
+            border: '1px solid',
+            borderColor: active ? 'var(--primary)' : 'var(--border-light)',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            fontWeight: 600,
+            transition: 'all 0.2s'
+          }}>
+          <i className={`fas ${icon}`} style={{ marginRight: '8px' }}></i> {label}
+        </button>
+      );
+    }
+
+    function AdminPanel({ user, onLogout }) {
+      const [activeTab, setActiveTab] = useState('database');
+      const [searchTerm, setSearchTerm] = useState('');
+
+      const filteredDB = mockDB.filter(row => 
+        Object.values(row).some(val =>
+          val != null && String(val).toLowerCase().includes(searchTerm.toLowerCase())
+        )
+      );
+
+      return (
+        <div style={{ padding: '20px', fontFamily: 'var(--font-family, sans-serif)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', background: 'var(--surface)', padding: '16px 24px', borderRadius: '16px', boxShadow: 'var(--shadow-sm)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{ background: 'var(--danger)', color: 'white', padding: '10px', borderRadius: '12px' }}>
+                <i className="fas fa-user-shield fa-lg"></i>
+              </div>
+              <div>
+                <h2 style={{ margin: 0, color: 'var(--danger)' }}>Master Admin Portal</h2>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Connected to Production Database</span>
+              </div>
+            </div>
+            <button className="btn btn-outline" style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }} onClick={onLogout}>
+              <i className="fas fa-power-off"></i> Terminate Session
+            </button>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
+            <MetricCard icon="fa-users" title="Total Users" value="14,205" trend="+12% this week" color="var(--primary)" />
+            <MetricCard icon="fa-helmet-safety" title="Active Electricians" value="842" trend="124 currently online" color="var(--warning)" />
+            <MetricCard icon="fa-indian-rupee-sign" title="Platform Revenue" value="₹12.4L" trend="3% fee taken" color="var(--success)" />
+            <MetricCard icon="fa-server" title="System Uptime" value="99.99%" trend="All systems nominal" color="var(--text-main)" />
+          </div>
+
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+            <TabButton active={activeTab === 'database'} onClick={() => setActiveTab('database')} icon="fa-database" label="Global Database" />
+            <TabButton active={activeTab === 'logs'} onClick={() => setActiveTab('logs')} icon="fa-terminal" label="System Logs" />
+          </div>
+
+          <div style={{ background: 'var(--surface)', borderRadius: '16px', boxShadow: 'var(--shadow-md)', overflow: 'hidden', border: '1px solid var(--border-light)' }}>
+            {activeTab === 'database' && (
+              <div>
+                <div style={{ padding: '16px', borderBottom: '1px solid var(--border-light)', display: 'flex', justifyContent: 'space-between' }}>
+                  <h3 style={{ margin: 0 }}><i className="fas fa-table" style={{ color: 'var(--primary)' }}></i> Master Records</h3>
+                  <input type="text" aria-label="Search records" placeholder="Search IDs, Names, Locations..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{ padding: '8px 16px', borderRadius: '20px', border: '1px solid var(--border-light)', width: '300px', outline: 'none' }} />
+                </div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem', textAlign: 'left' }}>
+                    <thead style={{ background: 'var(--secondary)', color: 'var(--text-muted)' }}>
+                      <tr>
+                        <th style={{ padding: '14px 16px' }}>System ID</th>
+                        <th style={{ padding: '14px 16px' }}>Type</th>
+                        <th style={{ padding: '14px 16px' }}>Full Name</th>
+                        <th style={{ padding: '14px 16px' }}>Live Location</th>
+                        <th style={{ padding: '14px 16px' }}>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredDB.map((row, idx) => (
+                        <tr key={row.id} style={{ borderBottom: '1px solid var(--border-light)', background: idx % 2 === 0 ? 'transparent' : 'var(--secondary)' }}>
+                          <td style={{ padding: '14px 16px', fontFamily: 'monospace', fontWeight: 'bold' }}>{row.id}</td>
+                          <td style={{ padding: '14px 16px' }}><span className="badge" style={{ background: row.type === 'Customer' ? 'var(--primary-light)' : '#fffbeb', color: row.type === 'Customer' ? 'var(--primary)' : 'var(--warning)' }}>{row.type}</span></td>
+                          <td style={{ padding: '14px 16px', fontWeight: 500 }}>{row.name}</td>
+                          <td style={{ padding: '14px 16px' }}><i className="fas fa-map-marker-alt" style={{ color: 'var(--text-muted)' }}></i> {row.location}</td>
+                          <td style={{ padding: '14px 16px' }}><span style={{ color: row.status === 'Online' || row.status === 'Active' ? 'var(--success)' : 'var(--text-muted)', fontWeight: 600 }}>• {row.status}</span></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+            {activeTab === 'logs' && (
+              <div style={{ background: '#0f172a', color: '#e2e8f0', minHeight: '500px', padding: '16px' }}>
+                {mockLogs.map((log, idx) => (
+                  <div key={idx} style={{ marginBottom: '10px', display: 'flex', gap: '16px', paddingBottom: '10px', borderBottom: '1px dashed #1e293b' }}>
+                    <span style={{ color: '#64748b' }}>[{log.time}]</span>
+                    <span style={{ color: log.level === 'INFO' ? '#38bdf8' : '#fbbf24', fontWeight: 'bold', width: '60px' }}>{log.level}</span>
+                    <span style={{ color: '#c084fc', width: '150px' }}>{log.src}</span>
+                    <span style={{ color: '#f8fafc', flex: 1 }}>{log.event}: <span style={{ color: '#94a3b8' }}>{log.details}</span></span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // ==========================================
+    // 3. MAIN APP BOOTSTRAP
+    // ==========================================
+    function App() {
+      const [currentView, setCurrentView] = useState('login');
+      const [user, setUser] = useState(null);
+
+      useEffect(() => {
+        const token = localStorage.getItem('token');
+        const savedUser = localStorage.getItem('user');
+        if (token && savedUser) {
+          try {
+            const userData = JSON.parse(savedUser);
+            setUser(userData);
+            setCurrentView(userData.role);
+          } catch (e) {
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+          }
+        } else if (token || savedUser) {
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+        }
+      }, []);
+
+      const handleLoginSuccess = (userData, role) => {
+        const userWithRole = { ...userData, role };
+        setUser(userWithRole);
+        setCurrentView(role);
+        localStorage.setItem('user', JSON.stringify(userWithRole));
+      };
+
+      const handleLogout = () => {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        setUser(null);
+        setCurrentView('login');
+      };
+
+      return (
+        <div className="app-container">
+          {currentView === 'login' ? (
+            <Login onLoginSuccess={handleLoginSuccess} />
+          ) : currentView === 'admin' ? (
+            <div style={{ animation: 'fadeIn 0.5s forwards', width: '100%', maxWidth: '1400px', margin: '0 auto' }}>
+              <AdminPanel user={user} onLogout={handleLogout} />
+            </div>
+          ) : (
+            <div style={{ animation: 'fadeIn 0.5s forwards' }}>
+              <Navbar user={user} onLogout={handleLogout} />
+              <div style={{ padding: '20px 0' }}>
+                {currentView === 'customer' && <CustomerHome user={user} />}
+                {currentView === 'electrician' && <ElectricianHome user={user} />}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
 </body>
 </html>
