@@ -15,7 +15,6 @@ export default function ElectricianHome({ user }) {
   useEffect(() => {
     if (isOnline) {
       socket.connect();
-      if (activeJobId) socket.emit('joinJobRoom', activeJobId);
 
       socket.on('receiveMessage', (data) => {
         // Mark incoming messages as 'other' for UI alignment
@@ -29,6 +28,13 @@ export default function ElectricianHome({ user }) {
       socket.off('receiveMessage');
       socket.disconnect();
     };
+  }, [isOnline]);
+
+  // Separate the room joining logic so accepting a job doesn't drop the socket connection
+  useEffect(() => {
+    if (isOnline && activeJobId) {
+      socket.emit('joinJobRoom', activeJobId);
+    }
   }, [isOnline, activeJobId]);
 
   // Poll for available jobs when online but not tracking
@@ -37,7 +43,8 @@ export default function ElectricianHome({ user }) {
     if (isOnline && !isTracking) {
       const checkJobs = async () => {
         try {
-          const job = await fetchJson('/jobs/available');
+          // Pass the electrician's current mock coordinates to trigger the geospatial matching algorithm
+          const job = await fetchJson('/jobs/available?latitude=12.9716&longitude=77.5946&maxDistance=15');
           setAvailableJob(job);
           if (job && job._id) setActiveJobId(job._id);
         } catch (e) {
@@ -84,7 +91,7 @@ export default function ElectricianHome({ user }) {
     if (!chatInput.trim()) return;
     const msgData = {
       jobId: activeJobId,
-      senderId: user._id, // Send the actual user ID
+      senderId: user.id || user._id, // Send the actual user ID securely
       sender: user?.name || 'Electrician',
       text: chatInput,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })

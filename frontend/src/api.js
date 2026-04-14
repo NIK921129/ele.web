@@ -1,4 +1,5 @@
-const API_BASE_URL = (import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000') + '/api';
+const baseURL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+const API_BASE_URL = `${baseURL.replace(/\/$/, '')}/api`;
 
 export async function fetchJson(url, options = {}) {
   const token = localStorage.getItem('token');

@@ -17,6 +17,7 @@ const SERVICES = [
 export default function CustomerHome({ user }) {
   const [selectedService, setSelectedService] = useState('wiring');
   const [address, setAddress] = useState('');
+  const [coordinates, setCoordinates] = useState([77.5946, 12.9716]); // [lng, lat] default to BLR for testing
   const [liveLocation, setLiveLocation] = useState(null);
   const [messages, setMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
@@ -79,6 +80,7 @@ export default function CustomerHome({ user }) {
         body: {
           serviceType: selectedService,
           address: address,
+          coordinates: coordinates,
           estimatedPrice: 349
         }
       });
@@ -111,7 +113,7 @@ export default function CustomerHome({ user }) {
     if (!chatInput.trim()) return;
     const msgData = {
       jobId: activeJobId,
-      senderId: user._id, // Send the actual user ID
+      senderId: user.id || user._id, // Send the actual user ID securely
       sender: user?.name || 'Customer',
       text: chatInput,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -126,6 +128,7 @@ export default function CustomerHome({ user }) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
           setAddress(`Lat: ${position.coords.latitude.toFixed(4)}, Lng: ${position.coords.longitude.toFixed(4)}`);
+          setCoordinates([position.coords.longitude, position.coords.latitude]);
         },
         (error) => {
           alert('Could not detect your location. Please check browser permissions.');
