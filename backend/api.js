@@ -3,7 +3,24 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const Job = require('../models/Job');
 
+const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_fallback_key';
+
 const router = express.Router();
+
+// Authentication Middleware
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return res.status(401).json({ message: 'Unauthorized: Missing token' });
+
+  const token = authHeader.split(' ')[1];
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded; // Attach the decoded payload to the request object
+    next();
+  } catch (err) {
+    return res.status(401).json({ message: 'Unauthorized: Invalid or expired token' });
+  }
+};
 
 // POST /api/login
 router.post('/login', async (req, res) => {
@@ -23,15 +40,15 @@ router.post('/login', async (req, res) => {
 
     // Generate a secure JWT for session management
     const token = jwt.sign(
-      { userId: user._id, role: user.role }, // Use user._id directly
-      JWT_SECRET,
+      { userId: user._id, role: user.role },
+      JWT_SECRET, // Use the defined constant
       { expiresIn: '7d' }
     );
 
     // Return data in the exact format the frontend expects
     res.json({
       token,
-      user: user.toObject()
+      user: user.toObject() // Ensure user object is returned
     });
   } catch (error) {
     console.error('Login Error:', error);
@@ -39,16 +56,9 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// POST /api/jobs - Create a new booking
-router.post('/jobs', async (req, res) => {
+// POST /api/jobs - Create a new booking (protected)
+router.post('/jobs', authenticateToken, async (req, res) => {
   try {
-    // Authenticate the user from the token
-    const authHeader = req.headers.authorization;
-    if (!authHeader) return res.status(401).json({ message: 'Unauthorized' });
-    
-    const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, JWT_SECRET);
-
     const { serviceType, address, coordinates, estimatedPrice } = req.body;
 
     if (!serviceType || !address) {
@@ -56,7 +66,7 @@ router.post('/jobs', async (req, res) => {
     }
 
     const newJob = new Job({
-      customer: decoded.userId,
+      customer: req.user.userId, // Use decoded user from middleware
       serviceType,
       address,
       location: { type: 'Point', coordinates: coordinates || [0, 0] },
@@ -73,34 +83,53 @@ router.post('/jobs', async (req, res) => {
   }
 });
 
-// GET /api/jobs/available - Fetch a pending job for electricians
-router.get('/jobs/available', async (req, res) => {
+// GET /api/jobs/available - Fetch a pending job for electricians (protected and optimized)
+router.get('/jobs/available', authenticateToken, async (req, res) => {
   try {
-    // Find the newest job that is still searching for an electrician
-    const job = await Job.findOne({ status: 'searching' }).sort({ createdAt: -1 });
-    res.status(200).json(job || null);
+    const { latitude, longitude, maxDistance = 10 } = req.query; // maxDistance in km
+
+    let query = { status: 'searching' };
+    let sort = { createdAt: -1 }; // Default sort by newest
+
+    if (latitude && longitude) {
+      const lat = parseFloat(latitude);
+      const lng = parseFloat(longitude);
+      const distanceInMeters = parseFloat(maxDistance) * 1000;
+
+      if (isNaN(lat) || isNaN(lng) || isNaN(distanceInMeters)) {
+        return res.status(400).json({ message: 'Invalid latitude, longitude, or maxDistance' });
+      }
+
+      query.location = {
+        $near: {
+          $geometry: {
+            type: "Point",
+            coordinates: [lng, lat]
+          },
+          $maxDistance: distanceInMeters
+        }
+      };
+      sort = {}; // When using $near, MongoDB automatically sorts by distance
+    }
+
+    const job = await Job.findOne(query).sort(sort).select('serviceType address estimatedPrice jobOTP status location customer'); // Select only necessary fields
+    res.status(200).json(job);
   } catch (error) {
     console.error('Fetch Available Jobs Error:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });
 
-// PUT /api/jobs/:id/accept - Electrician accepts a job
-router.put('/jobs/:id/accept', async (req, res) => {
+// PUT /api/jobs/:id/accept - Electrician accepts a job (protected)
+router.put('/jobs/:id/accept', authenticateToken, async (req, res) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) return res.status(401).json({ message: 'Unauthorized' });
-
-    const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'super_secret_fallback_key');
-
-    if (decoded.role !== 'electrician' && decoded.role !== 'admin') {
+    if (req.user.role !== 'electrician' && req.user.role !== 'admin') {
       return res.status(403).json({ message: 'Forbidden: Only electricians can accept jobs' });
     }
 
     const job = await Job.findOneAndUpdate(
       { _id: req.params.id, status: 'searching' },
-      { status: 'assigned', electrician: decoded.userId },
+      { status: 'assigned', electrician: req.user.userId }, // Use decoded user from middleware
       { new: true }
     );
 
@@ -115,18 +144,12 @@ router.put('/jobs/:id/accept', async (req, res) => {
   }
 });
 
-// PUT /api/jobs/:id/cancel - Customer cancels a job
-router.put('/jobs/:id/cancel', async (req, res) => {
+// PUT /api/jobs/:id/cancel - Customer cancels a job (protected)
+router.put('/jobs/:id/cancel', authenticateToken, async (req, res) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) return res.status(401).json({ message: 'Unauthorized' });
-
-    const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, JWT_SECRET);
-
     // Only allow cancelling if it's the customer's job and no electrician has accepted it yet
     const job = await Job.findOneAndUpdate(
-      { _id: req.params.id, customer: decoded.userId, status: 'searching' },
+      { _id: req.params.id, customer: req.user.userId, status: 'searching' }, // Use decoded user from middleware
       { status: 'cancelled' },
       { new: true }
     );
@@ -142,21 +165,15 @@ router.put('/jobs/:id/cancel', async (req, res) => {
   }
 });
 
-// PUT /api/jobs/:id/complete - Electrician marks a job as completed
-router.put('/jobs/:id/complete', async (req, res) => {
+// PUT /api/jobs/:id/complete - Electrician marks a job as completed (protected)
+router.put('/jobs/:id/complete', authenticateToken, async (req, res) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) return res.status(401).json({ message: 'Unauthorized' });
-
-    const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, JWT_SECRET);
-
-    if (decoded.role !== 'electrician' && decoded.role !== 'admin') {
+    if (req.user.role !== 'electrician' && req.user.role !== 'admin') {
       return res.status(403).json({ message: 'Forbidden: Only electricians can complete jobs' });
     }
 
     const job = await Job.findOneAndUpdate(
-      { _id: req.params.id, electrician: decoded.userId, status: { $in: ['assigned', 'in_progress', 'payment'] } },
+      { _id: req.params.id, electrician: req.user.userId, status: { $in: ['assigned', 'in_progress', 'payment'] } }, // Use decoded user from middleware
       { status: 'completed' },
       { new: true }
     );
@@ -172,14 +189,10 @@ router.put('/jobs/:id/complete', async (req, res) => {
   }
 });
 
-// POST /api/users/:id/rate - Rate an electrician
-router.post('/users/:id/rate', async (req, res) => {
+// POST /api/users/:id/rate - Rate an electrician (protected)
+router.post('/users/:id/rate', authenticateToken, async (req, res) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) return res.status(401).json({ message: 'Unauthorized' });
-    
-    // Validate token
-    jwt.verify(authHeader.split(' ')[1], JWT_SECRET);
+    // Token is already validated by middleware, req.user contains decoded payload
 
     const { rating } = req.body;
     if (!rating || rating < 1 || rating > 5) {
