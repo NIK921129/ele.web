@@ -599,16 +599,25 @@
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 
+  <script>
+    // --- Deployment Configuration ---
+    // This object centralizes the backend URL.
+    // For local development, use 'http://localhost:5000'.
+    // When you deploy, change this to your Render backend URL.
+    window.API_CONFIG = {
+      // Example for a deployed backend: 'https://voltflow-backend-xyz.onrender.com'
+      BASE_URL: 'https://voltflow-backend.onrender.com'
+    };
+  </script>
+
   <script type="text/babel">
     const { useState, useEffect, useRef } = React;
     
     // ==========================================
     // 1. API & SOCKET UTILITIES
     // ==========================================
-    
-    // IMPORTANT: Change this URL when you deploy your backend to Render!
-    const API_BASE_URL = 'http://localhost:5000/api';
-    const socket = io('http://localhost:5000', { autoConnect: false });
+    const API_BASE_URL = `${window.API_CONFIG.BASE_URL}/api`;
+    const socket = io(window.API_CONFIG.BASE_URL, { autoConnect: false });
 
     async function fetchJson(url, options = {}) {
       const token = localStorage.getItem('token');

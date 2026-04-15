@@ -1,6 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+require('dotenv').config(); // Load environment variables from .env file
 const jwt = require('jsonwebtoken');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -22,6 +23,12 @@ const io = new Server(server, { cors: corsOptions });
 app.use(cors(corsOptions));
 app.use(express.json());
 
+// Add a request logger to verify if the frontend is reaching the backend
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url} - Origin: ${req.headers.origin}`);
+  next();
+});
+
 const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_fallback_key';
 const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/voltflow';
@@ -29,9 +36,15 @@ const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/voltflow';
 // ==========================================
 // 1. MONGODB SCHEMAS & MODELS
 // ==========================================
-mongoose.connect(MONGO_URI)
-  .then(() => console.log('Connected to MongoDB'))
-  .catch(err => console.error('MongoDB connection error:', err));
+mongoose.connect(MONGO_URI).then(() => {
+  console.log('Connected to MongoDB');
+  // Start the server ONLY after the DB connection is successful
+  server.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}).catch(err => {
+  console.error('Could not connect to MongoDB. Server not started.', err);
+});
 
 const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
@@ -247,7 +260,3 @@ api.post('/users/:id/rate', authenticateToken, async (req, res) => {
 });
 
 app.use('/api', api);
-
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
