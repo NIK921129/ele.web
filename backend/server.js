@@ -9,11 +9,17 @@ const app = express();
 const server = http.createServer(app);
 
 // Remove trailing slash if it exists to prevent strict CORS mismatches
-const FRONTEND_URL = (process.env.FRONTEND_URL || '*').replace(/\/$/, '');
+const FRONTEND_URL = process.env.FRONTEND_URL ? process.env.FRONTEND_URL.replace(/\/$/, '') : null;
+
+const corsOptions = {
+  origin: FRONTEND_URL || true, // Use env var if present, otherwise reflect request origin
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+};
 
 // Configure Socket.io and CORS
-const io = new Server(server, { cors: { origin: FRONTEND_URL } });
-app.use(cors({ origin: FRONTEND_URL }));
+const io = new Server(server, { cors: corsOptions });
+app.use(cors(corsOptions));
 app.use(express.json());
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_fallback_key';
