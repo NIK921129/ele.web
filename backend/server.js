@@ -119,6 +119,20 @@ api.post('/login', async (req, res) => {
   }
 });
 
+// GET /api/me - Get current user profile from token
+api.get('/me', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).select('-__v'); // Exclude version key
+    if (!user) {
+      // This case can happen if the user was deleted but the token is still valid.
+      return res.status(404).json({ message: 'User not found' });
+    }
+    res.json(user.toObject());
+  } catch (error) {
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
 // POST /api/jobs - Create a new booking
 api.post('/jobs', authenticateToken, async (req, res) => {
   try {
@@ -234,6 +248,18 @@ api.post('/users/:id/rate', authenticateToken, async (req, res) => {
 
     const electrician = await User.findById(req.params.id);
     if (!electrician || electrician.role !== 'electrician') return res.status(404).json({ message: 'Electrician not found' });
+
+    // BUG FIX: Verify that the requesting user (customer) has a completed job with this electrician.
+    const completedJob = await Job.findOne({
+      customer: req.user.userId,
+      electrician: req.params.id,
+      status: 'completed'
+    });
+
+    // To prevent re-rating, you could add a flag like `isRated` to the Job schema and check for it here.
+    if (!completedJob) {
+      return res.status(403).json({ message: 'Forbidden: You can only rate an electrician after a completed job.' });
+    }
 
     const updatedUser = await User.findByIdAndUpdate(
       req.params.id,

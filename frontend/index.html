@@ -716,12 +716,10 @@
 
       const handleAdminAccess = () => {
         const key = prompt("Enter Master Admin Key:");
-        if (key === "79827") {
-          localStorage.setItem('token', 'admin-super-secret-token-for-demo');
-          onLoginSuccess({ name: 'Super Admin', role: 'admin', id: 'admin-001' }, 'admin');
-        } else if (key !== null) {
-          alert("Access Denied: Invalid Master Key");
-        }
+        // NOTE: This is a placeholder for a real admin login.
+        // A secure implementation requires a dedicated backend endpoint for admin authentication,
+        // not a hardcoded key in the frontend code.
+        if (key) alert("Access Denied: Admin portal requires a secure backend login.");
       };
 
       return (
@@ -1070,6 +1068,7 @@
     function ElectricianHome({ user }) {
       const [isOnline, setIsOnline] = useState(false);
       const [isTracking, setIsTracking] = useState(false);
+      const [hasArrived, setHasArrived] = useState(false);
       const [messages, setMessages] = useState([]);
       const [chatInput, setChatInput] = useState('');
       const [activeJobId, setActiveJobId] = useState(null);
@@ -1081,9 +1080,11 @@
           socket.connect();
           socket.on('receiveMessage', (data) => {
             setMessages((prev) => [...prev, { ...data, sender: 'other' }]);
+            if (!isTracking && !hasArrived) setHasArrived(true); // Auto-show chat if customer messages after arrival
           });
         } else {
           setIsTracking(false);
+          setHasArrived(false);
           socket.disconnect();
         }
         return () => {
@@ -1100,12 +1101,17 @@
 
       useEffect(() => {
         let pollInterval;
-        if (isOnline && !isTracking) {
+        if (isOnline && !activeJobId) {
           const checkJobs = async () => {
             try {
               const job = await fetchJson('/jobs/available?latitude=12.9716&longitude=77.5946&maxDistance=15');
-              setAvailableJob(job);
-              if (job && job._id) setActiveJobId(job._id);
+              // BUG FIX: Prevent setting empty objects as available jobs
+              if (job && job._id) {
+                setAvailableJob(job);
+              } else {
+                setAvailableJob(null);
+              }
+              // Do NOT set activeJobId here. It should only be set when the job is explicitly accepted.
             } catch (e) {
               console.error('Failed to fetch jobs:', e);
             }
@@ -1114,7 +1120,7 @@
           pollInterval = setInterval(checkJobs, 5000);
         }
         return () => clearInterval(pollInterval);
-      }, [isOnline, isTracking]);
+      }, [isOnline, activeJobId]);
 
       useEffect(() => {
         if (chatContainerRef.current) {
@@ -1136,7 +1142,10 @@
               distance: currentDist.toFixed(1),
               eta: currentEta
             });
-            if (currentDist <= 0) setIsTracking(false);
+            if (currentDist <= 0) {
+              setIsTracking(false);
+              setHasArrived(true);
+            }
           }, 3000);
         }
         return () => clearInterval(interval);
@@ -1159,7 +1168,9 @@
       const handleAcceptJob = async () => {
         try {
           await fetchJson(`/jobs/${availableJob._id}/accept`, { method: 'PUT' });
+          setActiveJobId(availableJob._id); // Link the job and join the chat room only AFTER accepting
           setIsTracking(true);
+          setHasArrived(false);
           setAvailableJob(null);
         } catch (error) {
           alert(error.message);
@@ -1170,6 +1181,7 @@
         try {
           await fetchJson(`/jobs/${activeJobId}/complete`, { method: 'PUT' });
           setIsTracking(false);
+          setHasArrived(false);
           setActiveJobId(null);
           setMessages([]);
           alert('Job successfully marked as completed!');
@@ -1200,7 +1212,7 @@
               </div>
             </div>
 
-            {isOnline && !isTracking && (
+            {isOnline && !activeJobId && (
               <div className="card" style={{ animationDelay: '0.1s', border: 'none', background: 'var(--primary-light)', boxShadow: 'none' }}>
                 <div style={{ textAlign: 'center', padding: '30px 20px' }}>
                   <div style={{ width: '80px', height: '80px', background: 'var(--surface)', borderRadius: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px', boxShadow: '0 0 0 10px rgba(255,255,255,0.5)' }}>
@@ -1224,15 +1236,22 @@
               </div>
             )}
 
-            {isTracking && (
+            {activeJobId && (
               <div className="card" style={{ animationDelay: '0.1s', border: '2px solid var(--success)', background: '#ecfdf5' }}>
                 <div style={{ textAlign: 'center', padding: '20px' }}>
-                  <i className="fas fa-location-arrow fa-fade fa-3x" style={{ color: 'var(--success)', marginBottom: '16px' }}></i>
-                  <h4 style={{ color: 'var(--success)' }}>En Route to Customer</h4>
-                  <p style={{ color: 'var(--text-main)' }}>Live location sharing is active. The customer is seeing your approach!</p>
-                  <button className="btn btn-outline" style={{ marginTop: '16px', borderColor: 'var(--danger)', color: 'var(--danger)' }} onClick={() => setIsTracking(false)}>
-                    Stop Tracking (Arrived)
-                  </button>
+                  {isTracking ? (
+                    <React.Fragment>
+                      <i className="fas fa-location-arrow fa-fade fa-3x" style={{ color: 'var(--success)', marginBottom: '16px' }}></i>
+                      <h4 style={{ color: 'var(--success)' }}>En Route to Customer</h4>
+                      <p style={{ color: 'var(--text-main)' }}>Live location sharing is active. The customer is seeing your approach!</p>
+                    </React.Fragment>
+                  ) : (
+                    <React.Fragment>
+                      <i className="fas fa-map-pin fa-3x" style={{ color: 'var(--primary)', marginBottom: '16px' }}></i>
+                      <h4 style={{ color: 'var(--primary)' }}>You Have Arrived</h4>
+                      <p style={{ color: 'var(--text-main)' }}>You can now begin the service. Message the customer if needed.</p>
+                    </React.Fragment>
+                  )}
                   <button className="btn" style={{ marginTop: '16px', marginLeft: '12px', background: 'var(--success)' }} onClick={handleCompleteJob}>
                     <i className="fas fa-check-circle"></i> Mark as Completed
                   </button>
@@ -1466,21 +1485,30 @@
       const [user, setUser] = useState(null);
 
       useEffect(() => {
-        const token = localStorage.getItem('token');
-        const savedUser = localStorage.getItem('user');
-        if (token && savedUser) {
-          try {
-            const userData = JSON.parse(savedUser);
-            setUser(userData);
-            setCurrentView(userData.role);
-          } catch (e) {
-            localStorage.removeItem('token');
-            localStorage.removeItem('user');
+        const validateSession = async () => {
+          const token = localStorage.getItem('token');
+          if (!token) {
+            // No token, ensure we are logged out.
+            handleLogout();
+            return;
           }
-        } else if (token || savedUser) {
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
-        }
+
+          try {
+            // BUG FIX: Stale user data in localStorage.
+            // Verify token by fetching the latest user data from the server.
+            const freshUser = await fetchJson('/me');
+            if (freshUser && freshUser._id) {
+              handleLoginSuccess(freshUser, freshUser.role);
+            } else {
+              throw new Error('Invalid user data received from server.');
+            }
+          } catch (error) {
+            // This catch block handles expired tokens (which cause a 401) or network errors.
+            console.error("Session validation failed:", error.message);
+            handleLogout();
+          }
+        };
+        validateSession();
       }, []);
 
       const handleLoginSuccess = (userData, role) => {
