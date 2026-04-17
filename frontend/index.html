@@ -83,6 +83,76 @@
     body.dark-mode .modal-content { background: #1a2233; }
     body.dark-mode .chat-widget { background: var(--surface); box-shadow: var(--shadow-md); }
 
+    /* --- New Enhanced Landing Styles --- */
+    .landing-page {
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: #020617; /* Deep midnight background */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      z-index: 1000;
+    }
+
+    .energy-blob {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(80px);
+      opacity: 0.5;
+      z-index: 1;
+      animation: blob-float 20s infinite alternate;
+    }
+
+    @keyframes blob-float {
+      from { transform: translate(0, 0) scale(1); }
+      to { transform: translate(100px, 50px) scale(1.2); }
+    }
+
+    .floating-icon {
+      position: absolute;
+      color: rgba(255, 255, 255, 0.15);
+      transition: transform 0.1s ease-out; /* For JS parallax */
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    .landing-glass-card {
+      background: rgba(255, 255, 255, 0.03);
+      backdrop-filter: blur(25px);
+      -webkit-backdrop-filter: blur(25px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 60px 40px;
+      border-radius: 40px;
+      text-align: center;
+      max-width: 600px;
+      width: 90%;
+      position: relative;
+      z-index: 10;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    }
+
+    .landing-title {
+      color: #fff;
+      font-size: 3.5rem;
+      font-weight: 800;
+      margin-bottom: 16px;
+      letter-spacing: -1px;
+    }
+
+    .landing-title span {
+      background: linear-gradient(to right, #818cf8, #38bdf8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .landing-desc {
+      color: #94a3b8;
+      font-size: 1.1rem;
+      margin-bottom: 40px;
+      line-height: 1.7;
+    }
+
     .app-container {
       max-width: 1200px;
       margin: 0 auto;
@@ -711,30 +781,97 @@
 
     // --- Landing Component ---
     function Landing({ onEnter, onSecret }) {
+      const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+
+      useEffect(() => {
+        const handleMouseMove = (e) => {
+          setMousePos({
+            x: (e.clientX / window.innerWidth - 0.5) * 40,
+            y: (e.clientY / window.innerHeight - 0.5) * 40
+          });
+        };
+        window.addEventListener('mousemove', handleMouseMove);
+        return () => window.removeEventListener('mousemove', handleMouseMove);
+      }, []);
+
+      const icons = [
+        { icon: 'fa-bolt', top: '15%', left: '10%', size: '3rem', delay: '0s' },
+        { icon: 'fa-plug', top: '20%', right: '15%', size: '2.5rem', delay: '1.5s' },
+        { icon: 'fa-microchip', bottom: '25%', left: '15%', size: '2rem', delay: '3s' },
+        { icon: 'fa-solar-panel', bottom: '20%', right: '20%', size: '3.5rem', delay: '4.5s' },
+        { icon: 'fa-lightbulb', top: '60%', left: '5%', size: '1.5rem', delay: '2s' },
+        { icon: 'fa-network-wired', top: '40%', right: '8%', size: '2rem', delay: '5s' }
+      ];
+
       return (
         <div className="landing-page">
           <div className="landing-bg-shape" style={{ top: '-10%', left: '-10%', width: '50vw', height: '50vw', background: 'var(--primary-light)', minWidth: '300px', minHeight: '300px' }}></div>
           <div className="landing-bg-shape" style={{ bottom: '-10%', right: '-10%', width: '40vw', height: '40vw', background: 'rgba(56, 189, 248, 0.2)', minWidth: '250px', minHeight: '250px' }}></div>
+          <div className="landing-bg-shape" style={{ top: '-20%', left: '-10%', width: '60vw', height: '60vw', background: 'var(--primary-light)', minWidth: '400px', minHeight: '400px' }}></div>
+          <div className="landing-bg-shape" style={{ bottom: '-20%', right: '-10%', width: '50vw', height: '50vw', background: 'rgba(56, 189, 248, 0.15)', minWidth: '350px', minHeight: '350px' }}></div>
+          {/* Animated Background Blobs */}
+          <div className="energy-blob" style={{ top: '-10%', left: '-10%', width: '500px', height: '500px', background: '#4f46e5' }}></div>
+          <div className="energy-blob" style={{ bottom: '-10%', right: '-10%', width: '600px', height: '600px', background: '#0ea5e9', animationDelay: '-5s' }}></div>
+          <div className="energy-blob" style={{ top: '40%', left: '30%', width: '300px', height: '300px', background: '#7c3aed', opacity: 0.3, animationDuration: '15s' }}></div>
           
           <div className="floating-icon" style={{ top: '15%', left: '10%', animationDelay: '0s' }}><i className="fas fa-microchip"></i></div>
           <div className="floating-icon" style={{ top: '25%', right: '15%', animationDelay: '1.5s', fontSize: '3.5rem' }}><i className="fas fa-bolt"></i></div>
           <div className="floating-icon" style={{ bottom: '20%', left: '20%', animationDelay: '3s', fontSize: '2rem' }}><i className="fas fa-network-wired"></i></div>
           <div className="floating-icon" style={{ bottom: '30%', right: '10%', animationDelay: '4.5s' }}><i className="fas fa-server"></i></div>
+          <div className="floating-icon" style={{ top: '15%', left: '10%', animationDelay: '0s', fontSize: '2rem' }}><i className="fas fa-bolt"></i></div>
+          <div className="floating-icon" style={{ top: '20%', right: '15%', animationDelay: '1.5s', fontSize: '3rem' }}><i className="fas fa-plug"></i></div>
+          <div className="floating-icon" style={{ bottom: '25%', left: '15%', animationDelay: '3s', fontSize: '2.5rem' }}><i className="fas fa-lightbulb"></i></div>
+          <div className="floating-icon" style={{ bottom: '20%', right: '20%', animationDelay: '4.5s', fontSize: '2rem' }}><i className="fas fa-solar-panel"></i></div>
+          {/* Parallax Floating Icons */}
+          {icons.map((item, idx) => (
+            <div 
+              key={idx}
+              className="floating-icon" 
+              style={{ 
+                top: item.top, 
+                left: item.left, 
+                right: item.right, 
+                bottom: item.bottom,
+                fontSize: item.size,
+                transform: `translate(${mousePos.x * (idx + 1) * 0.2}px, ${mousePos.y * (idx + 1) * 0.2}px)`
+              }}
+            >
+              <i className={`fas ${item.icon}`}></i>
+            </div>
+          ))}
 
-          <div className="landing-content" style={{ background: 'rgba(255, 255, 255, 0.6)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', padding: '40px 24px', borderRadius: '32px', border: '1px solid rgba(255,255,255,0.8)', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.1)' }}>
-            <img src="./wmremove-transformed.png" alt="WATTZEN Logo" style={{ width: '130px', height: 'auto', filter: 'drop-shadow(0 10px 15px rgba(0,0,0,0.1))', marginBottom: '12px' }} onError={(e) => { e.target.style.display = 'none'; }} />
-            <h1 className="landing-title" style={{ marginTop: 0 }}>WATT<span style={{ color: 'var(--primary)' }}>ZEN</span></h1>
-            <div className="landing-tagline">Power Your Network</div>
-            <p className="landing-desc" style={{ color: '#334155' }}>
-              A beautiful, seamless online space designed to connect you instantly with certified electricians. Book, track, and power up your life safely.
+          <div className="landing-content" style={{ zIndex: 10 }}>
+            <div className="landing-glass-card" style={{ background: 'rgba(255, 255, 255, 0.6)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', padding: '40px 24px', borderRadius: '32px', border: '1px solid rgba(255,255,255,0.8)', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.1)' }}>
+              <div style={{ display: 'inline-flex', padding: '16px', background: 'var(--surface)', borderRadius: '24px', boxShadow: 'var(--shadow-md)', marginBottom: '24px', border: '1px solid var(--border-light)' }}>
+                <img src="./wmremove-transformed.png" alt="WATTZEN Logo" style={{ width: '80px', height: 'auto', display: 'block' }} onError={(e) => { e.target.style.display = 'none'; }} />
+              </div>
+              <span className="landing-tagline">Power Your Network</span>
+              <h1 className="landing-title">Welcome to <span>WATTZEN</span></h1>
+              <p className="landing-desc">
+                A beautiful, seamless online space designed to connect you instantly with certified electricians. Book, track, and power up your life safely.
+              </p>
+              <div className="btn-glow" style={{ borderRadius: '40px', marginTop: '24px' }}>
+                <button className="btn" onClick={onEnter} style={{ fontSize: '1.1rem', padding: '18px 48px', borderRadius: '40px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '12px', letterSpacing: '0.5px', margin: '0 auto' }}>
+                  GET STARTED <i className="fas fa-arrow-right"></i>
+                </button>
+              </div>
+          <div className="landing-glass-card">
+            <div style={{ display: 'inline-flex', padding: '16px', background: 'rgba(255,255,255,0.05)', borderRadius: '24px', marginBottom: '32px', border: '1px solid rgba(255,255,255,0.1)' }}>
+              <img src="./wmremove-transformed.png" alt="WATTZEN" style={{ width: '100px', height: 'auto' }} />
+            </div>
+            <h1 className="landing-title">Power Your <span>Network</span></h1>
+            <p className="landing-desc">
+              Experience the next generation of electrical services. Instant connections, live tracking, and certified safety — all in one seamless space.
             </p>
-            <button className="btn" onClick={onEnter} style={{ fontSize: '1.05rem', padding: '18px 40px', borderRadius: '30px', textTransform: 'uppercase', letterSpacing: '1px', boxShadow: '0 10px 25px -5px rgba(79, 70, 229, 0.4)' }}>
-              POWER YOUR NETWORK <i className="fas fa-bolt" style={{ marginLeft: '8px' }}></i>
+            <button className="btn" onClick={onEnter} style={{ fontSize: '1.2rem', padding: '20px 60px', borderRadius: '50px', textTransform: 'uppercase', letterSpacing: '2px', background: 'linear-gradient(135deg, #6366f1 0%, #06b6d4 100%)' }}>
+              Get Started <i className="fas fa-arrow-right" style={{ marginLeft: '10px' }}></i>
             </button>
           </div>
 
-          <button onClick={onSecret} title="Admin Portal" style={{ position: 'absolute', bottom: '24px', right: '24px', background: 'var(--surface)', border: '1px solid var(--border-light)', color: 'var(--primary)', width: '54px', height: '54px', borderRadius: '50%', cursor: 'pointer', fontSize: '1.3rem', zIndex: 20, boxShadow: 'var(--shadow-md)', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'transform 0.2s' }} onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.1)'} onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}>
-            <i className="fas fa-user-shield"></i>
+          <button onClick={onSecret} title="Admin Portal" style={{ position: 'absolute', bottom: '24px', right: '24px', background: 'var(--surface)', border: '1px solid var(--border-light)', color: 'var(--text-muted)', width: '50px', height: '50px', borderRadius: '50%', cursor: 'pointer', fontSize: '1.2rem', zIndex: 20, boxShadow: 'var(--shadow-sm)', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.3s' }} onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--primary)'; e.currentTarget.style.transform = 'scale(1.1)'; e.currentTarget.style.boxShadow = 'var(--shadow-md)'; }} onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = 'var(--shadow-sm)'; }}>
+            <i className="fas fa-shield-halved"></i>
+          <button onClick={onSecret} style={{ position: 'absolute', bottom: '30px', right: '30px', background: 'transparent', border: '1px solid rgba(255,255,255,0.2)', color: 'rgba(255,255,255,0.4)', width: '50px', height: '50px', borderRadius: '50%', cursor: 'pointer', zIndex: 20 }}>
+            <i className="fas fa-shield-halved" style={{ fontSize: '1.2rem' }}></i>
           </button>
         </div>
       );
@@ -794,7 +931,7 @@
 
           if (userData && userData.token && userData.user) {
             localStorage.setItem('token', userData.token);
-            onLoginSuccess({ ...userData.user, id: userData.user?._id }, userData.user.role);
+            onLoginSuccess(userData.user, userData.user.role);
           } else {
             throw new Error('Invalid response from server: Missing token or user data');
           }
@@ -1053,7 +1190,7 @@
       const handleSubmitRating = async () => {
         try {
           // For now, we'll rate the first electrician in the team. A future update could allow rating each member.
-          const electricianId = assignedElectricians[0]?.id || assignedElectricians[0]?._id;
+          const electricianId = assignedElectricians[0]?._id;
           if (!electricianId) {
             showToast('No electrician found to rate.', 'error');
             return;
