@@ -11,7 +11,7 @@ const app = express();
 const server = http.createServer(app);
 
 // Remove trailing slash if it exists to prevent strict CORS mismatches
-const FRONTEND_URL = process.env.FRONTEND_URL ? process.env.FRONTEND_URL.replace(/\/$/, '') : 
+const FRONTEND_URL = process.env.FRONTEND_URL ? process.env.FRONTEND_URL.replace(/\/$/, '') : 'https://wattzen.vercel.app';
 const corsOptions = {
   origin: FRONTEND_URL || true, // Use env var if present, otherwise reflect request origin
   credentials: true,

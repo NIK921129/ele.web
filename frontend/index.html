@@ -55,8 +55,6 @@
     body.dark-mode {
       background: #0f172a;
       color: #e2e8f0;
-    }
-    body.dark-mode:root {
       --primary: #38bdf8;
       --primary-light: #1e293b;
       --secondary: #1e293b;
@@ -965,7 +963,6 @@
 
       const handleConfirmPayment = async () => {
         setIsBooking(true);
-        const jobDescription = selectedServiceObj.team ? `${selectedServiceObj.name} (Team of ${teamSize})` : selectedServiceObj.name;
         try {
           const job = await fetchJson('/jobs', {
             method: 'POST',
@@ -1176,7 +1173,7 @@
                   </button>
                 </div>
               ) : (
-                <div style={{ marginTop: '16px', padding: '16px', background: '#ecfdf5', borderRadius: '12px', border: '1px solid var(--success)' }}>
+                <div style={{ marginTop: '16px', padding: '16px', background: 'rgba(16, 185, 129, 0.1)', borderRadius: '12px', border: '1px solid var(--success)' }}>
                   <i className="fas fa-check-circle" style={{ color: 'var(--success)', marginBottom: '8px', fontSize: '1.5rem' }}></i>
                   <div style={{ fontWeight: 'bold', color: 'var(--success)', textAlign: 'center' }}>Your Team is Assembled!</div>
                   <div style={{ fontSize: '0.85rem', color: 'var(--text-main)', marginTop: '8px' }}>
@@ -1459,7 +1456,7 @@
                     <p style={{ color: 'var(--text-muted)' }}>We are matching you with customers within a 10km radius.</p>
                   ) : (
                     <div style={{ marginTop: '24px', padding: '20px', background: 'var(--surface)', borderRadius: '16px', border: '2px solid var(--success)', boxShadow: 'var(--shadow-lg)' }}>
-                      <span className="badge" style={{ background: '#dcfce7', color: '#166534', marginBottom: '12px', display: 'inline-block' }}>NEW MATCH FOUND</span>
+                      <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.2)', color: 'var(--success)', marginBottom: '12px', display: 'inline-block' }}>NEW MATCH FOUND</span>
                       <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-main)' }}><strong>Service:</strong> {availableJob.serviceType}</p>
                       <p style={{ margin: '4px 0 12px 0', fontSize: '0.9rem', color: 'var(--text-main)' }}><strong>Location:</strong> {availableJob.address}</p>
                       <p style={{ margin: '4px 0 12px 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>Job ID: <span style={{ fontFamily: 'monospace' }}>{availableJob._id}</span></p>
@@ -1473,7 +1470,7 @@
             )}
 
             {currentJob && (
-              <div className="card" style={{ animationDelay: '0.1s', border: '2px solid var(--success)', background: '#ecfdf5' }}>
+              <div className="card" style={{ animationDelay: '0.1s', border: '2px solid var(--success)', background: 'rgba(16, 185, 129, 0.1)' }}>
                 <div style={{ textAlign: 'center', padding: '20px' }}>
                   {isTeamWaiting ? (
                     <React.Fragment>
@@ -1813,7 +1810,7 @@
                         <th style={{ padding: '14px 16px' }}>System ID</th>
                         <th style={{ padding: '14px 16px' }}>Type</th>
                         <th style={{ padding: '14px 16px' }}>Full Name</th>
-                        <th style={{ padding: '14px 16px' }}>Live Location</th>
+                        <th style={{ padding: '14px 16px' }}>Phone Number</th>
                         <th style={{ padding: '14px 16px' }}>Status</th>
                       </tr>
                     </thead>
