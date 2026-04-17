@@ -700,6 +700,37 @@
     // 2. COMPONENTS
     // ==========================================
 
+    // --- Landing Component ---
+    function Landing({ onEnter, onSecret }) {
+      return (
+        <div className="landing-page">
+          <div className="landing-bg-shape" style={{ top: '-10%', left: '-10%', width: '400px', height: '400px', background: 'var(--primary-light)' }}></div>
+          <div className="landing-bg-shape" style={{ bottom: '-10%', right: '-10%', width: '300px', height: '300px', background: 'rgba(56, 189, 248, 0.2)' }}></div>
+          
+          <div className="floating-icon" style={{ top: '15%', left: '15%', animationDelay: '0s' }}><i className="fas fa-microchip"></i></div>
+          <div className="floating-icon" style={{ top: '25%', right: '20%', animationDelay: '1.5s', fontSize: '3.5rem' }}><i className="fas fa-bolt"></i></div>
+          <div className="floating-icon" style={{ bottom: '20%', left: '25%', animationDelay: '3s', fontSize: '2rem' }}><i className="fas fa-network-wired"></i></div>
+          <div className="floating-icon" style={{ bottom: '30%', right: '15%', animationDelay: '4.5s' }}><i className="fas fa-server"></i></div>
+
+          <div className="landing-content">
+            <img src="wmremove-transformed.png" alt="WATTZEN Logo" style={{ width: '160px', height: 'auto', filter: 'drop-shadow(0 10px 15px rgba(0,0,0,0.1))' }} />
+            <h1 className="landing-title">WATT<span style={{ color: 'var(--primary)' }}>ZEN</span></h1>
+            <div className="landing-tagline">Power Your Network</div>
+            <p className="landing-desc">
+              A beautiful, seamless online space designed to connect you instantly with certified electricians. Book, track, and power up your life safely.
+            </p>
+            <button className="btn" onClick={onEnter} style={{ fontSize: '1.1rem', padding: '16px 40px', borderRadius: '30px' }}>
+              ENTER WATTZEN <i className="fas fa-arrow-right" style={{ marginLeft: '8px' }}></i>
+            </button>
+          </div>
+
+          <button onClick={onSecret} title="Admin Portal" style={{ position: 'absolute', bottom: '20px', right: '20px', background: 'transparent', border: 'none', color: 'var(--border-light)', cursor: 'pointer', fontSize: '1.5rem', zIndex: 20 }}>
+            <i className="fas fa-bolt"></i>
+          </button>
+        </div>
+      );
+    }
+
     // --- Navbar Component ---
     function Navbar({ user, onLogout, toggleTheme, isDarkMode }) {
       return (
@@ -852,6 +883,7 @@
       const [messages, setMessages] = useState([]);
       const [chatInput, setChatInput] = useState('');
       const [activeJobId, setActiveJobId] = useState(null);
+      const [bookingPrice, setBookingPrice] = useState(null);
       const [isBooking, setIsBooking] = useState(false);
       const [assignedElectricians, setAssignedElectricians] = useState([]);
       const [jobCompleted, setJobCompleted] = useState(false);
@@ -885,6 +917,10 @@
         socket.on('receiveMessage', (data) => {
           setMessages((prev) => [...prev, { ...data, isSelf: false }]);
         });
+        socket.on('paymentVerified', () => {
+          setTeamStatusMessage('Payment verified! Searching for nearby electricians...');
+          showToast('Payment verified by Admin!', 'success');
+        });
         socket.on('jobAccepted', (data) => {
           setAssignedElectricians(data.electricians || []);
           setIsTeamFull(true);
@@ -903,6 +939,7 @@
           socket.off('electricianLocationChanged');
           socket.off('receiveMessage');
           socket.off('jobAccepted');
+          socket.off('paymentVerified');
           socket.off('jobCompleted');
           socket.off('teamMemberJoined');
           socket.disconnect();
@@ -919,18 +956,25 @@
         setTeamSize(1);
       }, [selectedService]);
 
-      const handleBookJob = async () => {
+      const handleInitiateBooking = () => {
         if (!address) return showToast('Please enter your full address to book a service.', 'warning');
+        // Generate random price 300 - 700 per electrician needed
+        const price = (Math.floor(Math.random() * 401) + 300) * teamSize;
+        setBookingPrice(price);
+      };
+
+      const handleConfirmPayment = async () => {
         setIsBooking(true);
-        
         const jobDescription = selectedServiceObj.team ? `${selectedServiceObj.name} (Team of ${teamSize})` : selectedServiceObj.name;
         try {
           const job = await fetchJson('/jobs', {
             method: 'POST',
-            body: { serviceType: selectedService, address: address, coordinates: coordinates, estimatedPrice: selectedServiceObj.team ? 4500 : 349, teamSize: teamSize }
+            body: { serviceType: selectedService, address, coordinates, estimatedPrice: bookingPrice, teamSize }
           });
           setActiveJobId(job._id);
-          showToast(`Job created successfully! Searching for electricians...`, 'success');
+          setBookingPrice(null);
+          setTeamStatusMessage('Payment submitted. Waiting for Admin verification...');
+          showToast(`Payment registered! Verifying...`, 'success');
           setJobCompleted(false);
           setIsTeamFull(false);
         } catch (error) {
@@ -951,6 +995,7 @@
           setIsTeamFull(false);
           setJobCompleted(false);
           setShowRating(false);
+          setBookingPrice(null);
           setRating(0);
           showToast('Job cancelled successfully.', 'success');
         } catch (error) {
@@ -988,9 +1033,13 @@
         }
       };
 
-      const handlePayment = () => {
-        showToast('Payment Processed! Thank you for using WATTZEN.', 'success');
-        setShowRating(true);
+      const handleCompleteJob = async () => {
+        try {
+          await fetchJson(`/jobs/${activeJobId}/complete`, { method: 'PUT' });
+          showToast('Job marked as completed. Please rate your experience!', 'success');
+        } catch (error) {
+          showToast(error.message, 'error');
+        }
       };
 
       const handleSubmitRating = async () => {
@@ -1099,12 +1148,25 @@
                 <button className="btn" style={{ padding: '10px 20px' }} onClick={handleLocateMe} title="Detect Location"><i className="fas fa-crosshairs"></i></button>
               </div>
 
-              {!activeJobId ? (
-                <button className="btn btn-block" style={{ marginTop: '16px' }} onClick={handleBookJob} disabled={isBooking}>
+              {!activeJobId && !bookingPrice ? (
+                <button className="btn btn-block" style={{ marginTop: '16px' }} onClick={handleInitiateBooking} disabled={isBooking}>
                   <i className="fas fa-bolt"></i> {isBooking ? 'Creating Job...' : 'Find Electricians Near Me'}
                 </button>
+              ) : !activeJobId && bookingPrice ? (
+                <div style={{ marginTop: '16px', padding: '24px', background: 'var(--surface)', borderRadius: '16px', border: '2px solid var(--primary)', textAlign: 'center', boxShadow: 'var(--shadow-md)' }}>
+                  <h3 style={{ color: 'var(--text-main)', margin: '0 0 8px 0' }}>Upfront Payment Required</h3>
+                  <p style={{ color: 'var(--text-muted)', marginBottom: '16px' }}>To secure your booking, please pay the estimated service fee.</p>
+                  <h2 style={{ fontSize: '2.5rem', color: 'var(--success)', margin: '0 0 20px 0' }}>₹{bookingPrice}</h2>
+                  <a href={`upi://pay?pa=9211293576@ptaxis&pn=WATTZEN&am=${bookingPrice}&cu=INR`} className="btn btn-block" style={{ background: '#10b981', display: 'block', textDecoration: 'none', marginBottom: '12px' }}>
+                    <i className="fas fa-qrcode"></i> Pay via UPI App
+                  </a>
+                  <button className="btn-outline btn btn-block" onClick={handleConfirmPayment} disabled={isBooking}>
+                    {isBooking ? 'Verifying...' : 'I have completed the payment'}
+                  </button>
+                  <button className="btn" style={{ background: 'transparent', color: 'var(--text-muted)', marginTop: '8px', boxShadow: 'none' }} onClick={() => setBookingPrice(null)}>Cancel</button>
+                </div>
               ) : !isTeamFull ? (
-                <div style={{ marginTop: '16px', padding: '16px', background: 'var(--secondary)', borderRadius: '12px', textAlign: 'center', border: '1px dashed var(--primary)' }}>
+                <div style={{ marginTop: '16px', padding: '24px', background: 'var(--secondary)', borderRadius: '12px', textAlign: 'center', border: '1px dashed var(--primary)' }}>
                   <i className="fas fa-spinner fa-spin" style={{ color: 'var(--primary)', marginBottom: '8px', fontSize: '1.5rem' }}></i>
                   <div style={{ fontWeight: 'bold' }}>Searching for nearby electricians...</div>
                   {teamStatusMessage && <div style={{ fontSize: '0.9rem', color: 'var(--text-main)', marginTop: '8px' }}>{teamStatusMessage}</div>}
@@ -1122,43 +1184,25 @@
                         <div key={e._id} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--surface)', padding: '8px', borderRadius: '8px', marginBottom: '4px' }}><i className="fas fa-user-hard-hat" style={{color: 'var(--primary)'}}></i> <strong>{e.name}</strong> ({e.phone})</div>
                     ))}
                   </div>
+                  {!jobCompleted && (
+                    <button className="btn btn-block" style={{ marginTop: '16px' }} onClick={handleCompleteJob}>
+                      <i className="fas fa-check-circle"></i> Mark Job as Done
+                    </button>
+                  )}
                 </div>
               )}
 
               {jobCompleted ? (
-                showRating ? (
-                  <div style={{ marginTop: '16px', padding: '24px', background: 'var(--surface)', borderRadius: '12px', border: '2px solid var(--primary)', textAlign: 'center', boxShadow: 'var(--shadow-md)' }}>
-                    <h3 style={{ color: 'var(--text-main)', margin: '0 0 8px 0' }}>Rate your Experience</h3>
-                    <p style={{ color: 'var(--text-muted)', marginBottom: '16px' }}>How was your service with <strong>{assignedElectricians[0]?.name}</strong> and team?</p>
-                    <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', fontSize: '2.5rem', marginBottom: '24px' }}>
-                      {[1, 2, 3, 4, 5].map((star) => (
-                        <i 
-                          key={star} 
-                          className="fas fa-star" 
-                          style={{ cursor: 'pointer', color: star <= (hoverRating || rating) ? 'var(--gold)' : 'var(--border-light)', transition: 'color 0.2s, transform 0.2s' }}
-                          onMouseEnter={() => setHoverRating(star)}
-                          onMouseLeave={() => setHoverRating(0)}
-                          onClick={() => setRating(star)}
-                          role="button"
-                          tabIndex={0}
-                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setRating(star); } }}
-                        ></i>
-                      ))}
-                    </div>
-                    <button className="btn btn-block" onClick={handleSubmitRating} disabled={rating === 0}>
-                      Submit Feedback
-                    </button>
+                <div style={{ marginTop: '16px', padding: '24px', background: 'var(--surface)', borderRadius: '12px', border: '2px solid var(--primary)', textAlign: 'center', boxShadow: 'var(--shadow-md)' }}>
+                  <h3 style={{ color: 'var(--text-main)', margin: '0 0 8px 0' }}>Rate your Experience</h3>
+                  <p style={{ color: 'var(--text-muted)', marginBottom: '16px' }}>How was your service with <strong>{assignedElectricians[0]?.name}</strong> and team?</p>
+                  <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', fontSize: '2.5rem', marginBottom: '24px' }}>
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <i key={star} className="fas fa-star" style={{ cursor: 'pointer', color: star <= (hoverRating || rating) ? 'var(--gold)' : 'var(--border-light)', transition: 'color 0.2s, transform 0.2s' }} onMouseEnter={() => setHoverRating(star)} onMouseLeave={() => setHoverRating(0)} onClick={() => setRating(star)}></i>
+                    ))}
                   </div>
-                ) : (
-                  <div style={{ marginTop: '16px', padding: '24px', background: 'var(--surface)', borderRadius: '12px', border: '2px solid var(--primary)', textAlign: 'center', boxShadow: 'var(--shadow-md)' }}>
-                    <h3 style={{ color: 'var(--primary)', margin: '0 0 8px 0' }}><i className="fas fa-file-invoice-dollar"></i> Invoice Summary</h3>
-                    <p style={{ color: 'var(--text-muted)', marginBottom: '16px' }}>Service completed by <strong>{assignedElectricians[0]?.name}</strong> and team.</p>
-                    <h2 style={{ fontSize: '2.5rem', color: 'var(--text-main)', margin: '0 0 20px 0' }}>₹349</h2>
-                    <button className="btn btn-block" onClick={handlePayment}>
-                      <i className="fas fa-credit-card"></i> Pay & Rate
-                    </button>
-                  </div>
-                )
+                  <button className="btn btn-block" onClick={handleSubmitRating} disabled={rating === 0}>Submit Feedback</button>
+                </div>
               ) : (assignedElectricians.length > 0 || liveLocation) && (
                 <React.Fragment>
                   {liveLocation && (
@@ -1229,6 +1273,7 @@
       const [chatInput, setChatInput] = useState('');
       const [activeJobId, setActiveJobId] = useState(null);
       const [availableJob, setAvailableJob] = useState(null);
+      const [walletBal, setWalletBal] = useState(user?.walletBalance || 0);
       const [currentJob, setCurrentJob] = useState(null); // Will hold the full job object
       const chatContainerRef = useRef(null);
 
@@ -1262,6 +1307,11 @@
             setAvailableJob(null);
             setMessages([]);
           });
+          socket.on('jobCompleted', () => {
+            showToast('Customer marked job as complete! Earnings added to wallet.', 'success');
+            // Refresh wallet balance
+            fetchJson('/me').then(res => setWalletBal(res.walletBalance)).catch(() => {});
+          });
         } else {
           setIsTracking(false);
           socket.disconnect();
@@ -1270,6 +1320,7 @@
           socket.off('receiveMessage');
           socket.off('jobAccepted');
           socket.off('jobCancelled');
+          socket.off('jobCompleted');
           socket.disconnect();
         };
       }, [isOnline]);
@@ -1365,14 +1416,11 @@
         }
       };
 
-      const handleCompleteJob = async () => {
+      const handleRequestWithdrawal = async () => {
         try {
-          await fetchJson(`/jobs/${activeJobId}/complete`, { method: 'PUT' });
-          setIsTracking(false);
-          setActiveJobId(null);
-          setCurrentJob(null);
-          setMessages([]);
-          showToast('Job successfully marked as completed!', 'success');
+          const res = await fetchJson('/withdrawals', { method: 'POST' });
+          showToast('Withdrawal request sent to Admin.', 'success');
+          setWalletBal(0); // Optimistically set to 0
         } catch (error) {
           showToast(error.message, 'error');
         }
@@ -1390,8 +1438,8 @@
               </div>
               <div className="inline-stats" style={{ display: 'flex', gap: '20px', marginTop: '16px' }}>
                 <div style={{ flex: 1, padding: '16px', background: 'var(--secondary)', borderRadius: '16px' }}>
-                  <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600, textTransform: 'uppercase' }}>TODAY'S EARNINGS</span>
-                  <h2 style={{ color: 'var(--success)', fontSize: '2.2rem', margin: '4px 0 0 0' }}>₹0</h2>
+                  <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600, textTransform: 'uppercase' }}>WALLET BALANCE</span>
+                  <h2 style={{ color: 'var(--success)', fontSize: '2.2rem', margin: '4px 0 0 0' }}>₹{walletBal.toFixed(0)}</h2>
                 </div>
                 <div style={{ flex: 1, padding: '16px', background: 'var(--secondary)', borderRadius: '16px' }}>
                   <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600, textTransform: 'uppercase' }}>JOBS COMPLETED</span>
@@ -1446,9 +1494,9 @@
                       <p style={{ color: 'var(--text-main)' }}>You can now begin the service. Message the customer if needed.</p>
                     </React.Fragment>
                   ) : null}
-                  <button className="btn" style={{ marginTop: '16px', marginLeft: '12px', background: 'var(--success)' }} onClick={handleCompleteJob}>
-                    <i className="fas fa-check-circle"></i> Mark as Completed
-                  </button>
+                  <p style={{ color: 'var(--warning)', marginTop: '16px', fontWeight: 'bold' }}>
+                    <i className="fas fa-info-circle"></i> Ask the customer to mark the job as 'Done' on their app when finished to receive your payout.
+                  </p>
                 </div>
             
             <div style={{ marginTop: '16px', background: 'var(--surface)', border: '1px solid var(--border-light)', borderRadius: '12px', overflow: 'hidden' }}>
@@ -1500,10 +1548,12 @@
 
           <div>
             <div className="earnings-card" style={{ animationDelay: '0.15s' }}>
-              <i className="fas fa-wallet"></i> <strong>Weekly Payout Tracker</strong>
-              <h3 style={{ margin: '8px 0' }}>₹4,250</h3>
-              <p style={{ fontSize: '0.8rem', opacity: 0.8 }}>Next payout processing on Friday.</p>
-              <button className="btn btn-block" style={{ background: 'rgba(255,255,255,0.2)', color: 'white', marginTop: '12px' }}>Withdraw to Bank</button>
+              <i className="fas fa-wallet"></i> <strong>Available for Withdrawal</strong>
+              <h3 style={{ margin: '8px 0' }}>₹{walletBal.toFixed(0)}</h3>
+              <p style={{ fontSize: '0.8rem', opacity: 0.8 }}>Min withdrawal: ₹500. 20% platform commission applied.</p>
+              <button className="btn btn-block" disabled={walletBal < 500} onClick={handleRequestWithdrawal} style={{ background: walletBal >= 500 ? 'var(--success)' : 'rgba(255,255,255,0.2)', color: 'white', marginTop: '12px' }}>
+                {walletBal >= 500 ? 'Request Bank Withdrawal' : 'Balance too low'}
+              </button>
             </div>
             
             <div className="card" style={{ animationDelay: '0.2s', marginTop: '20px' }}>
@@ -1612,6 +1662,7 @@
       const [mockData, setMockData] = useState([]);
       const [useMockData, setUseMockData] = useState(false);
       const [isLoading, setIsLoading] = useState(true);
+      const [financeData, setFinanceData] = useState({ pendingJobs: [], pendingWithdrawals: [] });
       const [isDownloading, setIsDownloading] = useState(false);
 
       useEffect(() => {
@@ -1620,6 +1671,8 @@
             setIsLoading(true);
             const users = await fetchJson('/admin/users');
             setLiveData(users);
+            const fin = await fetchJson('/admin/finance');
+            setFinanceData(fin);
           } catch (error) {
             showToast(`Failed to fetch users: ${error.message}`, 'error');
           } finally {
@@ -1686,6 +1739,25 @@
         }
       };
 
+      const handleApprovePayment = async (id) => {
+        try {
+          await fetchJson(`/admin/jobs/${id}/verify-payment`, { method: 'PUT' });
+          showToast('Payment verified. Job is now active.', 'success');
+          // Refresh lists
+          const fin = await fetchJson('/admin/finance');
+          setFinanceData(fin);
+        } catch (e) { showToast(e.message, 'error'); }
+      };
+
+      const handleApproveWithdrawal = async (id) => {
+        try {
+          await fetchJson(`/admin/withdrawals/${id}/approve`, { method: 'PUT' });
+          showToast('Withdrawal approved.', 'success');
+          const fin = await fetchJson('/admin/finance');
+          setFinanceData(fin);
+        } catch (e) { showToast(e.message, 'error'); }
+      };
+
       return (
         <div style={{ padding: '20px', fontFamily: 'var(--font-family, sans-serif)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', background: 'var(--surface)', padding: '16px 24px', borderRadius: '16px', boxShadow: 'var(--shadow-sm)' }}>
@@ -1714,6 +1786,7 @@
 
           <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
             <TabButton active={activeTab === 'database'} onClick={() => setActiveTab('database')} icon="fa-database" label="Global Database" />
+            <TabButton active={activeTab === 'finance'} onClick={() => setActiveTab('finance')} icon="fa-indian-rupee-sign" label="Finance & Approvals" />
             <TabButton active={activeTab === 'logs'} onClick={() => setActiveTab('logs')} icon="fa-terminal" label="System Logs" />
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: 'var(--text-main)', fontSize: '0.9rem', fontWeight: 600, background: 'var(--surface)', padding: '8px 16px', borderRadius: '30px', border: '1px solid var(--border-light)' }}>
@@ -1770,6 +1843,40 @@
                 </div>
               </div>
             )}
+            {activeTab === 'finance' && (
+              <div style={{ padding: '20px' }}>
+                <h3 style={{ color: 'var(--text-main)', marginBottom: '16px' }}><i className="fas fa-receipt"></i> Pending User Payments</h3>
+                <div style={{ display: 'grid', gap: '12px', marginBottom: '32px' }}>
+                  {financeData.pendingJobs.length === 0 && <p style={{ color: 'var(--text-muted)' }}>No payments pending verification.</p>}
+                  {financeData.pendingJobs.map(job => (
+                    <div key={job._id} style={{ background: 'var(--secondary)', padding: '16px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <strong>{job.serviceType}</strong> - ₹{job.estimatedPrice} <br/>
+                        <small>Customer: {job.customer?.name} ({job.customer?.phone})</small>
+                      </div>
+                      <button className="btn" style={{ background: 'var(--success)' }} onClick={() => handleApprovePayment(job._id)}>Approve Payment</button>
+                    </div>
+                  ))}
+                </div>
+
+                <h3 style={{ color: 'var(--text-main)', marginBottom: '16px' }}><i className="fas fa-money-bill-transfer"></i> Withdrawal Requests</h3>
+                <div style={{ display: 'grid', gap: '12px' }}>
+                  {financeData.pendingWithdrawals.length === 0 && <p style={{ color: 'var(--text-muted)' }}>No pending withdrawal requests.</p>}
+                  {financeData.pendingWithdrawals.map(req => (
+                    <div key={req._id} style={{ background: 'var(--secondary)', padding: '16px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <strong>Electrician: {req.electrician?.name}</strong> <br/>
+                        <small>Phone: {req.electrician?.phone}</small>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                        <strong style={{ fontSize: '1.2rem' }}>₹{req.amount}</strong>
+                        <button className="btn" style={{ background: 'var(--primary)' }} onClick={() => handleApproveWithdrawal(req._id)}>Mark as Transferred</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             {activeTab === 'logs' && (
               <div style={{ background: '#0f172a', color: '#e2e8f0', minHeight: '500px', padding: '16px' }}>
                 {mockLogs.map((log, idx) => (
@@ -1791,7 +1898,7 @@
     // 3. MAIN APP BOOTSTRAP
     // ==========================================
     function App() {
-      const [currentView, setCurrentView] = useState('login');
+      const [currentView, setCurrentView] = useState('landing');
       const [user, setUser] = useState(null);
       const [isDarkMode, setIsDarkMode] = useState(false);
       const [toasts, setToasts] = useState([]);
@@ -1812,8 +1919,7 @@
         const validateSession = async () => {
           const token = localStorage.getItem('token');
           if (!token) {
-            // No token, ensure we are logged out.
-            handleLogout();
+            if (currentView !== 'landing') setCurrentView('landing');
             setIsInitializing(false);
             return;
           }
@@ -1853,7 +1959,21 @@
         localStorage.removeItem('token');
         localStorage.removeItem('user');
         setUser(null);
-        setCurrentView('login');
+        setCurrentView('landing');
+      };
+
+      const handleSecretAdminLogin = async () => {
+        const pwd = prompt("Enter Admin Secret PIN:");
+        if (pwd === '79827') {
+          try {
+            const data = await fetchJson('/admin/secret-login', { method: 'POST', body: { password: pwd } });
+            localStorage.setItem('token', data.token);
+            handleLoginSuccess(data.user, 'admin');
+            showToast('Master Access Granted', 'success');
+          } catch(e) {
+            showToast('Access Denied', 'error');
+          }
+        }
       };
 
       if (isInitializing) {
@@ -1866,7 +1986,9 @@
 
       return (
         <div className="app-container">
-          {currentView === 'login' ? (
+          {currentView === 'landing' ? (
+            <Landing onEnter={() => setCurrentView('login')} onSecret={handleSecretAdminLogin} />
+          ) : currentView === 'login' ? (
             <Login onLoginSuccess={handleLoginSuccess} />
           ) : currentView === 'admin' ? (
             <div style={{ animation: 'fadeIn 0.5s forwards', width: '100%', maxWidth: '1400px', margin: '0 auto' }}>
