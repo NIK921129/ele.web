@@ -183,6 +183,8 @@
       display: flex;
       align-items: center;
       gap: 12px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
     }
 
     .notification-icon {
@@ -579,6 +581,15 @@
       .modal-content { margin: 0 auto; }
       .chat-widget { width: 320px; }
     }
+    @media (max-width: 600px) { /* Mobile specifics */
+      .landing-title { font-size: 2.2rem; }
+      .landing-desc { font-size: 0.95rem; }
+      .chat-widget { right: 10px; bottom: 10px; width: calc(100% - 20px); }
+      .address-bar { flex-direction: column; align-items: stretch; border-radius: 16px; padding: 12px; gap: 12px; }
+      .address-input { width: 100%; margin: 0; }
+      .logo-text { font-size: 1.5rem; }
+      .card { padding: 16px; }
+    }
     
     /* animations */
     @keyframes fadeIn { to { opacity: 1; } }
@@ -714,7 +725,7 @@
             <img src="./wmremove-transformed.png" alt="WATTZEN Logo" style={{ width: '130px', height: 'auto', filter: 'drop-shadow(0 10px 15px rgba(0,0,0,0.1))', marginBottom: '12px' }} onError={(e) => { e.target.style.display = 'none'; }} />
             <h1 className="landing-title" style={{ marginTop: 0 }}>WATT<span style={{ color: 'var(--primary)' }}>ZEN</span></h1>
             <div className="landing-tagline">Power Your Network</div>
-            <p className="landing-desc" style={{ color: '#334155', fontWeight: 500, maxWidth: '450px', margin: '0 auto 32px' }}>
+            <p className="landing-desc" style={{ color: '#334155' }}>
               A beautiful, seamless online space designed to connect you instantly with certified electricians. Book, track, and power up your life safely.
             </p>
             <button className="btn" onClick={onEnter} style={{ fontSize: '1.05rem', padding: '18px 40px', borderRadius: '30px', textTransform: 'uppercase', letterSpacing: '1px', boxShadow: '0 10px 25px -5px rgba(79, 70, 229, 0.4)' }}>
@@ -1071,7 +1082,7 @@
       return (
         <div className="dashboard-grid">
           <div>
-            <div className="promo-banner" style={{ background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)', color: 'white', padding: '24px', borderRadius: 'var(--radius-card)', marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: 'var(--shadow-lg)', border: '1px solid #334155' }}>
+            <div className="promo-banner" style={{ background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)', color: 'white', padding: '24px', borderRadius: 'var(--radius-card)', marginBottom: '24px', display: 'flex', flexWrap: 'wrap', gap: '16px', justifyContent: 'space-between', alignItems: 'center', boxShadow: 'var(--shadow-lg)', border: '1px solid #334155' }}>
               <div>
                 <span className="badge" style={{ background: 'rgba(255,255,255,0.1)', color: '#60a5fa', marginBottom: '8px', display: 'inline-block' }}>SUMMER SALE</span>
                 <h2 style={{ margin: 0, color: 'white', fontSize: '1.5rem' }}>20% Off AC Servicing</h2>
@@ -1126,7 +1137,7 @@
               </div>
 
               {selectedServiceObj?.team && (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--secondary)', padding: '16px', borderRadius: '16px', marginTop: '16px', border: '1px dashed var(--primary)' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center', justifyContent: 'space-between', background: 'var(--secondary)', padding: '16px', borderRadius: '16px', marginTop: '16px', border: '1px dashed var(--primary)' }}>
                   <div>
                     <strong style={{ display: 'block', color: 'var(--text-main)' }}>Project Team Required</strong>
                     <small style={{ color: 'var(--text-muted)' }}>How many electricians do you need?</small>
@@ -1433,12 +1444,12 @@
                   {isOnline ? <React.Fragment><span className="pulse-dot" style={{ marginRight: '8px' }}></span>Online</React.Fragment> : 'Go Online'}
                 </button>
               </div>
-              <div className="inline-stats" style={{ display: 'flex', gap: '20px', marginTop: '16px' }}>
-                <div style={{ flex: 1, padding: '16px', background: 'var(--secondary)', borderRadius: '16px' }}>
+                <div className="inline-stats" style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', marginTop: '16px' }}>
+                  <div style={{ flex: '1 1 200px', padding: '16px', background: 'var(--secondary)', borderRadius: '16px' }}>
                   <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600, textTransform: 'uppercase' }}>WALLET BALANCE</span>
                   <h2 style={{ color: 'var(--success)', fontSize: '2.2rem', margin: '4px 0 0 0' }}>₹{walletBal.toFixed(0)}</h2>
                 </div>
-                <div style={{ flex: 1, padding: '16px', background: 'var(--secondary)', borderRadius: '16px' }}>
+                  <div style={{ flex: '1 1 200px', padding: '16px', background: 'var(--secondary)', borderRadius: '16px' }}>
                   <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600, textTransform: 'uppercase' }}>JOBS COMPLETED</span>
                   <h2 style={{ color: 'var(--text-main)', fontSize: '2.2rem', margin: '4px 0 0 0' }}>0</h2>
                 </div>
@@ -1757,7 +1768,7 @@
 
       return (
         <div style={{ padding: '20px', fontFamily: 'var(--font-family, sans-serif)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', background: 'var(--surface)', padding: '16px 24px', borderRadius: '16px', boxShadow: 'var(--shadow-sm)' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', background: 'var(--surface)', padding: '16px 24px', borderRadius: '16px', boxShadow: 'var(--shadow-sm)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <div style={{ background: 'var(--danger)', color: 'white', padding: '10px', borderRadius: '12px' }}>
                 <i className="fas fa-user-shield fa-lg"></i>
@@ -1774,7 +1785,7 @@
             </button>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '24px' }}>
             <MetricCard icon="fa-users" title="Total Users" value={currentData.length.toLocaleString()} trend={useMockData ? "Mock Data Generated" : "+12% this week"} color="var(--primary)" />
             <MetricCard icon="fa-helmet-safety" title="Active Electricians" value="842" trend="124 currently online" color="var(--warning)" />
             <MetricCard icon="fa-indian-rupee-sign" title="Platform Revenue" value="₹12.4L" trend="3% fee taken" color="var(--success)" />
@@ -1846,7 +1857,7 @@
                 <div style={{ display: 'grid', gap: '12px', marginBottom: '32px' }}>
                   {financeData.pendingJobs.length === 0 && <p style={{ color: 'var(--text-muted)' }}>No payments pending verification.</p>}
                   {financeData.pendingJobs.map(job => (
-                    <div key={job._id} style={{ background: 'var(--secondary)', padding: '16px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div key={job._id} style={{ background: 'var(--secondary)', padding: '16px', borderRadius: '12px', display: 'flex', flexWrap: 'wrap', gap: '12px', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div>
                         <strong>{job.serviceType}</strong> - ₹{job.estimatedPrice} <br/>
                         <small>Customer: {job.customer?.name} ({job.customer?.phone})</small>
@@ -1860,7 +1871,7 @@
                 <div style={{ display: 'grid', gap: '12px' }}>
                   {financeData.pendingWithdrawals.length === 0 && <p style={{ color: 'var(--text-muted)' }}>No pending withdrawal requests.</p>}
                   {financeData.pendingWithdrawals.map(req => (
-                    <div key={req._id} style={{ background: 'var(--secondary)', padding: '16px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div key={req._id} style={{ background: 'var(--secondary)', padding: '16px', borderRadius: '12px', display: 'flex', flexWrap: 'wrap', gap: '12px', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div>
                         <strong>Electrician: {req.electrician?.name}</strong> <br/>
                         <small>Phone: {req.electrician?.phone}</small>
