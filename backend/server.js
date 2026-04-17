@@ -4,6 +4,7 @@ const cors = require('cors');
 require('dotenv').config(); // Load environment variables from .env file
 const jwt = require('jsonwebtoken');
 const http = require('http');
+const bcrypt = require('bcrypt');
 const { Server } = require('socket.io');
 
 const app = express();
@@ -49,6 +50,7 @@ mongoose.connect(MONGO_URI).then(() => {
 const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
   phone: { type: String, required: true },
+  password: { type: String, required: true },
   role: { type: String, enum: ['customer', 'electrician', 'admin'], required: true },
   totalReviews: { type: Number, default: 0 },
   averageRating: { type: Number, default: 0 }
@@ -100,20 +102,45 @@ const authenticateToken = (req, res, next) => {
 
 const api = express.Router();
 
+// POST /api/signup
+api.post('/signup', async (req, res) => {
+  try {
+    const { name, phone, password, role } = req.body;
+    if (!name || !phone || !password || !role) return res.status(400).json({ message: 'All fields are required' });
+
+    // Basic Input Validation
+    const phoneRegex = /^\d{10}$/;
+    if (!phoneRegex.test(phone)) return res.status(400).json({ message: 'Invalid phone number format. Must be 10 digits.' });
+    if (password.length < 6) return res.status(400).json({ message: 'Password must be at least 6 characters.' });
+
+    let existingUser = await User.findOne({ phone });
+    if (existingUser) return res.status(400).json({ message: 'Phone number already registered' });
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const user = new User({ name, phone, password: hashedPassword, role });
+    await user.save();
+
+    const token = jwt.sign({ userId: user._id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+    res.status(201).json({ token, user: { _id: user._id, name: user.name, phone: user.phone, role: user.role } });
+  } catch (error) {
+    res.status(500).json({ message: 'Internal server error during signup' });
+  }
+});
+
 // POST /api/login
 api.post('/login', async (req, res) => {
   try {
-    const { name, phone, role } = req.body;
-    if (!name || !phone || !role) return res.status(400).json({ message: 'Name, phone, and role required' });
+    const { phone, password, role } = req.body;
+    if (!phone || !password || !role) return res.status(400).json({ message: 'Phone, password, and role are required' });
 
-    let user = await User.findOne({ phone, role });
-    if (!user) {
-      user = new User({ name, phone, role });
-      await user.save();
-    }
+    const user = await User.findOne({ phone, role });
+    if (!user) return res.status(400).json({ message: 'Invalid credentials or wrong role' });
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) return res.status(400).json({ message: 'Invalid credentials' });
 
     const token = jwt.sign({ userId: user._id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ token, user: user.toObject() });
+    res.json({ token, user: { _id: user._id, name: user.name, phone: user.phone, role: user.role } });
   } catch (error) {
     res.status(500).json({ message: 'Internal server error during authentication' });
   }
@@ -150,6 +177,10 @@ api.post('/jobs', authenticateToken, async (req, res) => {
     });
 
     await newJob.save();
+    
+    // Broadcast the new job instantly to all connected users (electricians will listen for this)
+    io.emit('newJobAvailable', newJob);
+    
     res.status(201).json(newJob);
   } catch (error) {
     res.status(500).json({ message: 'Internal server error during booking' });

@@ -31,8 +31,8 @@
 
     /* Premium App Design Tokens */
     :root {
-      --primary: #2563eb;
-      --primary-light: #dbeafe;
+      --primary: #4f46e5;
+      --primary-light: #e0e7ff;
       --secondary: #f1f5f9;
       --surface: #ffffff;
       --border-light: #e2e8f080;
@@ -112,8 +112,15 @@
       padding: 8px 0 20px;
       flex-wrap: wrap;
       gap: 15px; /* Add gap for wrapping elements */
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(255, 255, 255, 0.8);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
       animation: slideDown 0.5s forwards;
     }
+    body.dark-mode .navbar { background: rgba(30, 41, 59, 0.8); }
 
     .logo-area {
       display: flex;
@@ -605,8 +612,7 @@
     // For local development, use 'http://localhost:5000'.
     // When you deploy, change this to your Render backend URL.
     window.API_CONFIG = {
-      // Example for a deployed backend: 'https://voltflow-backend-xyz.onrender.com'
-      BASE_URL: 'https://voltflow-backend.onrender.com'
+      BASE_URL: window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? 'http://localhost:5000' : 'https://voltflow-backend.onrender.com'
     };
   </script>
 
@@ -663,7 +669,7 @@
     // ==========================================
 
     // --- Navbar Component ---
-    function Navbar({ user, onLogout }) {
+    function Navbar({ user, onLogout, toggleTheme, isDarkMode }) {
       return (
         <div className="navbar">
           <div className="logo-area">
@@ -671,6 +677,9 @@
             <div className="logo-text">Volt<span>Flow</span></div>
           </div>
           <div className="profile-badge">
+            <button onClick={toggleTheme} title="Toggle Theme" style={{ border: 'none', background: 'var(--secondary)', width: '42px', height: '42px', borderRadius: '50%', cursor: 'pointer', color: 'var(--text-main)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border-light)' }}>
+              <i className={`fas ${isDarkMode ? 'fa-sun' : 'fa-moon'}`} style={{ fontSize: '1.2rem' }}></i>
+            </button>
             <div className="notification-icon"><i className="far fa-bell"></i></div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <span style={{ fontWeight: 600 }}>{user?.name}</span>
@@ -686,40 +695,40 @@
 
     // --- Login Component ---
     function Login({ onLoginSuccess }) {
-      const [loadingRole, setLoadingRole] = useState(null);
+      const [isLogin, setIsLogin] = useState(true);
+      const [role, setRole] = useState('customer');
+      const [name, setName] = useState('');
+      const [phone, setPhone] = useState('');
+      const [password, setPassword] = useState('');
+      const [loading, setLoading] = useState(false);
       const [error, setError] = useState(null);
 
-      const handleLogin = async (role) => {
-        setLoadingRole(role);
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        setLoading(true);
         setError(null);
         try {
-          const name = role === 'customer' ? 'Rahul Sharma' : 'Rajesh Electrician';
-          const phone = role === 'customer' ? '9876543210' : '9988776655';
+          const endpoint = isLogin ? '/login' : '/signup';
+          const body = isLogin 
+            ? { phone, password, role } 
+            : { name, phone, password, role };
 
-          const userData = await fetchJson('/login', {
+          const userData = await fetchJson(endpoint, {
             method: 'POST',
-            body: { name, phone, role }
+            body
           });
 
           if (userData && userData.token && userData.user) {
             localStorage.setItem('token', userData.token);
-            onLoginSuccess({ ...userData.user, id: userData.user?._id }, role);
+            onLoginSuccess({ ...userData.user, id: userData.user?._id }, userData.user.role);
           } else {
             throw new Error('Invalid response from server: Missing token or user data');
           }
         } catch (err) {
           setError(err.message);
         } finally {
-          setLoadingRole(null);
+          setLoading(false);
         }
-      };
-
-      const handleAdminAccess = () => {
-        const key = prompt("Enter Master Admin Key:");
-        // NOTE: This is a placeholder for a real admin login.
-        // A secure implementation requires a dedicated backend endpoint for admin authentication,
-        // not a hardcoded key in the frontend code.
-        if (key) alert("Access Denied: Admin portal requires a secure backend login.");
       };
 
       return (
@@ -729,27 +738,41 @@
             <div className="logo-text">Volt<span>Flow</span></div>
           </div>
           <div className="login-card">
-            <h1>Your Electrician, On Demand.</h1>
-            <p>Top-rated, verified professionals at your doorstep in under 30 minutes.</p>
+            <h1>{isLogin ? 'Welcome Back' : 'Create Account'}</h1>
+            <p>{isLogin ? 'Log in to your account to continue.' : 'Join the best electrician network.'}</p>
             
-            {error && <div style={{ color: 'red', marginBottom: '12px' }}>{error}</div>}
+            {error && <div style={{ color: 'white', background: 'var(--danger)', padding: '10px', borderRadius: '8px', marginBottom: '16px' }}>{error}</div>}
             
-            <button className="btn btn-block" style={{ padding: '16px' }} onClick={() => handleLogin('customer')} disabled={loadingRole !== null}>
-              <i className="fas fa-user"></i> {loadingRole === 'customer' ? 'Loading...' : 'Continue as Customer'}
-            </button>
-            
-            <div style={{ display: 'flex', alignItems: 'center', margin: '20px 0', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-              <div style={{ flex: 1, height: '1px', background: 'var(--border-light)' }}></div>
-              <span style={{ padding: '0 10px' }}>or</span>
-              <div style={{ flex: 1, height: '1px', background: 'var(--border-light)' }}></div>
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+              <button type="button" className={`btn btn-block ${role === 'customer' ? '' : 'btn-outline'}`} onClick={() => setRole('customer')} style={{ padding: '10px' }}>Customer</button>
+              <button type="button" className={`btn btn-block ${role === 'electrician' ? '' : 'btn-outline'}`} onClick={() => setRole('electrician')} style={{ padding: '10px' }}>Electrician</button>
             </div>
 
-            <button className="btn btn-outline btn-block" style={{ padding: '16px', color: 'var(--text-main)' }} onClick={() => handleLogin('electrician')} disabled={loadingRole !== null}>
-              <i className="fas fa-helmet-safety"></i> {loadingRole === 'electrician' ? 'Loading...' : "I'm an Electrician"}
-            </button>
+            <form onSubmit={handleSubmit} style={{ textAlign: 'left' }}>
+              {!isLogin && (
+                <div className="form-group">
+                  <label>Full Name</label>
+                  <input type="text" className="form-control" value={name} onChange={e => setName(e.target.value)} required placeholder="John Doe" />
+                </div>
+              )}
+              <div className="form-group">
+                <label>Phone Number</label>
+                <input type="tel" className="form-control" value={phone} onChange={e => setPhone(e.target.value)} required placeholder="1234567890" />
+              </div>
+              <div className="form-group">
+                <label>Password</label>
+                <input type="password" className="form-control" value={password} onChange={e => setPassword(e.target.value)} required placeholder="••••••••" />
+              </div>
+              <button type="submit" className="btn btn-block" disabled={loading} style={{ marginTop: '10px' }}>
+                {loading ? 'Processing...' : (isLogin ? 'Log In' : 'Sign Up')}
+              </button>
+            </form>
             
-            <div style={{ marginTop: '32px', fontSize: '0.85rem' }}>
-              <a href="#!" onClick={(e) => { e.preventDefault(); handleAdminAccess(); }} style={{ color: 'var(--text-muted)', textDecoration: 'none' }}><i className="fas fa-lock"></i> Master Admin Portal</a>
+            <div style={{ marginTop: '20px', fontSize: '0.9rem' }}>
+              {isLogin ? "Don't have an account? " : "Already have an account? "}
+              <a href="#!" onClick={(e) => { e.preventDefault(); setIsLogin(!isLogin); setError(null); }} style={{ color: 'var(--primary)', fontWeight: 'bold', textDecoration: 'none' }}>
+                {isLogin ? 'Sign Up' : 'Log In'}
+              </a>
             </div>
           </div>
         </div>
@@ -768,7 +791,7 @@
       { id: 'inverter', name: 'Inverter/UPS', icon: 'fa-battery-full' }
     ];
 
-    function CustomerHome({ user }) {
+    function CustomerHome({ user, showToast }) {
       const [selectedService, setSelectedService] = useState('wiring');
       const [address, setAddress] = useState('');
       const [coordinates, setCoordinates] = useState([77.5946, 12.9716]); 
@@ -818,7 +841,7 @@
       }, [messages]);
 
       const handleBookJob = async () => {
-        if (!address) return alert('Please enter your full address to book a service.');
+        if (!address) return showToast('Please enter your full address to book a service.', 'warning');
         setIsBooking(true);
         try {
           const job = await fetchJson('/jobs', {
@@ -826,10 +849,10 @@
             body: { serviceType: selectedService, address: address, coordinates: coordinates, estimatedPrice: 349 }
           });
           setActiveJobId(job._id);
-          alert(`Job created successfully! DB ID: ${job._id}`);
+          showToast(`Job created successfully! Searching for electricians...`, 'success');
           setJobCompleted(false);
         } catch (error) {
-          alert(error.message);
+          showToast(error.message, 'error');
         } finally {
           setIsBooking(false);
         }
@@ -845,8 +868,9 @@
           setJobCompleted(false);
           setShowRating(false);
           setRating(0);
+          showToast('Job cancelled successfully.', 'success');
         } catch (error) {
-          alert(error.message);
+          showToast(error.message, 'error');
         }
       };
 
@@ -872,16 +896,16 @@
               setCoordinates([position.coords.longitude, position.coords.latitude]);
             },
             (error) => {
-              alert('Could not detect your location. Please check browser permissions.');
+              showToast('Could not detect your location. Please check browser permissions.', 'error');
             }
           );
         } else {
-          alert('Geolocation is not supported by your browser.');
+          showToast('Geolocation is not supported by your browser.', 'error');
         }
       };
 
       const handlePayment = () => {
-        alert('Payment Processed! Thank you for using VoltFlow.');
+        showToast('Payment Processed! Thank you for using VoltFlow.', 'success');
         setShowRating(true);
       };
 
@@ -892,9 +916,9 @@
             method: 'POST',
             body: { rating }
           });
-          alert(`Thank you for your ${rating}-star feedback!`);
+          showToast(`Thank you for your ${rating}-star feedback!`, 'success');
         } catch (error) {
-          alert(error.message);
+          showToast(error.message, 'error');
         }
         setActiveJobId(null);
         setAssignedElectrician(null);
@@ -1065,7 +1089,7 @@
     }
 
     // --- Electrician Dashboard Component ---
-    function ElectricianHome({ user }) {
+    function ElectricianHome({ user, showToast }) {
       const [isOnline, setIsOnline] = useState(false);
       const [isTracking, setIsTracking] = useState(false);
       const [hasArrived, setHasArrived] = useState(false);
@@ -1117,9 +1141,18 @@
             }
           };
           checkJobs();
-          pollInterval = setInterval(checkJobs, 5000);
+
+          const handleNewJob = (job) => {
+            if (job.status === 'searching') {
+              setAvailableJob(job);
+            }
+          };
+          socket.on('newJobAvailable', handleNewJob);
+
+          return () => {
+            socket.off('newJobAvailable', handleNewJob);
+          };
         }
-        return () => clearInterval(pollInterval);
       }, [isOnline, activeJobId]);
 
       useEffect(() => {
@@ -1173,7 +1206,7 @@
           setHasArrived(false);
           setAvailableJob(null);
         } catch (error) {
-          alert(error.message);
+          showToast(error.message, 'error');
         }
       };
 
@@ -1184,9 +1217,9 @@
           setHasArrived(false);
           setActiveJobId(null);
           setMessages([]);
-          alert('Job successfully marked as completed!');
+          showToast('Job successfully marked as completed!', 'success');
         } catch (error) {
-          alert(error.message);
+          showToast(error.message, 'error');
         }
       };
 
@@ -1483,6 +1516,19 @@
     function App() {
       const [currentView, setCurrentView] = useState('login');
       const [user, setUser] = useState(null);
+      const [isDarkMode, setIsDarkMode] = useState(false);
+      const [toasts, setToasts] = useState([]);
+
+      const toggleTheme = () => {
+        setIsDarkMode(!isDarkMode);
+        document.body.classList.toggle('dark-mode');
+      };
+
+      const showToast = (message, type = 'success') => {
+        const id = Date.now();
+        setToasts((prev) => [...prev, { id, message, type }]);
+        setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4000);
+      };
 
       useEffect(() => {
         const validateSession = async () => {
@@ -1535,13 +1581,23 @@
             </div>
           ) : (
             <div style={{ animation: 'fadeIn 0.5s forwards' }}>
-              <Navbar user={user} onLogout={handleLogout} />
+              <Navbar user={user} onLogout={handleLogout} toggleTheme={toggleTheme} isDarkMode={isDarkMode} />
               <div style={{ padding: '20px 0' }}>
-                {currentView === 'customer' && <CustomerHome user={user} />}
-                {currentView === 'electrician' && <ElectricianHome user={user} />}
+                {currentView === 'customer' && <CustomerHome user={user} showToast={showToast} />}
+                {currentView === 'electrician' && <ElectricianHome user={user} showToast={showToast} />}
               </div>
             </div>
           )}
+
+          {/* Global Toast Notifications */}
+          <div id="toastContainer">
+            {toasts.map((t) => (
+              <div key={t.id} className={`toast-message show ${t.type}`}>
+                <i className={`fas ${t.type === 'error' ? 'fa-exclamation-circle' : t.type === 'warning' ? 'fa-triangle-exclamation' : 'fa-check-circle'}`}></i>
+                {t.message}
+              </div>
+            ))}
+          </div>
         </div>
       );
     }
