@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-  <title>VoltFlow — Electrician on Demand</title>
+  <title>WATTZEN — POWER YOUR NETWORK</title>
   <!-- Fonts & Icons -->
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
@@ -257,7 +257,7 @@
     /* Service Grid */
     .service-grid {
       display: grid;
-      grid-template-columns: repeat(2, 1fr); /* Default to 2 columns for mobile */
+      grid-template-columns: repeat(auto-fill, minmax(85px, 1fr));
       gap: 14px;
       margin: 12px 0 4px;
     }
@@ -284,7 +284,7 @@
       border-radius: 16px;
       margin-bottom: 8px;
       transition: all 0.2s;
-      font-size: 1.2rem; /* Adjust icon size for mobile */
+      font-size: 1.4rem;
     }
     .service-item span {
       font-weight: 600;
@@ -295,6 +295,38 @@
       border: 2px solid var(--primary);
       background: #eff6ff;
       box-shadow: 0 4px 12px rgba(37,99,235,0.1);
+    }
+    
+    /* Category Tabs */
+    .category-tabs {
+      display: flex;
+      gap: 12px;
+      overflow-x: auto;
+      padding-bottom: 12px;
+      margin-top: 16px;
+      scrollbar-width: none;
+    }
+    .category-tabs::-webkit-scrollbar { display: none; }
+    .category-tab {
+      padding: 10px 18px;
+      background: var(--surface);
+      border: 1px solid var(--border-light);
+      border-radius: 30px;
+      white-space: nowrap;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      transition: all 0.3s;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .category-tab.active {
+      background: var(--primary);
+      color: white;
+      border-color: var(--primary);
+      box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
     }
 
     /* address bar */
@@ -610,9 +642,9 @@
     // --- Deployment Configuration ---
     // This object centralizes the backend URL.
     // For local development, use 'http://localhost:5000'.
-    // When you deploy, change this to your Render backend URL.
+  // When you deploy, change this to your deployed backend URL.
     window.API_CONFIG = {
-      BASE_URL: window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? 'http://localhost:5000' : 'https://voltflow-backend.onrender.com'
+    BASE_URL: window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? 'http://localhost:5000' : 'https://wattzen.vercel.app'
     };
   </script>
 
@@ -673,8 +705,10 @@
       return (
         <div className="navbar">
           <div className="logo-area">
-            <div className="logo-icon"><i className="fas fa-bolt-lightning"></i></div>
-            <div className="logo-text">Volt<span>Flow</span></div>
+            <div className="logo-icon" style={{ background: 'transparent', boxShadow: 'none' }}>
+              <img src="wmremove-transformed.png" alt="WATTZEN Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+            </div>
+            <div className="logo-text">WATT<span>ZEN</span></div>
           </div>
           <div className="profile-badge">
             <button onClick={toggleTheme} title="Toggle Theme" style={{ border: 'none', background: 'var(--secondary)', width: '42px', height: '42px', borderRadius: '50%', cursor: 'pointer', color: 'var(--text-main)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border-light)' }}>
@@ -733,10 +767,13 @@
 
       return (
         <div className="login-container">
-          <div className="logo-area" style={{ justifyContent: 'center', marginBottom: '32px', transform: 'scale(1.2)' }}>
-            <div className="logo-icon"><i className="fas fa-bolt-lightning"></i></div>
-            <div className="logo-text">Volt<span>Flow</span></div>
+          <div className="logo-area" style={{ justifyContent: 'center', marginBottom: '8px', transform: 'scale(1.2)' }}>
+            <div className="logo-icon" style={{ background: 'transparent', boxShadow: 'none' }}>
+              <img src="wmremove-transformed.png" alt="WATTZEN Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+            </div>
+            <div className="logo-text">WATT<span>ZEN</span></div>
           </div>
+          <div style={{ textAlign: 'center', color: 'var(--primary)', fontWeight: '700', letterSpacing: '1.5px', marginBottom: '32px', fontSize: '0.85rem' }}>POWER YOUR NETWORK</div>
           <div className="login-card">
             <h1>{isLogin ? 'Welcome Back' : 'Create Account'}</h1>
             <p>{isLogin ? 'Log in to your account to continue.' : 'Join the best electrician network.'}</p>
@@ -781,14 +818,30 @@
 
     // --- Customer Dashboard Component ---
     const SERVICES = [
-      { id: 'wiring', name: 'Wiring Issue', icon: 'fa-plug-circle-bolt' },
-      { id: 'fan', name: 'Fan Repair', icon: 'fa-fan' },
-      { id: 'switch', name: 'Switchboard', icon: 'fa-toggle-on' },
-      { id: 'install', name: 'Installation', icon: 'fa-screwdriver-wrench' },
-      { id: 'ac', name: 'AC Servicing', icon: 'fa-snowflake' },
-      { id: 'ev', name: 'EV Charger', icon: 'fa-car-battery' },
-      { id: 'smart', name: 'Smart Home', icon: 'fa-house-signal' },
-      { id: 'inverter', name: 'Inverter/UPS', icon: 'fa-battery-full' }
+      // Repairs
+      { id: 'wiring', name: 'Wiring', icon: 'fa-plug-circle-bolt', category: 'repairs' },
+      { id: 'switch', name: 'Switches', icon: 'fa-toggle-on', category: 'repairs' },
+      { id: 'fan_repair', name: 'Fans', icon: 'fa-fan', category: 'repairs' },
+      { id: 'mcb', name: 'MCB/Fuse', icon: 'fa-bolt', category: 'repairs' },
+      { id: 'short_circuit', name: 'Shorts', icon: 'fa-fire-flame-curved', category: 'repairs' },
+      { id: 'meter', name: 'Meters', icon: 'fa-gauge-high', category: 'repairs' },
+      { id: 'earthing', name: 'Earthing', icon: 'fa-plug-circle-minus', category: 'repairs' },
+      // Appliances
+      { id: 'ac', name: 'AC Setup', icon: 'fa-snowflake', category: 'appliances' },
+      { id: 'tv', name: 'TV Mount', icon: 'fa-tv', category: 'appliances' },
+      { id: 'fridge', name: 'Fridge', icon: 'fa-temperature-low', category: 'appliances' },
+      { id: 'water_purifier', name: 'RO Filter', icon: 'fa-faucet-drip', category: 'appliances' },
+      { id: 'chimney', name: 'Chimney', icon: 'fa-fire-burner', category: 'appliances' },
+      { id: 'geyser', name: 'Geyser', icon: 'fa-hot-tub-person', category: 'appliances' },
+      { id: 'washing_machine', name: 'Washers', icon: 'fa-shirt', category: 'appliances' },
+      { id: 'microwave', name: 'Microwave', icon: 'fa-kitchen-set', category: 'appliances' },
+      { id: 'ev', name: 'EV Charger', icon: 'fa-charging-station', category: 'appliances' },
+      { id: 'smart', name: 'Smart Hub', icon: 'fa-house-signal', category: 'appliances' },
+      // Projects
+      { id: 'home_wiring', name: 'Home Wiring', icon: 'fa-house-chimney', category: 'projects', team: true },
+      { id: 'commercial', name: 'Commercial', icon: 'fa-building', category: 'projects', team: true },
+      { id: 'solar', name: 'Solar Panel', icon: 'fa-solar-panel', category: 'projects', team: true },
+      { id: 'renovation', name: 'Renovation', icon: 'fa-hammer', category: 'projects', team: true }
     ];
 
     function CustomerHome({ user, showToast }) {
@@ -800,12 +853,26 @@
       const [chatInput, setChatInput] = useState('');
       const [activeJobId, setActiveJobId] = useState(null);
       const [isBooking, setIsBooking] = useState(false);
-      const [assignedElectrician, setAssignedElectrician] = useState(null);
+      const [assignedElectricians, setAssignedElectricians] = useState([]);
       const [jobCompleted, setJobCompleted] = useState(false);
+      const [teamStatusMessage, setTeamStatusMessage] = useState('');
+      const [isTeamFull, setIsTeamFull] = useState(false);
       const [showRating, setShowRating] = useState(false);
       const [rating, setRating] = useState(0);
       const [hoverRating, setHoverRating] = useState(0);
       const chatContainerRef = useRef(null);
+      
+      const [activeCategory, setActiveCategory] = useState('repairs');
+      const [teamSize, setTeamSize] = useState(1);
+
+      const categories = [
+        { id: 'repairs', name: 'Quick Repairs', icon: 'fa-screwdriver-wrench' },
+        { id: 'appliances', name: 'Appliance Setup', icon: 'fa-plug' },
+        { id: 'projects', name: 'Big Projects', icon: 'fa-hard-hat' }
+      ];
+
+      const currentServices = SERVICES.filter(s => s.category === activeCategory);
+      const selectedServiceObj = SERVICES.find(s => s.id === selectedService);
 
       useEffect(() => {
         if (!activeJobId) return;
@@ -816,10 +883,17 @@
           setLiveLocation(data);
         });
         socket.on('receiveMessage', (data) => {
-          setMessages((prev) => [...prev, { ...data, sender: 'other' }]);
+          setMessages((prev) => [...prev, { ...data, isSelf: false }]);
         });
         socket.on('jobAccepted', (data) => {
-          setAssignedElectrician(data.electrician);
+          setAssignedElectricians(data.electricians || []);
+          setIsTeamFull(true);
+          setTeamStatusMessage(''); // Clear progress message
+        });
+        socket.on('teamMemberJoined', (data) => {
+            setAssignedElectricians(prev => [...prev, data.electrician]);
+            setTeamStatusMessage(`${data.currentSize} of ${data.teamSize} electricians have joined.`);
+            showToast(`${data.electrician.name} has joined the job!`, 'success');
         });
         socket.on('jobCompleted', () => {
           setJobCompleted(true);
@@ -830,6 +904,7 @@
           socket.off('receiveMessage');
           socket.off('jobAccepted');
           socket.off('jobCompleted');
+          socket.off('teamMemberJoined');
           socket.disconnect();
         };
       }, [activeJobId]);
@@ -840,17 +915,24 @@
         }
       }, [messages]);
 
+      useEffect(() => {
+        setTeamSize(1);
+      }, [selectedService]);
+
       const handleBookJob = async () => {
         if (!address) return showToast('Please enter your full address to book a service.', 'warning');
         setIsBooking(true);
+        
+        const jobDescription = selectedServiceObj.team ? `${selectedServiceObj.name} (Team of ${teamSize})` : selectedServiceObj.name;
         try {
           const job = await fetchJson('/jobs', {
             method: 'POST',
-            body: { serviceType: selectedService, address: address, coordinates: coordinates, estimatedPrice: 349 }
+            body: { serviceType: selectedService, address: address, coordinates: coordinates, estimatedPrice: selectedServiceObj.team ? 4500 : 349, teamSize: teamSize }
           });
           setActiveJobId(job._id);
           showToast(`Job created successfully! Searching for electricians...`, 'success');
           setJobCompleted(false);
+          setIsTeamFull(false);
         } catch (error) {
           showToast(error.message, 'error');
         } finally {
@@ -862,9 +944,11 @@
         try {
           await fetchJson(`/jobs/${activeJobId}/cancel`, { method: 'PUT' });
           setActiveJobId(null);
-          setAssignedElectrician(null);
+          setAssignedElectricians([]);
+          setTeamStatusMessage('');
           setLiveLocation(null);
           setMessages([]);
+          setIsTeamFull(false);
           setJobCompleted(false);
           setShowRating(false);
           setRating(0);
@@ -879,12 +963,12 @@
         const msgData = {
           jobId: activeJobId,
           senderId: user.id || user._id,
-          sender: user?.name || 'Customer',
+          senderName: user?.name || 'Customer',
           text: chatInput,
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         };
         socket.emit('sendMessage', msgData);
-        setMessages((prev) => [...prev, { ...msgData, sender: 'self' }]);
+        setMessages((prev) => [...prev, { ...msgData, isSelf: true }]);
         setChatInput('');
       };
 
@@ -905,28 +989,37 @@
       };
 
       const handlePayment = () => {
-        showToast('Payment Processed! Thank you for using VoltFlow.', 'success');
+        showToast('Payment Processed! Thank you for using WATTZEN.', 'success');
         setShowRating(true);
       };
 
       const handleSubmitRating = async () => {
         try {
-          const electricianId = assignedElectrician.id || assignedElectrician._id;
+          // For now, we'll rate the first electrician in the team. A future update could allow rating each member.
+          const electricianId = assignedElectricians[0]?.id || assignedElectricians[0]?._id;
+          if (!electricianId) {
+            showToast('No electrician found to rate.', 'error');
+            return;
+          }
           await fetchJson(`/users/${electricianId}/rate`, {
             method: 'POST',
             body: { rating }
           });
           showToast(`Thank you for your ${rating}-star feedback!`, 'success');
+          
+          // Only clear state upon successful rating submission
+          setActiveJobId(null);
+          setAssignedElectricians([]);
+          setTeamStatusMessage('');
+          setLiveLocation(null);
+          setJobCompleted(false);
+          setIsTeamFull(false);
+          setMessages([]);
+          setShowRating(false);
+          setRating(0);
         } catch (error) {
           showToast(error.message, 'error');
         }
-        setActiveJobId(null);
-        setAssignedElectrician(null);
-        setLiveLocation(null);
-        setJobCompleted(false);
-        setMessages([]);
-        setShowRating(false);
-        setRating(0);
       };
 
       return (
@@ -948,10 +1041,26 @@
                   <i className="fas fa-gem"></i> Premium
                 </span>
               </div>
-              <p style={{ color: 'var(--text-muted)', marginBottom: '16px' }}>What do you need help with today? Choose from our expanded catalog.</p>
+              <p style={{ color: 'var(--text-muted)', marginBottom: '8px' }}>What do you need help with today? Choose from our expanded catalog.</p>
               
-              <div className="service-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px' }}>
-                {SERVICES.map(s => (
+              <div className="category-tabs">
+                {categories.map(cat => (
+                  <div 
+                    key={cat.id} 
+                    className={`category-tab ${activeCategory === cat.id ? 'active' : ''}`}
+                    onClick={() => {
+                      setActiveCategory(cat.id);
+                      const foundService = SERVICES.find(s => s.category === cat.id);
+                      if (foundService) setSelectedService(foundService.id); else setSelectedService(null);
+                    }}
+                  >
+                    <i className={`fas ${cat.icon}`}></i> {cat.name}
+                  </div>
+                ))}
+              </div>
+
+              <div className="service-grid">
+                {currentServices.map(s => (
                   <div 
                     key={s.id} 
                     className={`service-item ${selectedService === s.id ? 'active' : ''}`} 
@@ -970,6 +1079,20 @@
                 ))}
               </div>
 
+              {selectedServiceObj?.team && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--secondary)', padding: '16px', borderRadius: '16px', marginTop: '16px', border: '1px dashed var(--primary)' }}>
+                  <div>
+                    <strong style={{ display: 'block', color: 'var(--text-main)' }}>Project Team Required</strong>
+                    <small style={{ color: 'var(--text-muted)' }}>How many electricians do you need?</small>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'var(--surface)', padding: '6px', borderRadius: '20px', boxShadow: 'var(--shadow-sm)' }}>
+                    <button onClick={() => setTeamSize(Math.max(1, teamSize - 1))} style={{ width: '32px', height: '32px', borderRadius: '50%', border: 'none', background: 'var(--secondary)', color: 'var(--text-main)', cursor: 'pointer', fontWeight: 'bold' }}>-</button>
+                    <strong style={{ width: '20px', textAlign: 'center', color: 'var(--primary)' }}>{teamSize}</strong>
+                    <button onClick={() => setTeamSize(Math.min(10, teamSize + 1))} style={{ width: '32px', height: '32px', borderRadius: '50%', border: 'none', background: 'var(--primary)', color: 'white', cursor: 'pointer', fontWeight: 'bold' }}>+</button>
+                  </div>
+                </div>
+              )}
+
               <div className="address-bar">
                 <i className="fas fa-location-dot"></i>
                 <input type="text" className="address-input" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Enter your full address..." />
@@ -980,20 +1103,25 @@
                 <button className="btn btn-block" style={{ marginTop: '16px' }} onClick={handleBookJob} disabled={isBooking}>
                   <i className="fas fa-bolt"></i> {isBooking ? 'Creating Job...' : 'Find Electricians Near Me'}
                 </button>
-              ) : !assignedElectrician ? (
+              ) : !isTeamFull ? (
                 <div style={{ marginTop: '16px', padding: '16px', background: 'var(--secondary)', borderRadius: '12px', textAlign: 'center', border: '1px dashed var(--primary)' }}>
                   <i className="fas fa-spinner fa-spin" style={{ color: 'var(--primary)', marginBottom: '8px', fontSize: '1.5rem' }}></i>
                   <div style={{ fontWeight: 'bold' }}>Searching for nearby electricians...</div>
+                  {teamStatusMessage && <div style={{ fontSize: '0.9rem', color: 'var(--text-main)', marginTop: '8px' }}>{teamStatusMessage}</div>}
                   <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Tracking Job ID: <span style={{ fontFamily: 'monospace' }}>{activeJobId}</span></div>
                   <button className="btn btn-outline" style={{ marginTop: '12px', borderColor: 'var(--danger)', color: 'var(--danger)', padding: '6px 12px', fontSize: '0.85rem' }} onClick={handleCancelJob}>
                     Cancel Search
                   </button>
                 </div>
               ) : (
-                <div style={{ marginTop: '16px', padding: '16px', background: '#ecfdf5', borderRadius: '12px', textAlign: 'center', border: '1px solid var(--success)' }}>
+                <div style={{ marginTop: '16px', padding: '16px', background: '#ecfdf5', borderRadius: '12px', border: '1px solid var(--success)' }}>
                   <i className="fas fa-check-circle" style={{ color: 'var(--success)', marginBottom: '8px', fontSize: '1.5rem' }}></i>
-                  <div style={{ fontWeight: 'bold', color: 'var(--success)' }}>Job Accepted!</div>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--text-main)' }}>{assignedElectrician.name} is preparing to depart.</div>
+                  <div style={{ fontWeight: 'bold', color: 'var(--success)', textAlign: 'center' }}>Your Team is Assembled!</div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-main)', marginTop: '8px' }}>
+                    {assignedElectricians.map(e => (
+                        <div key={e._id} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--surface)', padding: '8px', borderRadius: '8px', marginBottom: '4px' }}><i className="fas fa-user-hard-hat" style={{color: 'var(--primary)'}}></i> <strong>{e.name}</strong> ({e.phone})</div>
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -1001,7 +1129,7 @@
                 showRating ? (
                   <div style={{ marginTop: '16px', padding: '24px', background: 'var(--surface)', borderRadius: '12px', border: '2px solid var(--primary)', textAlign: 'center', boxShadow: 'var(--shadow-md)' }}>
                     <h3 style={{ color: 'var(--text-main)', margin: '0 0 8px 0' }}>Rate your Experience</h3>
-                    <p style={{ color: 'var(--text-muted)', marginBottom: '16px' }}>How was your service with <strong>{assignedElectrician?.name}</strong>?</p>
+                    <p style={{ color: 'var(--text-muted)', marginBottom: '16px' }}>How was your service with <strong>{assignedElectricians[0]?.name}</strong> and team?</p>
                     <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', fontSize: '2.5rem', marginBottom: '24px' }}>
                       {[1, 2, 3, 4, 5].map((star) => (
                         <i 
@@ -1024,14 +1152,14 @@
                 ) : (
                   <div style={{ marginTop: '16px', padding: '24px', background: 'var(--surface)', borderRadius: '12px', border: '2px solid var(--primary)', textAlign: 'center', boxShadow: 'var(--shadow-md)' }}>
                     <h3 style={{ color: 'var(--primary)', margin: '0 0 8px 0' }}><i className="fas fa-file-invoice-dollar"></i> Invoice Summary</h3>
-                    <p style={{ color: 'var(--text-muted)', marginBottom: '16px' }}>Service completed by <strong>{assignedElectrician?.name}</strong>.</p>
+                    <p style={{ color: 'var(--text-muted)', marginBottom: '16px' }}>Service completed by <strong>{assignedElectricians[0]?.name}</strong> and team.</p>
                     <h2 style={{ fontSize: '2.5rem', color: 'var(--text-main)', margin: '0 0 20px 0' }}>₹349</h2>
                     <button className="btn btn-block" onClick={handlePayment}>
                       <i className="fas fa-credit-card"></i> Pay & Rate
                     </button>
                   </div>
                 )
-              ) : (assignedElectrician || liveLocation) && (
+              ) : (assignedElectricians.length > 0 || liveLocation) && (
                 <React.Fragment>
                   {liveLocation && (
                     <div style={{ marginTop: '16px', padding: '16px', background: 'var(--primary-light)', border: '1px solid var(--primary)', borderRadius: '12px' }}>
@@ -1047,15 +1175,20 @@
                   
                   <div style={{ marginTop: '16px', background: 'var(--surface)', border: '1px solid var(--border-light)', borderRadius: '12px', overflow: 'hidden' }}>
                     <div style={{ background: 'var(--primary)', color: 'white', padding: '10px 16px', fontWeight: 'bold' }}>
-                      <i className="fas fa-comments"></i> Message Electrician
+                      <i className="fas fa-comments"></i> Team & Customer Chat
                     </div>
                     <div ref={chatContainerRef} style={{ padding: '16px', height: '200px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', background: 'var(--secondary)' }}>
-                      {messages.map((m, i) => (
-                        <div key={i} style={{ alignSelf: m.sender === 'self' ? 'flex-end' : 'flex-start', background: m.sender === 'self' ? 'var(--primary)' : 'var(--surface)', color: m.sender === 'self' ? 'white' : 'var(--text-main)', padding: '8px 12px', borderRadius: '12px', maxWidth: '80%', border: m.sender === 'self' ? 'none' : '1px solid var(--border-light)' }}>
+                    {messages.map((m, i) => {
+                      const isSelf = m.isSelf || m.sender === 'self';
+                      const senderName = m.senderName || m.sender;
+                      return (
+                        <div key={i} style={{ alignSelf: isSelf ? 'flex-end' : 'flex-start', background: isSelf ? 'var(--primary)' : 'var(--surface)', color: isSelf ? 'white' : 'var(--text-main)', padding: '8px 12px', borderRadius: '12px', maxWidth: '80%', border: isSelf ? 'none' : '1px solid var(--border-light)' }}>
+                          {!isSelf && <div style={{ fontSize: '0.75rem', fontWeight: 'bold', marginBottom: '4px', opacity: 0.8 }}>{senderName}</div>}
                           <div style={{ fontSize: '0.9rem' }}>{m.text}</div>
                           <div style={{ fontSize: '0.7rem', opacity: 0.8, textAlign: 'right', marginTop: '4px' }}>{m.time}</div>
                         </div>
-                      ))}
+                      );
+                    })}
                       {messages.length === 0 && <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem', margin: 'auto' }}>No messages yet. Say hi!</div>}
                     </div>
                     <div style={{ padding: '10px', display: 'flex', gap: '8px', borderTop: '1px solid var(--border-light)' }}>
@@ -1092,27 +1225,51 @@
     function ElectricianHome({ user, showToast }) {
       const [isOnline, setIsOnline] = useState(false);
       const [isTracking, setIsTracking] = useState(false);
-      const [hasArrived, setHasArrived] = useState(false);
       const [messages, setMessages] = useState([]);
       const [chatInput, setChatInput] = useState('');
       const [activeJobId, setActiveJobId] = useState(null);
       const [availableJob, setAvailableJob] = useState(null);
+      const [currentJob, setCurrentJob] = useState(null); // Will hold the full job object
       const chatContainerRef = useRef(null);
+
+      const jobStatus = currentJob?.status;
+      const teamSize = currentJob?.teamSize || 1;
+      const currentTeamSize = currentJob?.electricians?.length || 0;
+      const isTeamJob = teamSize > 1;
+      const isTeamWaiting = isTeamJob && jobStatus === 'searching' && currentTeamSize < teamSize;
+      const isJobActive = jobStatus === 'assigned' || jobStatus === 'in_progress';
+      const hasArrived = isJobActive && !isTracking; // Simplified logic for arrival
 
       useEffect(() => {
         if (isOnline) {
           socket.connect();
           socket.on('receiveMessage', (data) => {
-            setMessages((prev) => [...prev, { ...data, sender: 'other' }]);
-            if (!isTracking && !hasArrived) setHasArrived(true); // Auto-show chat if customer messages after arrival
+            setMessages((prev) => [...prev, { ...data, isSelf: false }]);
+          });
+          socket.on('jobAccepted', (data) => {
+            // This event fires when the team is full. If this electrician is part of the team, update their state.
+            if (data.electricians.some(e => String(e._id) === String(user._id) || String(e.id) === String(user._id))) {
+                setCurrentJob(prev => ({...prev, status: 'assigned', electricians: data.electricians}));
+                setIsTracking(true); // All members start tracking when team is full
+                showToast('Team is full! Job is now active.', 'success');
+            }
+          });
+          socket.on('jobCancelled', () => {
+            showToast('The customer cancelled the job.', 'warning');
+            setIsTracking(false);
+            setActiveJobId(null);
+            setCurrentJob(null);
+            setAvailableJob(null);
+            setMessages([]);
           });
         } else {
           setIsTracking(false);
-          setHasArrived(false);
           socket.disconnect();
         }
         return () => {
           socket.off('receiveMessage');
+          socket.off('jobAccepted');
+          socket.off('jobCancelled');
           socket.disconnect();
         };
       }, [isOnline]);
@@ -1125,7 +1282,7 @@
 
       useEffect(() => {
         let pollInterval;
-        if (isOnline && !activeJobId) {
+        if (isOnline && !currentJob) {
           const checkJobs = async () => {
             try {
               const job = await fetchJson('/jobs/available?latitude=12.9716&longitude=77.5946&maxDistance=15');
@@ -1153,7 +1310,7 @@
             socket.off('newJobAvailable', handleNewJob);
           };
         }
-      }, [isOnline, activeJobId]);
+      }, [isOnline, currentJob]);
 
       useEffect(() => {
         if (chatContainerRef.current) {
@@ -1177,7 +1334,6 @@
             });
             if (currentDist <= 0) {
               setIsTracking(false);
-              setHasArrived(true);
             }
           }, 3000);
         }
@@ -1189,22 +1345,21 @@
         const msgData = {
           jobId: activeJobId,
           senderId: user.id || user._id,
-          sender: user?.name || 'Electrician',
+          senderName: user?.name || 'Electrician',
           text: chatInput,
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         };
         socket.emit('sendMessage', msgData);
-        setMessages((prev) => [...prev, { ...msgData, sender: 'self' }]);
+        setMessages((prev) => [...prev, { ...msgData, isSelf: true }]);
         setChatInput('');
       };
 
       const handleAcceptJob = async () => {
         try {
-          await fetchJson(`/jobs/${availableJob._id}/accept`, { method: 'PUT' });
+          const acceptedJob = await fetchJson(`/jobs/${availableJob._id}/accept`, { method: 'PUT' });
           setActiveJobId(availableJob._id); // Link the job and join the chat room only AFTER accepting
-          setIsTracking(true);
-          setHasArrived(false);
           setAvailableJob(null);
+          setCurrentJob(acceptedJob); // Set the full job object
         } catch (error) {
           showToast(error.message, 'error');
         }
@@ -1214,8 +1369,8 @@
         try {
           await fetchJson(`/jobs/${activeJobId}/complete`, { method: 'PUT' });
           setIsTracking(false);
-          setHasArrived(false);
           setActiveJobId(null);
+          setCurrentJob(null);
           setMessages([]);
           showToast('Job successfully marked as completed!', 'success');
         } catch (error) {
@@ -1245,7 +1400,7 @@
               </div>
             </div>
 
-            {isOnline && !activeJobId && (
+            {isOnline && !currentJob && (
               <div className="card" style={{ animationDelay: '0.1s', border: 'none', background: 'var(--primary-light)', boxShadow: 'none' }}>
                 <div style={{ textAlign: 'center', padding: '30px 20px' }}>
                   <div style={{ width: '80px', height: '80px', background: 'var(--surface)', borderRadius: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px', boxShadow: '0 0 0 10px rgba(255,255,255,0.5)' }}>
@@ -1269,22 +1424,28 @@
               </div>
             )}
 
-            {activeJobId && (
+            {currentJob && (
               <div className="card" style={{ animationDelay: '0.1s', border: '2px solid var(--success)', background: '#ecfdf5' }}>
                 <div style={{ textAlign: 'center', padding: '20px' }}>
-                  {isTracking ? (
+                  {isTeamWaiting ? (
+                    <React.Fragment>
+                        <i className="fas fa-users fa-3x" style={{ color: 'var(--primary)', marginBottom: '16px' }}></i>
+                        <h4 style={{ color: 'var(--primary)' }}>Waiting for Team</h4>
+                        <p style={{ color: 'var(--text-main)' }}>{currentTeamSize} of {teamSize} electricians have joined. The job will start when the team is full.</p>
+                    </React.Fragment>
+                  ) : isTracking ? (
                     <React.Fragment>
                       <i className="fas fa-location-arrow fa-fade fa-3x" style={{ color: 'var(--success)', marginBottom: '16px' }}></i>
                       <h4 style={{ color: 'var(--success)' }}>En Route to Customer</h4>
                       <p style={{ color: 'var(--text-main)' }}>Live location sharing is active. The customer is seeing your approach!</p>
                     </React.Fragment>
-                  ) : (
+                  ) : hasArrived ? (
                     <React.Fragment>
                       <i className="fas fa-map-pin fa-3x" style={{ color: 'var(--primary)', marginBottom: '16px' }}></i>
                       <h4 style={{ color: 'var(--primary)' }}>You Have Arrived</h4>
                       <p style={{ color: 'var(--text-main)' }}>You can now begin the service. Message the customer if needed.</p>
                     </React.Fragment>
-                  )}
+                  ) : null}
                   <button className="btn" style={{ marginTop: '16px', marginLeft: '12px', background: 'var(--success)' }} onClick={handleCompleteJob}>
                     <i className="fas fa-check-circle"></i> Mark as Completed
                   </button>
@@ -1292,15 +1453,20 @@
             
             <div style={{ marginTop: '16px', background: 'var(--surface)', border: '1px solid var(--border-light)', borderRadius: '12px', overflow: 'hidden' }}>
               <div style={{ background: 'var(--primary)', color: 'white', padding: '10px 16px', fontWeight: 'bold' }}>
-                <i className="fas fa-comments"></i> Message Customer
+                <i className="fas fa-comments"></i> Team & Customer Chat
               </div>
               <div ref={chatContainerRef} style={{ padding: '16px', height: '200px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', background: 'var(--secondary)' }}>
-                {messages.map((m, i) => (
-                  <div key={i} style={{ alignSelf: m.sender === 'self' ? 'flex-end' : 'flex-start', background: m.sender === 'self' ? 'var(--primary)' : 'var(--surface)', color: m.sender === 'self' ? 'white' : 'var(--text-main)', padding: '8px 12px', borderRadius: '12px', maxWidth: '80%', border: m.sender === 'self' ? 'none' : '1px solid var(--border-light)' }}>
-                    <div style={{ fontSize: '0.9rem' }}>{m.text}</div>
-                    <div style={{ fontSize: '0.7rem', opacity: 0.8, textAlign: 'right', marginTop: '4px' }}>{m.time}</div>
-                  </div>
-                ))}
+                {messages.map((m, i) => {
+                  const isSelf = m.isSelf || m.sender === 'self';
+                  const senderName = m.senderName || m.sender;
+                  return (
+                    <div key={i} style={{ alignSelf: isSelf ? 'flex-end' : 'flex-start', background: isSelf ? 'var(--primary)' : 'var(--surface)', color: isSelf ? 'white' : 'var(--text-main)', padding: '8px 12px', borderRadius: '12px', maxWidth: '80%', border: isSelf ? 'none' : '1px solid var(--border-light)' }}>
+                      {!isSelf && <div style={{ fontSize: '0.75rem', fontWeight: 'bold', marginBottom: '4px', opacity: 0.8 }}>{senderName}</div>}
+                      <div style={{ fontSize: '0.9rem' }}>{m.text}</div>
+                      <div style={{ fontSize: '0.7rem', opacity: 0.8, textAlign: 'right', marginTop: '4px' }}>{m.time}</div>
+                    </div>
+                  );
+                })}
                 {messages.length === 0 && <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem', margin: 'auto' }}>No messages yet. Send an update!</div>}
               </div>
               <div style={{ padding: '10px', display: 'flex', gap: '8px', borderTop: '1px solid var(--border-light)' }}>
@@ -1373,15 +1539,13 @@
     }
 
     // --- Admin Dashboard Components ---
-    const mockDB = [
-      { id: 'USR-1001', type: 'Customer', name: 'Rahul Sharma', phone: '+91 9876543210', pass: 'bcrypt_$2a$12$Kx...', location: 'Koramangala, BLR', service: 'Wiring Issue', payment: '₹349 (Paid)', status: 'Active' },
-      { id: 'ELC-2041', type: 'Electrician', name: 'Rajesh Kumar', phone: '+91 9988776655', pass: 'bcrypt_$2a$12$Lp...', location: 'HSR Layout, BLR', service: 'N/A', payment: '₹1250 (Earned)', status: 'Online' },
-      { id: 'USR-1002', type: 'Customer', name: 'Anita Desai', phone: '+91 9123456780', pass: 'bcrypt_$2a$12$Zq...', location: 'Indiranagar, BLR', service: 'AC Servicing', payment: '₹950 (Pending)', status: 'Searching' },
-    ];
-
     const mockLogs = [
       { time: '10:42:01 AM', level: 'INFO', src: 'AuthService', event: 'User Login', details: 'ELC-2041 authenticated successfully.' },
-      { time: '10:45:12 AM', level: 'WARN', src: 'GeoTracker', event: 'High Latency', details: 'Location tracking API response > 500ms' }
+    { time: '10:45:12 AM', level: 'WARN', src: 'GeoTracker', event: 'High Latency', details: 'Location tracking API response > 500ms' },
+    { time: '10:48:33 AM', level: 'INFO', src: 'JobService', event: 'Job Created', details: 'USR-1004 requested Smart Home setup.' },
+    { time: '10:50:05 AM', level: 'INFO', src: 'JobMatching', event: 'Electrician Assigned', details: 'ELC-2042 accepted job from USR-1004.' },
+    { time: '10:55:20 AM', level: 'ERROR', src: 'PaymentGateway', event: 'Transaction Failed', details: 'Payment timeout for USR-1002.' },
+    { time: '11:02:15 AM', level: 'INFO', src: 'AuthService', event: 'User Logout', details: 'ELC-2043 disconnected.' }
     ];
 
     function MetricCard({ icon, title, value, trend, color }) {
@@ -1421,15 +1585,106 @@
       );
     }
 
-    function AdminPanel({ user, onLogout }) {
+    const generateMockUsers = () => {
+      const firstNames = ['Rahul', 'Priya', 'Amit', 'Sneha', 'Vikram', 'Anita', 'Karan', 'Neha', 'Rajesh', 'Pooja', 'Suresh', 'Kavita', 'Ramesh', 'Riya', 'Mohit', 'Anjali', 'Deepak', 'Swati', 'Sanjay', 'Meera'];
+      const lastNames = ['Sharma', 'Patel', 'Verma', 'Reddy', 'Singh', 'Desai', 'Malhotra', 'Kapoor', 'Kumar', 'Jain', 'Gupta', 'Rao', 'Iyer', 'Menon', 'Nair', 'Bhat', 'Joshi', 'Chawla', 'Das', 'Sen'];
+      
+      const mockUsers = [];
+      for (let i = 1; i <= 125; i++) {
+        const isCustomer = Math.random() > 0.35;
+        const fName = firstNames[Math.floor(Math.random() * firstNames.length)];
+        const lName = lastNames[Math.floor(Math.random() * lastNames.length)];
+        mockUsers.push({
+          _id: `MOCK-${1000 + i}`,
+          role: isCustomer ? 'customer' : 'electrician',
+          name: `${fName} ${lName}`,
+          phone: `+91 9${Math.floor(100000000 + Math.random() * 900000000)}`,
+          status: Math.random() > 0.2 ? 'Active' : 'Offline'
+        });
+      }
+      return mockUsers;
+    };
+
+    function AdminPanel({ user, onLogout, showToast }) {
       const [activeTab, setActiveTab] = useState('database');
       const [searchTerm, setSearchTerm] = useState('');
+      const [liveData, setLiveData] = useState([]);
+      const [mockData, setMockData] = useState([]);
+      const [useMockData, setUseMockData] = useState(false);
+      const [isLoading, setIsLoading] = useState(true);
+      const [isDownloading, setIsDownloading] = useState(false);
 
-      const filteredDB = mockDB.filter(row => 
+      useEffect(() => {
+        const fetchUsers = async () => {
+          try {
+            setIsLoading(true);
+            const users = await fetchJson('/admin/users');
+            setLiveData(users);
+          } catch (error) {
+            showToast(`Failed to fetch users: ${error.message}`, 'error');
+          } finally {
+            setIsLoading(false);
+          }
+        };
+
+        fetchUsers();
+        setMockData(generateMockUsers());
+      }, []);
+
+      const currentData = useMockData ? mockData : liveData;
+
+      const filteredDB = currentData.filter(row => 
         Object.values(row).some(val =>
           val != null && String(val).toLowerCase().includes(searchTerm.toLowerCase())
         )
       );
+
+      const handleDownloadReport = async () => {
+        try {
+          setIsDownloading(true);
+          const jobs = await fetchJson('/admin/reports/completed-jobs');
+          
+          if (!jobs || jobs.length === 0) {
+            showToast('No completed jobs found to generate a report.', 'warning');
+            return;
+          }
+          
+          // Construct CSV headers and rows
+          const headers = ['Job ID', 'Service Type', 'Address', 'Estimated Price (INR)', 'Customer Name', 'Customer Phone', 'Assigned Electricians', 'Completed At'];
+          const csvRows = [headers.join(',')];
+          
+          jobs.forEach(job => {
+            const customerName = job.customer ? `"${job.customer.name}"` : 'N/A';
+            const customerPhone = job.customer ? `"${job.customer.phone}"` : 'N/A';
+            const electricians = job.electricians && job.electricians.length > 0 
+              ? `"${job.electricians.map(e => e.name).join(' & ')}"` 
+              : 'None';
+            const completedAt = new Date(job.updatedAt).toLocaleString();
+            
+            const row = [
+              job._id, `"${job.serviceType}"`, `"${job.address}"`, job.estimatedPrice,
+              customerName, customerPhone, electricians, `"${completedAt}"`
+            ];
+            csvRows.push(row.join(','));
+          });
+          
+          // Trigger file download
+          const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.setAttribute('href', url);
+          a.setAttribute('download', `Completed_Jobs_Report_${new Date().toISOString().split('T')[0]}.csv`);
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          
+          showToast('Report generated successfully!', 'success');
+        } catch (error) {
+          showToast(`Failed to generate report: ${error.message}`, 'error');
+        } finally {
+          setIsDownloading(false);
+        }
+      };
 
       return (
         <div style={{ padding: '20px', fontFamily: 'var(--font-family, sans-serif)' }}>
@@ -1440,7 +1695,9 @@
               </div>
               <div>
                 <h2 style={{ margin: 0, color: 'var(--danger)' }}>Master Admin Portal</h2>
-                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Connected to Production Database</span>
+                <span style={{ fontSize: '0.85rem', color: useMockData ? 'var(--warning)' : 'var(--text-muted)', fontWeight: useMockData ? 'bold' : 'normal' }}>
+                  {useMockData ? '⚠️ Connected to Local Mock Database' : 'Connected to Production Database'}
+                </span>
               </div>
             </div>
             <button className="btn btn-outline" style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }} onClick={onLogout}>
@@ -1449,15 +1706,24 @@
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
-            <MetricCard icon="fa-users" title="Total Users" value="14,205" trend="+12% this week" color="var(--primary)" />
+            <MetricCard icon="fa-users" title="Total Users" value={currentData.length.toLocaleString()} trend={useMockData ? "Mock Data Generated" : "+12% this week"} color="var(--primary)" />
             <MetricCard icon="fa-helmet-safety" title="Active Electricians" value="842" trend="124 currently online" color="var(--warning)" />
             <MetricCard icon="fa-indian-rupee-sign" title="Platform Revenue" value="₹12.4L" trend="3% fee taken" color="var(--success)" />
             <MetricCard icon="fa-server" title="System Uptime" value="99.99%" trend="All systems nominal" color="var(--text-main)" />
           </div>
 
-          <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
             <TabButton active={activeTab === 'database'} onClick={() => setActiveTab('database')} icon="fa-database" label="Global Database" />
             <TabButton active={activeTab === 'logs'} onClick={() => setActiveTab('logs')} icon="fa-terminal" label="System Logs" />
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: 'var(--text-main)', fontSize: '0.9rem', fontWeight: 600, background: 'var(--surface)', padding: '8px 16px', borderRadius: '30px', border: '1px solid var(--border-light)' }}>
+                <input type="checkbox" checked={useMockData} onChange={(e) => setUseMockData(e.target.checked)} style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: 'var(--primary)' }} />
+                Demo Mode
+              </label>
+              <button className="btn btn-outline" style={{ borderColor: 'var(--primary)', color: 'var(--primary)' }} onClick={handleDownloadReport} disabled={isDownloading}>
+                <i className={`fas ${isDownloading ? 'fa-spinner fa-spin' : 'fa-file-csv'}`}></i> {isDownloading ? 'Generating...' : 'Export Completed Jobs'}
+              </button>
+            </div>
           </div>
 
           <div style={{ background: 'var(--surface)', borderRadius: '16px', boxShadow: 'var(--shadow-md)', overflow: 'hidden', border: '1px solid var(--border-light)' }}>
@@ -1479,13 +1745,24 @@
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredDB.map((row, idx) => (
-                        <tr key={row.id} style={{ borderBottom: '1px solid var(--border-light)', background: idx % 2 === 0 ? 'transparent' : 'var(--secondary)' }}>
-                          <td style={{ padding: '14px 16px', fontFamily: 'monospace', fontWeight: 'bold' }}>{row.id}</td>
-                          <td style={{ padding: '14px 16px' }}><span className="badge" style={{ background: row.type === 'Customer' ? 'var(--primary-light)' : '#fffbeb', color: row.type === 'Customer' ? 'var(--primary)' : 'var(--warning)' }}>{row.type}</span></td>
+                      {isLoading && !useMockData ? (
+                        <tr>
+                          <td colSpan="5" style={{ textAlign: 'center', padding: '40px' }}>
+                            <i className="fas fa-spinner fa-spin fa-2x" style={{ color: 'var(--primary)' }}></i>
+                            <p style={{ marginTop: '10px', color: 'var(--text-muted)' }}>Loading Live Data...</p>
+                          </td>
+                        </tr>
+                      ) : filteredDB.map((row, idx) => (
+                        <tr key={row._id} style={{ borderBottom: '1px solid var(--border-light)', background: idx % 2 === 0 ? 'transparent' : 'var(--secondary)' }}>
+                          <td style={{ padding: '14px 16px', fontFamily: 'monospace', fontWeight: 'bold' }}>{row._id}</td>
+                          <td style={{ padding: '14px 16px' }}><span className="badge" style={{ textTransform: 'capitalize', background: row.role === 'customer' ? 'var(--primary-light)' : '#fffbeb', color: row.role === 'customer' ? 'var(--primary)' : 'var(--warning)' }}>{row.role}</span></td>
                           <td style={{ padding: '14px 16px', fontWeight: 500 }}>{row.name}</td>
-                          <td style={{ padding: '14px 16px' }}><i className="fas fa-map-marker-alt" style={{ color: 'var(--text-muted)' }}></i> {row.location}</td>
-                          <td style={{ padding: '14px 16px' }}><span style={{ color: row.status === 'Online' || row.status === 'Active' ? 'var(--success)' : 'var(--text-muted)', fontWeight: 600 }}>• {row.status}</span></td>
+                          <td style={{ padding: '14px 16px' }}><i className="fas fa-phone" style={{ color: 'var(--text-muted)', marginRight: '8px' }}></i> {row.phone}</td>
+                          <td style={{ padding: '14px 16px' }}>
+                            <span style={{ color: (row.status === 'Offline' || row.status === 'Inactive') ? 'var(--text-muted)' : 'var(--success)', fontWeight: 600 }}>
+                              • {row.status || 'Active'}
+                            </span>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -1518,6 +1795,7 @@
       const [user, setUser] = useState(null);
       const [isDarkMode, setIsDarkMode] = useState(false);
       const [toasts, setToasts] = useState([]);
+      const [isInitializing, setIsInitializing] = useState(true);
 
       const toggleTheme = () => {
         setIsDarkMode(!isDarkMode);
@@ -1536,8 +1814,12 @@
           if (!token) {
             // No token, ensure we are logged out.
             handleLogout();
+            setIsInitializing(false);
             return;
           }
+
+          // Add a timeout safeguard to ensure the UI eventually loads
+          const timeoutId = setTimeout(() => setIsInitializing(false), 5000);
 
           try {
             // BUG FIX: Stale user data in localStorage.
@@ -1552,6 +1834,9 @@
             // This catch block handles expired tokens (which cause a 401) or network errors.
             console.error("Session validation failed:", error.message);
             handleLogout();
+          } finally {
+            setIsInitializing(false);
+            clearTimeout(timeoutId);
           }
         };
         validateSession();
@@ -1571,13 +1856,21 @@
         setCurrentView('login');
       };
 
+      if (isInitializing) {
+        return (
+          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', width: '100vw' }}>
+            <i className="fas fa-spinner fa-spin fa-3x" style={{ color: 'var(--primary)' }}></i>
+          </div>
+        );
+      }
+
       return (
         <div className="app-container">
           {currentView === 'login' ? (
             <Login onLoginSuccess={handleLoginSuccess} />
           ) : currentView === 'admin' ? (
             <div style={{ animation: 'fadeIn 0.5s forwards', width: '100%', maxWidth: '1400px', margin: '0 auto' }}>
-              <AdminPanel user={user} onLogout={handleLogout} />
+              <AdminPanel user={user} onLogout={handleLogout} showToast={showToast} />
             </div>
           ) : (
             <div style={{ animation: 'fadeIn 0.5s forwards' }}>
