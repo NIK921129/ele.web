@@ -702,28 +702,28 @@
     function Landing({ onEnter, onSecret }) {
       return (
         <div className="landing-page">
-          <div className="landing-bg-shape" style={{ top: '-10%', left: '-10%', width: '400px', height: '400px', background: 'var(--primary-light)' }}></div>
-          <div className="landing-bg-shape" style={{ bottom: '-10%', right: '-10%', width: '300px', height: '300px', background: 'rgba(56, 189, 248, 0.2)' }}></div>
+          <div className="landing-bg-shape" style={{ top: '-10%', left: '-10%', width: '50vw', height: '50vw', background: 'var(--primary-light)', minWidth: '300px', minHeight: '300px' }}></div>
+          <div className="landing-bg-shape" style={{ bottom: '-10%', right: '-10%', width: '40vw', height: '40vw', background: 'rgba(56, 189, 248, 0.2)', minWidth: '250px', minHeight: '250px' }}></div>
           
-          <div className="floating-icon" style={{ top: '15%', left: '15%', animationDelay: '0s' }}><i className="fas fa-microchip"></i></div>
-          <div className="floating-icon" style={{ top: '25%', right: '20%', animationDelay: '1.5s', fontSize: '3.5rem' }}><i className="fas fa-bolt"></i></div>
-          <div className="floating-icon" style={{ bottom: '20%', left: '25%', animationDelay: '3s', fontSize: '2rem' }}><i className="fas fa-network-wired"></i></div>
-          <div className="floating-icon" style={{ bottom: '30%', right: '15%', animationDelay: '4.5s' }}><i className="fas fa-server"></i></div>
+          <div className="floating-icon" style={{ top: '15%', left: '10%', animationDelay: '0s' }}><i className="fas fa-microchip"></i></div>
+          <div className="floating-icon" style={{ top: '25%', right: '15%', animationDelay: '1.5s', fontSize: '3.5rem' }}><i className="fas fa-bolt"></i></div>
+          <div className="floating-icon" style={{ bottom: '20%', left: '20%', animationDelay: '3s', fontSize: '2rem' }}><i className="fas fa-network-wired"></i></div>
+          <div className="floating-icon" style={{ bottom: '30%', right: '10%', animationDelay: '4.5s' }}><i className="fas fa-server"></i></div>
 
-          <div className="landing-content">
-            <img src="wmremove-transformed.png" alt="WATTZEN Logo" style={{ width: '160px', height: 'auto', filter: 'drop-shadow(0 10px 15px rgba(0,0,0,0.1))' }} />
-            <h1 className="landing-title">WATT<span style={{ color: 'var(--primary)' }}>ZEN</span></h1>
+          <div className="landing-content" style={{ background: 'rgba(255, 255, 255, 0.6)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', padding: '40px 24px', borderRadius: '32px', border: '1px solid rgba(255,255,255,0.8)', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.1)' }}>
+            <img src="./wmremove-transformed.png" alt="WATTZEN Logo" style={{ width: '130px', height: 'auto', filter: 'drop-shadow(0 10px 15px rgba(0,0,0,0.1))', marginBottom: '12px' }} onError={(e) => { e.target.style.display = 'none'; }} />
+            <h1 className="landing-title" style={{ marginTop: 0 }}>WATT<span style={{ color: 'var(--primary)' }}>ZEN</span></h1>
             <div className="landing-tagline">Power Your Network</div>
-            <p className="landing-desc">
+            <p className="landing-desc" style={{ color: '#334155', fontWeight: 500, maxWidth: '450px', margin: '0 auto 32px' }}>
               A beautiful, seamless online space designed to connect you instantly with certified electricians. Book, track, and power up your life safely.
             </p>
-            <button className="btn" onClick={onEnter} style={{ fontSize: '1.1rem', padding: '16px 40px', borderRadius: '30px' }}>
-              ENTER WATTZEN <i className="fas fa-arrow-right" style={{ marginLeft: '8px' }}></i>
+            <button className="btn" onClick={onEnter} style={{ fontSize: '1.05rem', padding: '18px 40px', borderRadius: '30px', textTransform: 'uppercase', letterSpacing: '1px', boxShadow: '0 10px 25px -5px rgba(79, 70, 229, 0.4)' }}>
+              POWER YOUR NETWORK <i className="fas fa-bolt" style={{ marginLeft: '8px' }}></i>
             </button>
           </div>
 
-          <button onClick={onSecret} title="Admin Portal" style={{ position: 'absolute', bottom: '20px', right: '20px', background: 'transparent', border: 'none', color: 'var(--border-light)', cursor: 'pointer', fontSize: '1.5rem', zIndex: 20 }}>
-            <i className="fas fa-bolt"></i>
+          <button onClick={onSecret} title="Admin Portal" style={{ position: 'absolute', bottom: '24px', right: '24px', background: 'var(--surface)', border: '1px solid var(--border-light)', color: 'var(--primary)', width: '54px', height: '54px', borderRadius: '50%', cursor: 'pointer', fontSize: '1.3rem', zIndex: 20, boxShadow: 'var(--shadow-md)', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'transform 0.2s' }} onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.1)'} onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}>
+            <i className="fas fa-user-shield"></i>
           </button>
         </div>
       );
@@ -735,7 +735,7 @@
         <div className="navbar">
           <div className="logo-area">
             <div className="logo-icon" style={{ background: 'transparent', boxShadow: 'none' }}>
-              <img src="wmremove-transformed.png" alt="WATTZEN Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+              <img src="./wmremove-transformed.png" alt="WATTZEN Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} onError={(e) => { e.target.style.display = 'none'; }} />
             </div>
             <div className="logo-text">WATT<span>ZEN</span></div>
           </div>
@@ -798,7 +798,7 @@
         <div className="login-container">
           <div className="logo-area" style={{ justifyContent: 'center', marginBottom: '8px', transform: 'scale(1.2)' }}>
             <div className="logo-icon" style={{ background: 'transparent', boxShadow: 'none' }}>
-              <img src="wmremove-transformed.png" alt="WATTZEN Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+              <img src="./wmremove-transformed.png" alt="WATTZEN Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} onError={(e) => { e.target.style.display = 'none'; }} />
             </div>
             <div className="logo-text">WATT<span>ZEN</span></div>
           </div>
