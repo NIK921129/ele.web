@@ -771,16 +771,6 @@
 <body>
   <div id="root"></div>
 
-  <script>
-    // --- Deployment Configuration ---
-    // This object centralizes the backend URL.
-    // For local development, use 'http://localhost:5000'.
-  // When deployed, this MUST be your backend URL (e.g., Render), NOT your frontend 
-  // l URL!
-    window.API_CONFIG = {
-    BASE_URL: (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.protocol === 'file:') ? 'http://localhost:5000' : 'https://wattzen-backend.onrender.com'
-    };
-  </script>
   <script type="module" src="/main.jsx"></script>
 </body>
 </html>

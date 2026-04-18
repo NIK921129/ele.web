@@ -5,7 +5,7 @@ import { BrowserRouter, Routes, Route, useNavigate, Navigate, useLocation } from
 // ==========================================
 // 1. API & SOCKET UTILITIES
 // ==========================================
-const BASE_URL = window.API_CONFIG?.BASE_URL || (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? 'http://localhost:5000' : 'https://wattzen-backend.onrender.com');
+const BASE_URL = import.meta.env.VITE_API_URL || (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? 'http://localhost:5000' : 'https://wattzen-backend.onrender.com');
 const API_BASE_URL = `${BASE_URL}/api`;
 const socket = io(BASE_URL, { autoConnect: false });
 
@@ -107,6 +107,7 @@ function Landing({ onEnter, onSecret }) {
           position: 'absolute',
           left: `${p.x}%`,
           top: `${p.y}%`,
+
           color: 'rgba(56, 189, 248, 0.2)',
           fontSize: `${p.size}rem`,
           transform: `translate(${mouse.x * 50 * p.speed}px, ${mouse.y * 50 * p.speed}px)`,
@@ -361,7 +362,7 @@ function CustomerHome({ user, showToast }) {
       socket.off('teamMemberJoined');
       socket.disconnect();
     };
-  }, [activeJobId]);
+  }, [activeJobId, showToast]);
 
   useEffect(() => {
     if (chatContainerRef.current) {
@@ -452,6 +453,8 @@ function CustomerHome({ user, showToast }) {
   const handleCompleteJob = async () => {
     try {
       await fetchJson(`/jobs/${activeJobId}/complete`, { method: 'PUT' });
+      // Optimistically update the UI to prevent hanging if the socket packet drops
+      setJobCompleted(true);
       showToast('Job marked as completed. Please rate your experience!', 'success');
     } catch (error) {
       showToast(error.message, 'error');
@@ -690,6 +693,7 @@ function ElectricianHome({ user, showToast }) {
   const [activeJobId, setActiveJobId] = useState(null);
   const [availableJob, setAvailableJob] = useState(null);
   const [walletBal, setWalletBal] = useState(user?.walletBalance || 0);
+  const [jobsCompleted, setJobsCompleted] = useState(user?.jobsCompleted || 0);
   const [currentJob, setCurrentJob] = useState(null); // Will hold the full job object
   const chatContainerRef = useRef(null);
 
@@ -726,7 +730,10 @@ function ElectricianHome({ user, showToast }) {
       socket.on('jobCompleted', () => {
         showToast('Customer marked job as complete! Earnings added to wallet.', 'success');
         // Refresh wallet balance
-        fetchJson('/me').then(res => setWalletBal(res.walletBalance)).catch(() => {});
+        fetchJson('/me').then(res => {
+          setWalletBal(res.walletBalance);
+          setJobsCompleted(res.jobsCompleted);
+        }).catch(() => {});
       });
       socket.on('teamMemberJoined', (data) => {
         setCurrentJob(prev => {
@@ -748,7 +755,7 @@ function ElectricianHome({ user, showToast }) {
       socket.off('teamMemberJoined');
       socket.disconnect();
     };
-  }, [isOnline]);
+  }, [isOnline, showToast, user]);
 
   useEffect(() => {
     if (isOnline && activeJobId) {
@@ -840,6 +847,11 @@ function ElectricianHome({ user, showToast }) {
       setActiveJobId(availableJob._id); // Link the job and join the chat room only AFTER accepting
       setAvailableJob(null);
       setCurrentJob(acceptedJob); // Set the full job object
+      
+      // Prevent socket race condition: if the team is already full upon acceptance, start tracking instantly
+      if (acceptedJob.status === 'assigned') {
+        setIsTracking(true);
+      }
     } catch (error) {
       showToast(error.message, 'error');
       // FIX: Clear the stale job so polling can find a fresh one
@@ -874,7 +886,7 @@ function ElectricianHome({ user, showToast }) {
             </div>
               <div style={{ flex: '1 1 200px', padding: '16px', background: 'var(--secondary)', borderRadius: '16px' }}>
               <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600, textTransform: 'uppercase' }}>JOBS COMPLETED</span>
-              <h2 style={{ color: 'var(--text-main)', fontSize: '2.2rem', margin: '4px 0 0 0' }}>0</h2>
+              <h2 style={{ color: 'var(--text-main)', fontSize: '2.2rem', margin: '4px 0 0 0' }}>{jobsCompleted}</h2>
             </div>
           </div>
         </div>
@@ -1357,11 +1369,11 @@ function AppContent() {
     document.body.classList.toggle('dark-mode');
   };
 
-  const showToast = (message, type = 'success') => {
+  const showToast = React.useCallback((message, type = 'success') => {
     const id = Date.now();
     setToasts((prev) => [...prev, { id, message, type }]);
     setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4000);
-  };
+  }, []);
 
   useEffect(() => {
     const validateSession = async () => {

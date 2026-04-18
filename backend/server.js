@@ -12,9 +12,10 @@ app.set('trust proxy', 1); // Enable trusting proxy headers for correct IP detec
 const server = http.createServer(app);
 
 // Remove trailing slash if it exists to prevent strict CORS mismatches
-const FRONTEND_URL = process.env.FRONTEND_URL ? process.env.FRONTEND_URL.replace(/\/$/, '') : 'https://wattzen.vercel.app';
+// Allow dynamic origin for local dev, but lock to a specific URL in production via environment variables.
+const FRONTEND_URL = process.env.FRONTEND_URL ? process.env.FRONTEND_URL.replace(/\/$/, '') : undefined;
 const corsOptions = {
-  origin: process.env.FRONTEND_URL ? FRONTEND_URL : true, // Reflect origin in dev, use env in prod
+  origin: FRONTEND_URL || true, // Reflect origin if FRONTEND_URL is not set (for local dev)
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
 };
@@ -51,12 +52,13 @@ mongoose.connect(MONGO_URI).then(() => {
 
 const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
-  phone: { type: String, required: true },
+  phone: { type: String, required: true, unique: true },
   password: { type: String, required: true },
   role: { type: String, enum: ['customer', 'electrician', 'admin'], required: true },
   totalReviews: { type: Number, default: 0 },
   averageRating: { type: Number, default: 0 },
-  walletBalance: { type: Number, default: 0 }
+  walletBalance: { type: Number, default: 0 },
+  jobsCompleted: { type: Number, default: 0 }
 }, { timestamps: true });
 
 const jobSchema = new mongoose.Schema({
@@ -78,6 +80,7 @@ const jobSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 jobSchema.index({ location: '2dsphere' });
+jobSchema.index({ status: 1 }); // Optimize high-frequency status queries made by electricians
 
 const withdrawalSchema = new mongoose.Schema({
   electrician: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
@@ -151,7 +154,8 @@ api.post('/admin/secret-login', async (req, res) => {
     console.log(`[AUDIT] Successful Admin Login from IP: ${clientIp} at ${new Date().toISOString()}`);
     let admin = await User.findOne({ role: 'admin' });
     if (!admin) {
-      admin = await User.create({ name: 'System Admin', phone: '0000000000', password: await bcrypt.hash(ADMIN_PIN, 10), role: 'admin' });
+      // Use a non-numeric string to guarantee no collision with regular user phone numbers
+      admin = await User.create({ name: 'System Admin', phone: 'ADMIN_MASTER', password: await bcrypt.hash(ADMIN_PIN, 10), role: 'admin' });
     }
     const token = jwt.sign({ userId: admin._id, role: 'admin' }, JWT_SECRET, { expiresIn: '7d' });
     return res.json({ token, user: admin });
@@ -182,6 +186,7 @@ api.post('/signup', async (req, res) => {
     if (role === 'admin') {
       return res.status(403).json({ message: 'Unauthorized: Admin role cannot be self-assigned' });
     }
+    if (!['customer', 'electrician'].includes(role)) return res.status(400).json({ message: 'Invalid role selection' });
 
     // Basic Input Validation
     const phoneRegex = /^\d{10}$/;
@@ -198,6 +203,9 @@ api.post('/signup', async (req, res) => {
     const token = jwt.sign({ userId: user._id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
     res.status(201).json({ token, user: { _id: user._id, name: user.name, phone: user.phone, role: user.role } });
   } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({ message: 'Phone number is already registered' });
+    }
     res.status(500).json({ message: 'Internal server error during signup' });
   }
 });
@@ -241,13 +249,17 @@ api.post('/jobs', authenticateToken, async (req, res) => {
     const { serviceType, address, coordinates, estimatedPrice, teamSize } = req.body;
     if (!serviceType || !address) return res.status(400).json({ message: 'Service type and address required' });
 
+    // Security: Prevent malicious injection of negative prices or absurd team sizes
+    const safePrice = Math.max(299, Number(estimatedPrice) || 299);
+    const safeTeamSize = Math.max(1, Math.min(10, Number(teamSize) || 1));
+
     const newJob = new Job({
       customer: req.user.userId,
       serviceType,
       address,
-      teamSize: teamSize || 1,
+      teamSize: safeTeamSize,
       location: { type: 'Point', coordinates: coordinates || [0, 0] },
-      estimatedPrice: estimatedPrice || 299,
+      estimatedPrice: safePrice,
       paymentStatus: 'verifying',
       jobOTP: Math.floor(1000 + Math.random() * 9000).toString(),
       status: 'verifying_payment'
@@ -346,6 +358,10 @@ api.put('/jobs/:id/cancel', authenticateToken, async (req, res) => {
       { new: true }
     );
     if (!job) return res.status(404).json({ message: 'Job not found or already assigned' });
+
+    // Notify any partially joined or tracking electricians that the job was cancelled
+    io.to(req.params.id).emit('jobCancelled');
+
     res.status(200).json({ message: 'Job cancelled successfully' });
   } catch (error) {
     res.status(500).json({ message: 'Internal server error' });
@@ -356,7 +372,11 @@ api.put('/jobs/:id/cancel', authenticateToken, async (req, res) => {
 api.put('/admin/jobs/:id/verify-payment', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
-    const job = await Job.findByIdAndUpdate(req.params.id, { paymentStatus: 'paid', status: 'searching' }, { new: true });
+    const job = await Job.findOneAndUpdate(
+      { _id: req.params.id, status: 'verifying_payment' }, 
+      { paymentStatus: 'paid', status: 'searching' }, 
+      { new: true }
+    );
     if (!job) return res.status(404).json({ message: 'Job not found' });
     
     io.to(req.params.id).emit('paymentVerified');
@@ -380,10 +400,12 @@ api.put('/jobs/:id/complete', authenticateToken, async (req, res) => {
     
     if (!job) return res.status(404).json({ message: 'Job not found' });
 
-    // Payout: 80% to electricians (20% platform cut)
-    const earningsPerElectrician = (job.estimatedPrice * 0.8) / Math.max(1, job.electricians.length);
+    // Payout: 80% to electricians (20% platform cut). Round to 2 decimal places.
+    const earningsPerElectrician = Math.round(((job.estimatedPrice * 0.8) / Math.max(1, job.electricians.length)) * 100) / 100;
     for (const electricianId of job.electricians) {
-      await User.findByIdAndUpdate(electricianId, { $inc: { walletBalance: earningsPerElectrician } });
+      await User.findByIdAndUpdate(electricianId, { 
+        $inc: { walletBalance: earningsPerElectrician, jobsCompleted: 1 } 
+      });
     }
 
     io.to(req.params.id).emit('jobCompleted'); // Notify all in room
@@ -465,7 +487,11 @@ api.post('/withdrawals', authenticateToken, async (req, res) => {
 api.put('/admin/withdrawals/:id/approve', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
-    const withdrawal = await Withdrawal.findByIdAndUpdate(req.params.id, { status: 'approved' }, { new: true });
+    const withdrawal = await Withdrawal.findOneAndUpdate(
+      { _id: req.params.id, status: 'pending' }, 
+      { status: 'approved' }, 
+      { new: true }
+    );
     if (!withdrawal) return res.status(404).json({ message: 'Request not found' });
     res.status(200).json({ message: 'Withdrawal approved', withdrawal });
   } catch (error) {
