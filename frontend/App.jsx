@@ -1,15 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { io } from 'socket.io-client';
 import { BrowserRouter, Routes, Route, useNavigate, Navigate, useLocation } from 'react-router-dom';
 
 import logoImage from './wmremove-transformed.png';
+import { useSocket } from './SocketContext.jsx';
 
 // ==========================================
 // 1. API & SOCKET UTILITIES
 // ==========================================
 const BASE_URL = import.meta.env.VITE_API_URL || (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? 'http://localhost:5000' : 'https://wattzen-backend.onrender.com');
 const API_BASE_URL = `${BASE_URL}/api`;
-const socket = io(BASE_URL, { autoConnect: false });
 
 async function fetchJson(url, options = {}) {
   const token = localStorage.getItem('token');
@@ -152,7 +151,7 @@ function Landing({ onEnter, onSecret }) {
 }
 
 // --- Navbar Component ---
-function Navbar({ user, onLogout, toggleTheme, isDarkMode }) {
+function Navbar({ user, onLogout, toggleTheme, isDarkMode, onEditProfile }) {
   return (
     <div className="navbar">
       <div className="logo-area">
@@ -166,13 +165,49 @@ function Navbar({ user, onLogout, toggleTheme, isDarkMode }) {
           <i className={`fas ${isDarkMode ? 'fa-sun' : 'fa-moon'}`} style={{ fontSize: '1.2rem' }}></i>
         </button>
         <div className="notification-icon"><i className="far fa-bell"></i></div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div className="desktop-only" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <span className="profile-name" style={{ fontWeight: 600 }}>{user?.name}</span>
-          <div style={{ background: 'var(--surface)', width: '42px', height: '42px', borderRadius: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border-light)' }}>
+          <div onClick={onEditProfile} title="Edit Profile" style={{ background: 'var(--surface)', width: '42px', height: '42px', borderRadius: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border-light)', cursor: 'pointer', transition: 'all 0.2s' }}>
             <i className="fas fa-user-circle" style={{ fontSize: '28px', color: 'var(--primary)' }}></i>
           </div>
         </div>
-        <button className="btn btn-outline" style={{ padding: '6px 12px', marginLeft: '10px' }} onClick={onLogout}>Logout</button>
+        <button className="btn btn-outline desktop-only" style={{ padding: '6px 12px', marginLeft: '10px' }} onClick={onLogout}>Logout</button>
+      </div>
+    </div>
+  );
+}
+
+// --- Edit Profile Modal ---
+function ProfileModal({ user, onClose, onUpdate, showToast, onLogout }) {
+  const [name, setName] = useState(user?.name || '');
+  const [phone, setPhone] = useState(user?.phone || '');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const updatedUser = await fetchJson('/me', { method: 'PUT', body: { name, phone } });
+      onUpdate(updatedUser);
+      showToast('Profile updated successfully', 'success');
+      onClose();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay visible">
+      <div className="modal-content">
+        <div className="modal-header"><h3>Edit Profile</h3><button onClick={onClose}>&times;</button></div>
+        <form onSubmit={handleSubmit}>
+          <div className="form-group"><label>Full Name</label><input type="text" className="form-control" value={name} onChange={e=>setName(e.target.value)} required /></div>
+          <div className="form-group"><label>Phone Number</label><input type="tel" className="form-control" value={phone} onChange={e=>setPhone(e.target.value)} required /></div>
+          <button type="submit" className="btn btn-block" disabled={loading}>{loading ? 'Saving...' : 'Save Changes'}</button>
+          <button type="button" className="btn-outline btn btn-block" style={{ marginTop: '12px', borderColor: 'var(--danger)', color: 'var(--danger)' }} onClick={onLogout}>Log Out</button>
+        </form>
       </div>
     </div>
   );
@@ -187,6 +222,7 @@ function Login({ onLoginSuccess }) {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -249,7 +285,10 @@ function Login({ onLoginSuccess }) {
           </div>
           <div className="form-group">
             <label>Password</label>
-            <input type="password" className="form-control" value={password} onChange={e => setPassword(e.target.value)} required placeholder="••••••••" />
+            <div className="input-icon-wrapper">
+              <input type={showPassword ? "text" : "password"} className="form-control" value={password} onChange={e => setPassword(e.target.value)} required placeholder="••••••••" />
+              <i className={`fas ${showPassword ? 'fa-eye-slash' : 'fa-eye'} action-icon`} onClick={() => setShowPassword(!showPassword)}></i>
+            </div>
           </div>
           <button type="submit" className="btn btn-block" disabled={loading} style={{ marginTop: '10px' }}>
             {loading ? 'Processing...' : (isLogin ? 'Log In' : 'Sign Up')}
@@ -265,6 +304,51 @@ function Login({ onLoginSuccess }) {
       </div>
     </div>
   );
+}
+
+// --- Shared Real-Time Tracking Map Component ---
+function TrackingMap({ origin, destination }) {
+  const mapRef = useRef(null);
+  const mapInstance = useRef(null);
+  const originMarker = useRef(null);
+  const destMarker = useRef(null);
+
+  useEffect(() => {
+    if (!window.google || !window.google.maps || !mapRef.current) return;
+
+    if (!mapInstance.current) {
+      mapInstance.current = new window.google.maps.Map(mapRef.current, {
+        zoom: 14,
+        center: { lat: origin[1], lng: origin[0] },
+        disableDefaultUI: true,
+        zoomControl: true,
+      });
+
+      originMarker.current = new window.google.maps.Marker({
+        map: mapInstance.current,
+        label: { text: 'C', color: 'white', fontWeight: 'bold' },
+        title: 'Customer Location',
+      });
+
+      destMarker.current = new window.google.maps.Marker({
+        map: mapInstance.current,
+        label: { text: 'E', color: 'white', fontWeight: 'bold' },
+        title: 'Electrician Location',
+      });
+    }
+
+    if (origin && origin.length === 2) originMarker.current.setPosition({ lat: origin[1], lng: origin[0] });
+    if (destination && destination.length === 2) destMarker.current.setPosition({ lat: destination[1], lng: destination[0] });
+
+    if (origin && destination && origin.length === 2 && destination.length === 2) {
+      const bounds = new window.google.maps.LatLngBounds();
+      bounds.extend({ lat: origin[1], lng: origin[0] });
+      bounds.extend({ lat: destination[1], lng: destination[0] });
+      mapInstance.current.fitBounds(bounds, { top: 40, bottom: 40, left: 40, right: 40 });
+    }
+  }, [origin, destination]);
+
+  return <div ref={mapRef} style={{ width: '100%', height: '250px', borderRadius: '12px', marginTop: '16px', border: '1px solid var(--border-light)' }} />;
 }
 
 // --- Customer Dashboard Component ---
@@ -296,6 +380,7 @@ const SERVICES = [
 ];
 
 function CustomerHome({ user, showToast }) {
+  const { socket } = useSocket();
   const [selectedService, setSelectedService] = useState('wiring');
   const [address, setAddress] = useState('');
   const [coordinates, setCoordinates] = useState([77.5946, 12.9716]); 
@@ -314,6 +399,12 @@ function CustomerHome({ user, showToast }) {
   const [hoverRating, setHoverRating] = useState(0);
   const chatContainerRef = useRef(null);
   
+  const [currentTab, setCurrentTab] = useState('active');
+  const [jobHistory, setJobHistory] = useState([]);
+  const [typingUser, setTypingUser] = useState(null);
+  const typingTimeoutRef = useRef(null);
+  const addressInputRef = useRef(null);
+  
   const [activeCategory, setActiveCategory] = useState('repairs');
   const [teamSize, setTeamSize] = useState(1);
 
@@ -328,7 +419,6 @@ function CustomerHome({ user, showToast }) {
 
   useEffect(() => {
     if (!activeJobId) return;
-    socket.connect();
     socket.emit('joinJobRoom', activeJobId);
 
     socket.on('electricianLocationChanged', (data) => {
@@ -337,6 +427,8 @@ function CustomerHome({ user, showToast }) {
     socket.on('receiveMessage', (data) => {
       setMessages((prev) => [...prev, { ...data, isSelf: false }]);
     });
+    socket.on('userTyping', (data) => setTypingUser(data.senderName));
+    socket.on('userStopTyping', () => setTypingUser(null));
     socket.on('paymentVerified', () => {
       setTeamStatusMessage('Payment verified! Searching for nearby electricians...');
       showToast('Payment verified by Admin!', 'success');
@@ -347,7 +439,10 @@ function CustomerHome({ user, showToast }) {
       setTeamStatusMessage(''); // Clear progress message
     });
     socket.on('teamMemberJoined', (data) => {
-        setAssignedElectricians(prev => [...prev, data.electrician]);
+        setAssignedElectricians(prev => {
+            if (prev.some(e => String(e._id) === String(data.electrician._id))) return prev;
+            return [...prev, data.electrician];
+        });
         setTeamStatusMessage(`${data.currentSize} of ${data.teamSize} electricians have joined.`);
         showToast(`${data.electrician.name} has joined the job!`, 'success');
     });
@@ -362,9 +457,10 @@ function CustomerHome({ user, showToast }) {
       socket.off('paymentVerified');
       socket.off('jobCompleted');
       socket.off('teamMemberJoined');
-      socket.disconnect();
+      socket.off('userTyping');
+      socket.off('userStopTyping');
     };
-  }, [activeJobId, showToast]);
+  }, [activeJobId, showToast, socket]);
 
   useEffect(() => {
     if (chatContainerRef.current) {
@@ -375,6 +471,36 @@ function CustomerHome({ user, showToast }) {
   useEffect(() => {
     setTeamSize(1);
   }, [selectedService]);
+
+  // Initialize Google Places Autocomplete
+  useEffect(() => {
+    if (currentTab === 'active' && window.google && window.google.maps && window.google.maps.places && addressInputRef.current) {
+      const autocomplete = new window.google.maps.places.Autocomplete(addressInputRef.current, {
+        fields: ["formatted_address", "geometry"],
+        componentRestrictions: { country: 'in' } // Restrict to India (update as needed)
+      });
+      const listener = autocomplete.addListener('place_changed', () => {
+        const place = autocomplete.getPlace();
+        if (place.geometry && place.geometry.location) {
+          setAddress(place.formatted_address);
+          setCoordinates([place.geometry.location.lng(), place.geometry.location.lat()]);
+        }
+      });
+      return () => window.google.maps.event.removeListener(listener);
+    }
+  }, [currentTab]);
+
+  useEffect(() => {
+    if (currentTab === 'history') {
+      const fetchHistory = async () => { 
+        try {
+          const data = await fetchJson('/jobs/history');
+          setJobHistory(Array.isArray(data) ? data : []);
+        } catch (e) { showToast('Failed to load history', 'error'); }
+      }; 
+      fetchHistory();
+    }
+  }, [currentTab, showToast]);
 
   const handleInitiateBooking = () => {
     if (!address) return showToast('Please enter your full address to book a service.', 'warning');
@@ -495,6 +621,17 @@ function CustomerHome({ user, showToast }) {
   return (
     <div className="dashboard-grid">
       <div>
+        <div className="delivery-header">
+          <div className="info">
+            <span className="title">Service Location</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
+              <i className="fas fa-location-dot" style={{ color: 'var(--primary)', fontSize: '1.2rem' }}></i>
+              <input type="text" ref={addressInputRef} value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Enter your full address..." style={{ background: 'transparent', border: 'none', outline: 'none', fontWeight: '800', color: 'var(--text-main)', fontSize: '1.05rem', width: '100%' }} />
+            </div>
+          </div>
+          <button className="btn" style={{ padding: '10px', borderRadius: '50%', width: '45px', height: '45px', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={handleLocateMe} title="Detect Location"><i className="fas fa-crosshairs"></i></button>
+        </div>
+
         <div className="promo-banner">
           <div>
             <span className="badge" style={{ background: 'rgba(255,255,255,0.1)', color: '#60a5fa', marginBottom: '8px', display: 'inline-block' }}>SUMMER SALE</span>
@@ -504,6 +641,12 @@ function CustomerHome({ user, showToast }) {
           <button className="btn" style={{ background: 'white', color: '#0f172a', fontWeight: 'bold', boxShadow: 'none', padding: '12px 20px' }}>Claim Offer</button>
         </div>
 
+      <div className="desktop-tabs" style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
+        <button className={`btn ${currentTab === 'active' ? '' : 'btn-outline'}`} style={{ flex: 1, padding: '10px' }} onClick={() => setCurrentTab('active')}>Active Booking</button>
+        <button className={`btn ${currentTab === 'history' ? '' : 'btn-outline'}`} style={{ flex: 1, padding: '10px' }} onClick={() => setCurrentTab('history')}>Job History</button>
+      </div>
+
+      {currentTab === 'active' ? (
         <div className="card">
           <div className="card-header">
             <h3 style={{ fontSize: '1.4rem' }}><i className="fas fa-hand-sparkles" style={{ marginRight: '8px', color: 'var(--warning)' }}></i> Hello, {user?.name?.split(' ')[0] || 'User'}</h3>
@@ -563,12 +706,6 @@ function CustomerHome({ user, showToast }) {
             </div>
           )}
 
-          <div className="address-bar">
-            <i className="fas fa-location-dot"></i>
-            <input type="text" className="address-input" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Enter your full address..." />
-            <button className="btn" style={{ padding: '10px 20px' }} onClick={handleLocateMe} title="Detect Location"><i className="fas fa-crosshairs"></i></button>
-          </div>
-
           {!activeJobId && !bookingPrice ? (
             <button className="btn btn-block" style={{ marginTop: '16px' }} onClick={handleInitiateBooking} disabled={isBooking}>
               <i className="fas fa-bolt"></i> {isBooking ? 'Creating Job...' : 'Find Electricians Near Me'}
@@ -602,7 +739,10 @@ function CustomerHome({ user, showToast }) {
               <div style={{ fontWeight: 'bold', color: 'var(--success)', textAlign: 'center' }}>Your Team is Assembled!</div>
               <div style={{ fontSize: '0.85rem', color: 'var(--text-main)', marginTop: '8px' }}>
                 {assignedElectricians.map(e => (
-                    <div key={e._id} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--surface)', padding: '8px', borderRadius: '8px', marginBottom: '4px' }}><i className="fas fa-user-hard-hat" style={{color: 'var(--primary)'}}></i> <strong>{e.name}</strong> ({e.phone})</div>
+                    <div key={e._id} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--surface)', padding: '8px', borderRadius: '8px', marginBottom: '4px', justifyContent: 'space-between' }}>
+                      <div><i className="fas fa-user-hard-hat" style={{color: 'var(--primary)'}}></i> <strong>{e.name}</strong></div>
+                      <a href={`tel:${e.phone}`} className="btn btn-outline" style={{ padding: '6px 12px', fontSize: '0.8rem' }}><i className="fas fa-phone"></i> Call</a>
+                    </div>
                 ))}
               </div>
               {!jobCompleted && (
@@ -635,6 +775,9 @@ function CustomerHome({ user, showToast }) {
                     <strong>Distance:</strong> {liveLocation.distance} km <br />
                     <strong>ETA:</strong> {liveLocation.eta} mins <br />
                   </p>
+                  {liveLocation.coordinates && (
+                    <TrackingMap origin={coordinates} destination={liveLocation.coordinates} />
+                  )}
                 </div>
               )}
               
@@ -656,15 +799,54 @@ function CustomerHome({ user, showToast }) {
                 })}
                   {messages.length === 0 && <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem', margin: 'auto' }}>No messages yet. Say hi!</div>}
                 </div>
+                {typingUser && <div style={{ fontSize: '0.8rem', color: 'var(--primary)', fontStyle: 'italic', padding: '8px 16px 0', background: 'var(--secondary)' }}>{typingUser} is typing...</div>}
                 <div style={{ padding: '10px', display: 'flex', gap: '8px', borderTop: '1px solid var(--border-light)' }}>
-                  <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()} placeholder="Type a message..." style={{ flex: 1, padding: '10px', borderRadius: '20px', border: '1px solid var(--border-light)', outline: 'none' }} />
+                  <input type="text" value={chatInput} onChange={(e) => {
+                    setChatInput(e.target.value);
+                    socket.emit('typing', { jobId: activeJobId, senderName: user?.name?.split(' ')[0] || 'Customer' }); 
+                    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+                    typingTimeoutRef.current = setTimeout(() => socket.emit('stopTyping', { jobId: activeJobId }), 1500);
+                  }} onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()} placeholder="Type a message..." style={{ flex: 1, padding: '10px', borderRadius: '20px', border: '1px solid var(--border-light)', outline: 'none' }} /> 
                   <button className="btn" style={{ padding: '10px 16px', borderRadius: '20px' }} onClick={handleSendMessage}><i className="fas fa-paper-plane"></i></button>
                 </div>
               </div>
             </React.Fragment>
           )}
         </div>
+      ) : (
+        <div className="card" style={{ animation: 'fadeInUp 0.4s forwards' }}>
+          <h3 style={{ marginBottom: '16px' }}><i className="fas fa-history" style={{ color: 'var(--primary)' }}></i> Your Job History</h3>
+          {jobHistory.length === 0 ? <p style={{ color: 'var(--text-muted)' }}>No past jobs found.</p> : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {jobHistory.map(job => (
+                <div key={job._id} style={{ background: 'var(--secondary)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-light)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <strong style={{ fontSize: '1.1rem', textTransform: 'capitalize' }}>{job.serviceType.replace('_', ' ')}</strong>
+                    <span className="badge" style={{ background: job.status === 'completed' ? 'var(--success)' : (job.status === 'cancelled' ? 'var(--danger)' : 'var(--warning)'), color: 'white' }}>{job.status}</span>
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}><i className="far fa-calendar-alt"></i> {new Date(job.createdAt).toLocaleDateString()}</div>
+                  <div style={{ fontSize: '0.95rem', marginTop: '8px', fontWeight: 'bold', color: 'var(--primary)' }}>₹{job.estimatedPrice}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       </div>
+
+      {/* Mobile Bottom Navigation */}
+      <div className="mobile-bottom-nav">
+        <div className={`nav-item ${currentTab === 'active' ? 'active' : ''}`} onClick={() => setCurrentTab('active')}>
+          <i className="fas fa-bolt"></i><span>Services</span>
+        </div>
+        <div className={`nav-item ${currentTab === 'history' ? 'active' : ''}`} onClick={() => setCurrentTab('history')}>
+          <i className="fas fa-receipt"></i><span>Orders</span>
+        </div>
+        <div className="nav-item" onClick={onEditProfile}>
+          <i className="fas fa-user"></i><span>Profile</span>
+        </div>
+      </div>
+
       
       <div>
         <div className="card">
@@ -687,7 +869,8 @@ function CustomerHome({ user, showToast }) {
 }
 
 // --- Electrician Dashboard Component ---
-function ElectricianHome({ user, showToast }) {
+function ElectricianHome({ user, showToast, onEditProfile }) {
+  const { socket } = useSocket();
   const [isOnline, setIsOnline] = useState(false);
   const [isTracking, setIsTracking] = useState(false);
   const [messages, setMessages] = useState([]);
@@ -698,6 +881,13 @@ function ElectricianHome({ user, showToast }) {
   const [jobsCompleted, setJobsCompleted] = useState(user?.jobsCompleted || 0);
   const [currentJob, setCurrentJob] = useState(null); // Will hold the full job object
   const chatContainerRef = useRef(null);
+  const [currentTab, setCurrentTab] = useState('active');
+  const [jobHistory, setJobHistory] = useState([]);
+  const [typingUser, setTypingUser] = useState(null);
+  const typingTimeoutRef = useRef(null);
+  const chartRef = useRef(null);
+  const chartInstance = useRef(null);
+  const [myLiveCoords, setMyLiveCoords] = useState(null);
 
   const jobStatus = currentJob?.status;
   const teamSize = currentJob?.teamSize || 1;
@@ -709,10 +899,11 @@ function ElectricianHome({ user, showToast }) {
 
   useEffect(() => {
     if (isOnline) {
-      socket.connect();
       socket.on('receiveMessage', (data) => {
         setMessages((prev) => [...prev, { ...data, isSelf: false }]);
       });
+      socket.on('userTyping', (data) => setTypingUser(data.senderName));
+      socket.on('userStopTyping', () => setTypingUser(null));
       socket.on('jobAccepted', (data) => {
         // This event fires when the team is full. If this electrician is part of the team, update their state.
         if (data.electricians.some(e => String(e._id) === String(user._id) || String(e.id) === String(user._id))) {
@@ -736,18 +927,22 @@ function ElectricianHome({ user, showToast }) {
           setWalletBal(res.walletBalance);
           setJobsCompleted(res.jobsCompleted);
         }).catch(() => {});
+          
+          // Release the UI so the electrician can accept the next job
+          setActiveJobId(null);
+          setCurrentJob(null);
+          setIsTracking(false);
+          setMessages([]);
       });
       socket.on('teamMemberJoined', (data) => {
         setCurrentJob(prev => {
           if (!prev) return prev;
-          // Prevent duplicates in case of network stutters
           if (prev.electricians.some(e => String(e._id) === String(data.electrician._id))) return prev;
           return { ...prev, electricians: [...prev.electricians, data.electrician] };
         });
       });
     } else {
       setIsTracking(false);
-      socket.disconnect();
     }
     return () => {
       socket.off('receiveMessage');
@@ -755,15 +950,16 @@ function ElectricianHome({ user, showToast }) {
       socket.off('jobCancelled');
       socket.off('jobCompleted');
       socket.off('teamMemberJoined');
-      socket.disconnect();
-    };
-  }, [isOnline, showToast, user]);
+      socket.off('userTyping');
+      socket.off('userStopTyping');
+    }; 
+  }, [isOnline, showToast, user, socket]);
 
   useEffect(() => {
     if (isOnline && activeJobId) {
       socket.emit('joinJobRoom', activeJobId);
-    }
-  }, [isOnline, activeJobId]);
+    } 
+  }, [isOnline, activeJobId, socket]);
 
   useEffect(() => {
     let pollInterval;
@@ -798,14 +994,55 @@ function ElectricianHome({ user, showToast }) {
         clearInterval(pollInterval);
         socket.off('newJobAvailable', handleNewJob);
       };
-    }
-  }, [isOnline, currentJob]);
+    } 
+  }, [isOnline, currentJob, socket]);
 
   useEffect(() => {
     if (chatContainerRef.current) {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
   }, [messages]);
+
+  useEffect(() => {
+    if (currentTab === 'history') {
+      const fetchHistory = async () => {
+        try {
+          const data = await fetchJson('/jobs/history');
+          setJobHistory(Array.isArray(data) ? data : []);
+        } catch (e) { showToast('Failed to load history', 'error'); }
+      };
+      fetchHistory();
+    }
+  }, [currentTab, showToast]);
+
+  // Render Job History Earnings Chart
+  useEffect(() => {
+    if (currentTab === 'history' && jobHistory.length > 0 && chartRef.current) {
+      if (chartInstance.current) chartInstance.current.destroy();
+      const ctx = chartRef.current.getContext('2d');
+      
+      const last7Days = [...Array(7)].map((_, i) => {
+        const d = new Date(); d.setDate(d.getDate() - i); return d.toLocaleDateString();
+      }).reverse();
+      
+      const earningsData = last7Days.map(date => {
+        return jobHistory.filter(job => new Date(job.createdAt).toLocaleDateString() === date && job.status === 'completed')
+          .reduce((sum, job) => sum + Math.round((job.estimatedPrice * 0.8) / Math.max(1, job.electricians?.length || 1)), 0);
+      });
+
+      chartInstance.current = new window.Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: last7Days.map(d => d.substring(0, 5)),
+          datasets: [{
+            label: 'Earnings (₹)', data: earningsData, borderColor: '#0d9488',
+            backgroundColor: 'rgba(13, 148, 136, 0.2)', fill: true, tension: 0.4
+          }]
+        },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+      });
+    }
+  }, [currentTab, jobHistory]);
 
   useEffect(() => {
     let interval;
@@ -827,7 +1064,7 @@ function ElectricianHome({ user, showToast }) {
       }, 3000);
     }
     return () => clearInterval(interval);
-  }, [isTracking, activeJobId]);
+  }, [isTracking, activeJobId, socket]);
 
   const handleSendMessage = () => {
     if (!chatInput.trim()) return;
@@ -893,6 +1130,13 @@ function ElectricianHome({ user, showToast }) {
           </div>
         </div>
 
+        <div className="desktop-tabs" style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
+          <button className={`btn ${currentTab === 'active' ? '' : 'btn-outline'}`} style={{ flex: 1, padding: '10px' }} onClick={() => setCurrentTab('active')}>Workspace</button>
+          <button className={`btn ${currentTab === 'history' ? '' : 'btn-outline'}`} style={{ flex: 1, padding: '10px' }} onClick={() => setCurrentTab('history')}>Job History</button>
+        </div>
+
+        {currentTab === 'active' ? (
+          <React.Fragment>
         {isOnline && !currentJob && (
           <div className="card" style={{ animationDelay: '0.1s', border: 'none', background: 'var(--primary-light)', boxShadow: 'none' }}>
             <div style={{ textAlign: 'center', padding: '30px 20px' }}>
@@ -906,8 +1150,10 @@ function ElectricianHome({ user, showToast }) {
                 <div style={{ marginTop: '24px', padding: '20px', background: 'var(--surface)', borderRadius: '16px', border: '2px solid var(--success)', boxShadow: 'var(--shadow-lg)' }}>
                   <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.2)', color: 'var(--success)', marginBottom: '12px', display: 'inline-block' }}>NEW MATCH FOUND</span>
                   <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-main)' }}><strong>Service:</strong> {availableJob.serviceType}</p>
-                  <p style={{ margin: '4px 0 12px 0', fontSize: '0.9rem', color: 'var(--text-main)' }}><strong>Location:</strong> {availableJob.address}</p>
-                  <p style={{ margin: '4px 0 12px 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>Job ID: <span style={{ fontFamily: 'monospace' }}>{availableJob._id}</span></p>
+                  <p style={{ margin: '4px 0 12px 0', fontSize: '0.9rem', color: 'var(--text-main)' }}>
+                    <strong>Location:</strong> <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(availableJob.address)}`} target="_blank" rel="noreferrer" style={{ color: 'var(--primary)', textDecoration: 'none' }}>{availableJob.address} <i className="fas fa-external-link-alt"></i></a>
+                  </p>
+                  <p style={{ margin: '0 0 12px 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>Job ID: <span style={{ fontFamily: 'monospace' }}>{availableJob._id}</span></p>
                   <button className="btn" style={{ width: '100%', background: 'var(--success)', marginTop: '8px' }} onClick={handleAcceptJob}>
                     Accept Job & Start Tracking
                   </button>
@@ -931,12 +1177,18 @@ function ElectricianHome({ user, showToast }) {
                   <i className="fas fa-location-arrow fa-fade fa-3x" style={{ color: 'var(--success)', marginBottom: '16px' }}></i>
                   <h4 style={{ color: 'var(--success)' }}>En Route to Customer</h4>
                   <p style={{ color: 'var(--text-main)' }}>Live location sharing is active. The customer is seeing your approach!</p>
+                  {myLiveCoords && currentJob?.location?.coordinates && (
+                    <TrackingMap origin={currentJob.location.coordinates} destination={myLiveCoords} />
+                  )}
                 </React.Fragment>
               ) : hasArrived ? (
                 <React.Fragment>
                   <i className="fas fa-map-pin fa-3x" style={{ color: 'var(--primary)', marginBottom: '16px' }}></i>
                   <h4 style={{ color: 'var(--primary)' }}>You Have Arrived</h4>
                   <p style={{ color: 'var(--text-main)' }}>You can now begin the service. Message the customer if needed.</p>
+                  <p style={{ margin: '12px 0 0 0', fontSize: '0.9rem', color: 'var(--text-main)' }}>
+                    <strong>Job Location:</strong> <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(currentJob.address)}`} target="_blank" rel="noreferrer" style={{ color: 'var(--primary)', textDecoration: 'none' }}>{currentJob.address} <i className="fas fa-external-link-alt"></i></a>
+                  </p>
                 </React.Fragment>
               ) : null}
               <p style={{ color: 'var(--warning)', marginTop: '16px', fontWeight: 'bold' }}>
@@ -962,8 +1214,14 @@ function ElectricianHome({ user, showToast }) {
             })}
             {messages.length === 0 && <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem', margin: 'auto' }}>No messages yet. Send an update!</div>}
           </div>
+              {typingUser && <div style={{ fontSize: '0.8rem', color: 'var(--primary)', fontStyle: 'italic', padding: '8px 16px 0', background: 'var(--secondary)' }}>{typingUser} is typing...</div>}
           <div style={{ padding: '10px', display: 'flex', gap: '8px', borderTop: '1px solid var(--border-light)' }}>
-            <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()} placeholder="Type a message..." style={{ flex: 1, padding: '10px', borderRadius: '20px', border: '1px solid var(--border-light)', outline: 'none' }} />
+                <input type="text" value={chatInput} onChange={(e) => {
+                  setChatInput(e.target.value);
+                  socket.emit('typing', { jobId: activeJobId, senderName: user?.name?.split(' ')[0] || 'Electrician' }); 
+                  if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+                  typingTimeoutRef.current = setTimeout(() => socket.emit('stopTyping', { jobId: activeJobId }), 1500);
+                }} onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()} placeholder="Type a message..." style={{ flex: 1, padding: '10px', borderRadius: '20px', border: '1px solid var(--border-light)', outline: 'none' }} /> 
             <button className="btn" style={{ padding: '10px 16px', borderRadius: '20px' }} onClick={handleSendMessage}><i className="fas fa-paper-plane"></i></button>
           </div>
         </div>
@@ -988,6 +1246,44 @@ function ElectricianHome({ user, showToast }) {
               <p style={{ fontSize: '0.85rem', margin: 0, color: 'var(--text-muted)' }}>Always wear protective shoe covers when entering a home. Clearly explain the issue and price breakdown before starting repairs.</p>
             </div>
           </div>
+        </div>
+        </React.Fragment>
+        ) : (
+          <div className="card" style={{ animation: 'fadeInUp 0.4s forwards' }}>
+            <h3 style={{ marginBottom: '16px' }}><i className="fas fa-history" style={{ color: 'var(--primary)' }}></i> Your Job History</h3>
+            {jobHistory.length > 0 && (
+              <div style={{ marginBottom: '20px', height: '180px', width: '100%' }}>
+                <canvas ref={chartRef}></canvas>
+              </div>
+            )}
+            {jobHistory.length === 0 ? <p style={{ color: 'var(--text-muted)' }}>No past jobs found.</p> : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {jobHistory.map(job => (
+                  <div key={job._id} style={{ background: 'var(--secondary)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-light)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                      <strong style={{ fontSize: '1.1rem', textTransform: 'capitalize' }}>{job.serviceType.replace('_', ' ')}</strong>
+                      <span className="badge" style={{ background: job.status === 'completed' ? 'var(--success)' : (job.status === 'cancelled' ? 'var(--danger)' : 'var(--warning)'), color: 'white' }}>{job.status}</span>
+                    </div>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}><i className="far fa-calendar-alt"></i> {new Date(job.createdAt).toLocaleDateString()}</div>
+                    <div style={{ fontSize: '0.95rem', marginTop: '8px', fontWeight: 'bold', color: 'var(--primary)' }}>Earnings: <span style={{ color: 'var(--success)' }}>₹{Math.round((job.estimatedPrice * 0.8) / Math.max(1, job.electricians?.length || 1))}</span></div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Mobile Bottom Navigation */}
+      <div className="mobile-bottom-nav">
+        <div className={`nav-item ${currentTab === 'active' ? 'active' : ''}`} onClick={() => setCurrentTab('active')}>
+          <i className="fas fa-toolbox"></i><span>Workspace</span>
+        </div>
+        <div className={`nav-item ${currentTab === 'history' ? 'active' : ''}`} onClick={() => setCurrentTab('history')}>
+          <i className="fas fa-receipt"></i><span>History</span>
+        </div>
+        <div className="nav-item" onClick={onEditProfile}>
+          <i className="fas fa-user"></i><span>Profile</span>
         </div>
       </div>
 
@@ -1101,6 +1397,7 @@ const generateMockUsers = () => {
 };
 
 function AdminPanel({ user, onLogout, showToast }) {
+  const { socket } = useSocket();
   const [activeTab, setActiveTab] = useState('database');
   const [searchTerm, setSearchTerm] = useState('');
   const [liveData, setLiveData] = useState([]);
@@ -1109,30 +1406,38 @@ function AdminPanel({ user, onLogout, showToast }) {
   const [isLoading, setIsLoading] = useState(true);
   const [financeData, setFinanceData] = useState({ pendingJobs: [], pendingWithdrawals: [] });
   const [isDownloading, setIsDownloading] = useState(false);
+  const [broadcastMsg, setBroadcastMsg] = useState('');
+
+  const fetchDashboardData = React.useCallback(async () => {
+    try {
+      setIsLoading(true);
+      const users = await fetchJson('/admin/users');
+      setLiveData(Array.isArray(users) ? users : []);
+      const fin = await fetchJson('/admin/finance');
+      setFinanceData(fin && Array.isArray(fin.pendingJobs) ? fin : { pendingJobs: [], pendingWithdrawals: [] });
+    } catch (error) {
+      showToast(`Failed to fetch dashboard data: ${error.message}`, 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [showToast]);
 
   useEffect(() => {
-    const fetchUsers = async () => {
-      try {
-        setIsLoading(true);
-        const users = await fetchJson('/admin/users');
-        setLiveData(users);
-        const fin = await fetchJson('/admin/finance');
-        setFinanceData(fin);
-      } catch (error) {
-        showToast(`Failed to fetch users: ${error.message}`, 'error');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchUsers();
+    fetchDashboardData();
     setMockData(generateMockUsers());
-  }, []);
 
-  const currentData = useMockData ? mockData : liveData;
+    const handleAdminRefresh = () => fetchDashboardData();
+    socket.on('adminRefresh', handleAdminRefresh);
+
+    return () => {
+      socket.off('adminRefresh', handleAdminRefresh);
+    };
+  }, [socket, fetchDashboardData]);
+
+  const currentData = useMockData ? mockData : (Array.isArray(liveData) ? liveData : []);
 
   const filteredDB = currentData.filter(row => 
-    Object.values(row).some(val =>
+    row && Object.values(row).some(val =>
       val != null && String(val).toLowerCase().includes(searchTerm.toLowerCase())
     )
   );
@@ -1155,7 +1460,7 @@ function AdminPanel({ user, onLogout, showToast }) {
         const customerName = job.customer ? `"${job.customer.name}"` : 'N/A';
         const customerPhone = job.customer ? `"${job.customer.phone}"` : 'N/A';
         const electricians = job.electricians && job.electricians.length > 0 
-          ? `"${job.electricians.map(e => e.name).join(' & ')}"` 
+          ? `"${job.electricians.map(e => e?.name || 'Unknown').join(' & ')}"` 
           : 'None';
         const completedAt = new Date(job.updatedAt).toLocaleString();
         
@@ -1188,9 +1493,7 @@ function AdminPanel({ user, onLogout, showToast }) {
     try {
       await fetchJson(`/admin/jobs/${id}/verify-payment`, { method: 'PUT' });
       showToast('Payment verified. Job is now active.', 'success');
-      // Refresh lists
-      const fin = await fetchJson('/admin/finance');
-      setFinanceData(fin);
+      // The WebSocket 'adminRefresh' event will automatically pull the fresh lists
     } catch (e) { showToast(e.message, 'error'); }
   };
 
@@ -1198,13 +1501,21 @@ function AdminPanel({ user, onLogout, showToast }) {
     try {
       await fetchJson(`/admin/withdrawals/${id}/approve`, { method: 'PUT' });
       showToast('Withdrawal approved.', 'success');
-      const fin = await fetchJson('/admin/finance');
-      setFinanceData(fin);
+      // The WebSocket 'adminRefresh' event will automatically pull the fresh lists
     } catch (e) { showToast(e.message, 'error'); }
   };
 
+  const handleBroadcast = async () => {
+    if(!broadcastMsg.trim()) return;
+    try {
+      await fetchJson('/admin/broadcast', { method: 'POST', body: { message: broadcastMsg.trim() } });
+      showToast('Broadcast sent to all active users!', 'success');
+      setBroadcastMsg('');
+    } catch(e) { showToast(e.message, 'error'); }
+  };
+
   return (
-    <div style={{ padding: '20px', fontFamily: 'var(--font-family, sans-serif)' }}>
+    <div style={{ padding: '0', fontFamily: 'var(--font-family, sans-serif)' }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', background: 'var(--surface)', padding: '16px 24px', borderRadius: '16px', boxShadow: 'var(--shadow-sm)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <div style={{ background: 'var(--danger)', color: 'white', padding: '10px', borderRadius: '12px' }}>
@@ -1220,6 +1531,11 @@ function AdminPanel({ user, onLogout, showToast }) {
         <button className="btn btn-outline" style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }} onClick={onLogout}>
           <i className="fas fa-power-off"></i> Terminate Session
         </button>
+      </div>
+
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '24px' }}>
+        <input type="text" value={broadcastMsg} onChange={e => setBroadcastMsg(e.target.value)} placeholder="Type a system-wide broadcast message..." className="form-control" style={{ margin: 0, flex: 1 }} />
+        <button className="btn" style={{ background: 'var(--warning)' }} onClick={handleBroadcast}><i className="fas fa-bullhorn"></i> Send Broadcast</button>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '24px' }}>
@@ -1238,6 +1554,9 @@ function AdminPanel({ user, onLogout, showToast }) {
             <input type="checkbox" checked={useMockData} onChange={(e) => setUseMockData(e.target.checked)} style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: 'var(--primary)' }} />
             Demo Mode
           </label>
+        <button className="btn btn-outline" style={{ borderColor: 'var(--success)', color: 'var(--success)' }} onClick={fetchDashboardData} disabled={isLoading}>
+          <i className={`fas ${isLoading ? 'fa-spinner fa-spin' : 'fa-sync'}`}></i> Refresh Data
+        </button>
           <button className="btn btn-outline" style={{ borderColor: 'var(--primary)', color: 'var(--primary)' }} onClick={handleDownloadReport} disabled={isDownloading}>
             <i className={`fas ${isDownloading ? 'fa-spinner fa-spin' : 'fa-file-csv'}`}></i> {isDownloading ? 'Generating...' : 'Export Completed Jobs'}
           </button>
@@ -1247,9 +1566,9 @@ function AdminPanel({ user, onLogout, showToast }) {
       <div style={{ background: 'var(--surface)', borderRadius: '16px', boxShadow: 'var(--shadow-md)', overflow: 'hidden', border: '1px solid var(--border-light)' }}>
         {activeTab === 'database' && (
           <div>
-            <div style={{ padding: '16px', borderBottom: '1px solid var(--border-light)', display: 'flex', justifyContent: 'space-between' }}>
+            <div style={{ padding: '16px', borderBottom: '1px solid var(--border-light)', display: 'flex', flexWrap: 'wrap', gap: '12px', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ margin: 0 }}><i className="fas fa-table" style={{ color: 'var(--primary)' }}></i> Master Records</h3>
-              <input type="text" aria-label="Search records" placeholder="Search IDs, Names, Locations..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{ padding: '8px 16px', borderRadius: '20px', border: '1px solid var(--border-light)', width: '300px', outline: 'none' }} />
+              <input type="text" aria-label="Search records" placeholder="Search IDs, Names, Locations..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{ padding: '8px 16px', borderRadius: '20px', border: '1px solid var(--border-light)', width: '100%', maxWidth: '300px', outline: 'none' }} />
             </div>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem', textAlign: 'left' }}>
@@ -1292,8 +1611,8 @@ function AdminPanel({ user, onLogout, showToast }) {
           <div style={{ padding: '20px' }}>
             <h3 style={{ color: 'var(--text-main)', marginBottom: '16px' }}><i className="fas fa-receipt"></i> Pending User Payments</h3>
             <div style={{ display: 'grid', gap: '12px', marginBottom: '32px' }}>
-              {financeData.pendingJobs.length === 0 && <p style={{ color: 'var(--text-muted)' }}>No payments pending verification.</p>}
-              {financeData.pendingJobs.map(job => (
+          {(financeData.pendingJobs || []).length === 0 && <p style={{ color: 'var(--text-muted)' }}>No payments pending verification.</p>}
+          {(financeData.pendingJobs || []).map(job => (
                 <div key={job._id} style={{ background: 'var(--secondary)', padding: '16px', borderRadius: '12px', display: 'flex', flexWrap: 'wrap', gap: '12px', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <strong>{job.serviceType}</strong> - ₹{job.estimatedPrice} <br/>
@@ -1306,8 +1625,8 @@ function AdminPanel({ user, onLogout, showToast }) {
 
             <h3 style={{ color: 'var(--text-main)', marginBottom: '16px' }}><i className="fas fa-money-bill-transfer"></i> Withdrawal Requests</h3>
             <div style={{ display: 'grid', gap: '12px' }}>
-              {financeData.pendingWithdrawals.length === 0 && <p style={{ color: 'var(--text-muted)' }}>No pending withdrawal requests.</p>}
-              {financeData.pendingWithdrawals.map(req => (
+          {(financeData.pendingWithdrawals || []).length === 0 && <p style={{ color: 'var(--text-muted)' }}>No pending withdrawal requests.</p>}
+          {(financeData.pendingWithdrawals || []).map(req => (
                 <div key={req._id} style={{ background: 'var(--secondary)', padding: '16px', borderRadius: '12px', display: 'flex', flexWrap: 'wrap', gap: '12px', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <strong>Electrician: {req.electrician?.name}</strong> <br/>
@@ -1323,9 +1642,9 @@ function AdminPanel({ user, onLogout, showToast }) {
           </div>
         )}
         {activeTab === 'logs' && (
-          <div style={{ background: '#0f172a', color: '#e2e8f0', minHeight: '500px', padding: '16px' }}>
+          <div style={{ background: '#0f172a', color: '#e2e8f0', minHeight: '500px', padding: '16px', overflowX: 'auto' }}>
             {mockLogs.map((log, idx) => (
-              <div key={idx} style={{ marginBottom: '10px', display: 'flex', gap: '16px', paddingBottom: '10px', borderBottom: '1px dashed #1e293b' }}>
+              <div key={idx} style={{ marginBottom: '10px', display: 'flex', gap: '16px', paddingBottom: '10px', borderBottom: '1px dashed #1e293b', minWidth: '600px' }}>
                 <span style={{ color: '#64748b' }}>[{log.time}]</span>
                 <span style={{ color: log.level === 'INFO' ? '#38bdf8' : '#fbbf24', fontWeight: 'bold', width: '60px' }}>{log.level}</span>
                 <span style={{ color: '#c084fc', width: '150px' }}>{log.src}</span>
@@ -1343,10 +1662,12 @@ function AdminPanel({ user, onLogout, showToast }) {
 // 3. MAIN APP BOOTSTRAP
 // ==========================================
 function AppContent() {
+  const { socket } = useSocket();
   const [user, setUser] = useState(null);
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(() => localStorage.getItem('wattzen_theme') === 'dark');
   const [toasts, setToasts] = useState([]);
   const [isInitializing, setIsInitializing] = useState(true);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -1359,17 +1680,31 @@ function AppContent() {
     navigate(`/${role}`);
   };
 
+  const handleProfileUpdate = (updatedUser) => {
+    const userWithRole = { ...updatedUser, role: user.role };
+    setUser(userWithRole);
+    localStorage.setItem('user', JSON.stringify(userWithRole));
+  };
+
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     setUser(null);
-    navigate('/');
+    navigate('/login');
   };
 
   const toggleTheme = () => {
-    setIsDarkMode(!isDarkMode);
-    document.body.classList.toggle('dark-mode');
+    setIsDarkMode(prev => {
+      const next = !prev;
+      localStorage.setItem('wattzen_theme', next ? 'dark' : 'light');
+      return next;
+    });
   };
+
+  useEffect(() => {
+    if (isDarkMode) document.body.classList.add('dark-mode');
+    else document.body.classList.remove('dark-mode');
+  }, [isDarkMode]);
 
   const showToast = React.useCallback((message, type = 'success') => {
     const id = Date.now();
@@ -1382,7 +1717,7 @@ function AppContent() {
       const token = localStorage.getItem('token');
       if (!token) {
         if (location.pathname !== '/' && location.pathname !== '/login') {
-          navigate('/');
+          navigate('/login');
         }
         setIsInitializing(false);
         return;
@@ -1399,9 +1734,10 @@ function AppContent() {
           const userWithRole = { ...freshUser, role: freshUser.role };
           setUser(userWithRole);
           localStorage.setItem('user', JSON.stringify(userWithRole));
-          const targetPath = `/${freshUser.role}`;
-          if (location.pathname !== targetPath) {
-            navigate(targetPath);
+          
+          // Redirect logged-in users away from auth pages, or if they try accessing the wrong role dashboard
+          if (location.pathname === '/' || location.pathname === '/login' || !location.pathname.startsWith(`/${freshUser.role}`)) {
+            navigate(`/${freshUser.role}`);
           }
         } else {
           throw new Error('Invalid user data received from server.');
@@ -1417,6 +1753,22 @@ function AppContent() {
     validateSession();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Global socket listener for Admin Broadcasts and connection management
+  useEffect(() => {
+    if (user) {
+      socket.connect();
+      const handleBroadcast = (msg) => showToast(`📢 Admin Broadcast: ${msg}`, 'warning');
+      socket.on('systemBroadcast', handleBroadcast);
+      
+      return () => {
+        socket.off('systemBroadcast', handleBroadcast);
+      };
+    } else {
+      // If there's no user, disconnect the socket.
+      socket.disconnect();
+    }
+  }, [user, showToast, socket]);
 
   const handleSecretAdminLogin = async () => {
     const pwd = prompt("Enter Admin Secret PIN:");
@@ -1451,27 +1803,29 @@ function AppContent() {
       padding: isAuthView ? '0' : '16px'
     }}>
       <Routes>
-        <Route path="/" element={<Landing onEnter={() => navigate('/login')} onSecret={handleSecretAdminLogin} />} />
-        <Route path="/login" element={<Login onLoginSuccess={handleLoginSuccess} />} />
+        <Route path="/" element={user ? <Navigate to={`/${user.role}`} replace /> : <Landing onEnter={() => navigate('/login')} onSecret={handleSecretAdminLogin} />} />
+        <Route path="/login" element={user ? <Navigate to={`/${user.role}`} replace /> : <Login onLoginSuccess={handleLoginSuccess} />} />
         
         <Route path="/admin" element={user?.role === 'admin' ? <AdminPanel user={user} onLogout={handleLogout} showToast={showToast} /> : <Navigate to="/login" replace />} />
         
         <Route path="/customer" element={user?.role === 'customer' ? (
           <React.Fragment>
-            <Navbar user={user} onLogout={handleLogout} toggleTheme={toggleTheme} isDarkMode={isDarkMode} />
-            <div style={{ padding: '20px 0' }}><CustomerHome user={user} showToast={showToast} /></div>
+            <Navbar user={user} onLogout={handleLogout} toggleTheme={toggleTheme} isDarkMode={isDarkMode} onEditProfile={() => setIsProfileModalOpen(true)} />
+            <div style={{ padding: '20px 0' }}><CustomerHome user={user} showToast={showToast} onEditProfile={() => setIsProfileModalOpen(true)} /></div>
           </React.Fragment>
         ) : <Navigate to="/login" replace />} />
 
         <Route path="/electrician" element={user?.role === 'electrician' ? (
           <React.Fragment>
-            <Navbar user={user} onLogout={handleLogout} toggleTheme={toggleTheme} isDarkMode={isDarkMode} />
-            <div style={{ padding: '20px 0' }}><ElectricianHome user={user} showToast={showToast} /></div>
+            <Navbar user={user} onLogout={handleLogout} toggleTheme={toggleTheme} isDarkMode={isDarkMode} onEditProfile={() => setIsProfileModalOpen(true)} />
+            <div style={{ padding: '20px 0' }}><ElectricianHome user={user} showToast={showToast} onEditProfile={() => setIsProfileModalOpen(true)} /></div>
           </React.Fragment>
         ) : <Navigate to="/login" replace />} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+
+      {isProfileModalOpen && <ProfileModal user={user} onClose={() => setIsProfileModalOpen(false)} onUpdate={handleProfileUpdate} showToast={showToast} onLogout={handleLogout} />}
 
       {/* Global Toast Notifications */}
       <div id="toastContainer">

@@ -38,16 +38,23 @@ const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/wattzen';
 // ==========================================
 // 1. MONGODB SCHEMAS & MODELS
 // ==========================================
-mongoose.connect(MONGO_URI).then(() => {
-  console.log('Connected to MongoDB');
-  // Prevent port binding if deployed in a Serverless environment like Vercel
+const connectDB = async () => {
+  // Serverless DB caching: Prevent connection pool exhaustion by reusing active connections
+  if (mongoose.connection.readyState >= 1) return;
+  try {
+    await mongoose.connect(MONGO_URI);
+    console.log('Connected to MongoDB');
+  } catch (err) {
+    console.error('Could not connect to MongoDB.', err);
+  }
+};
+
+connectDB().then(() => {
   if (!process.env.VERCEL) {
     server.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
     });
   }
-}).catch(err => {
-  console.error('Could not connect to MongoDB.', err);
 });
 
 const userSchema = new mongoose.Schema({
@@ -76,7 +83,8 @@ const jobSchema = new mongoose.Schema({
   jobOTP: { type: String },
   paymentStatus: { type: String, enum: ['pending', 'verifying', 'paid'], default: 'pending' },
   status: { type: String, enum: ['verifying_payment', 'searching', 'assigned', 'in_progress', 'payment', 'completed', 'cancelled'], default: 'verifying_payment' },
-  isRated: { type: Boolean, default: false }
+  isRated: { type: Boolean, default: false }, // Kept for backwards compatibility
+  ratedElectricians: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }]
 }, { timestamps: true });
 
 jobSchema.index({ location: '2dsphere' });
@@ -99,6 +107,8 @@ io.on('connection', (socket) => {
   socket.on('joinJobRoom', (jobId) => socket.join(jobId));
   socket.on('updateLocation', (data) => io.to(data.jobId).emit('electricianLocationChanged', data));
   socket.on('sendMessage', (data) => socket.to(data.jobId).emit('receiveMessage', data));
+  socket.on('typing', (data) => socket.to(data.jobId).emit('userTyping', data));
+  socket.on('stopTyping', (data) => socket.to(data.jobId).emit('userStopTyping', data));
 });
 
 // ==========================================
@@ -159,7 +169,9 @@ api.post('/admin/secret-login', async (req, res) => {
         admin = await User.create({ name: 'System Admin', phone: 'ADMIN_MASTER', password: await bcrypt.hash(ADMIN_PIN, 10), role: 'admin' });
       }
       const token = jwt.sign({ userId: admin._id, role: 'admin' }, JWT_SECRET, { expiresIn: '7d' });
-      return res.json({ token, user: admin });
+      
+      // FIX: Secure the payload to prevent leaking the hashed PIN back to the frontend
+      return res.json({ token, user: { _id: admin._id, name: admin.name, phone: admin.phone, role: admin.role } });
     }
 
     console.warn(`[AUDIT] Failed Admin Login attempt from IP: ${clientIp} at ${new Date().toISOString()}`);
@@ -184,8 +196,12 @@ api.post('/admin/secret-login', async (req, res) => {
 // POST /api/signup
 api.post('/signup', async (req, res) => {
   try {
-    const { name, phone, password, role } = req.body;
+    let { name, phone, password, role } = req.body;
     if (!name || !phone || !password || !role) return res.status(400).json({ message: 'All fields are required' });
+
+    // Trim inputs to prevent accidental trailing spaces from mobile keyboards
+    name = name.trim();
+    phone = phone.trim();
 
     // Security: Prevent unauthorized creation of admin accounts
     if (role === 'admin') {
@@ -204,6 +220,7 @@ api.post('/signup', async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
     const user = new User({ name, phone, password: hashedPassword, role });
     await user.save();
+    io.emit('adminRefresh');
 
     const token = jwt.sign({ userId: user._id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
     res.status(201).json({ token, user: { _id: user._id, name: user.name, phone: user.phone, role: user.role } });
@@ -218,8 +235,10 @@ api.post('/signup', async (req, res) => {
 // POST /api/login
 api.post('/login', async (req, res) => {
   try {
-    const { phone, password, role } = req.body;
+    let { phone, password, role } = req.body;
     if (!phone || !password || !role) return res.status(400).json({ message: 'Phone, password, and role are required' });
+
+    phone = phone.trim();
 
     const user = await User.findOne({ phone, role });
     if (!user) return res.status(400).json({ message: 'Invalid credentials or wrong role' });
@@ -237,7 +256,8 @@ api.post('/login', async (req, res) => {
 // GET /api/me - Get current user profile from token
 api.get('/me', authenticateToken, async (req, res) => {
   try {
-    const user = await User.findById(req.user.userId).select('-__v'); // Exclude version key
+    // FIX: Explicitly exclude the password hash from being sent to the client
+    const user = await User.findById(req.user.userId).select('-password -__v'); 
     if (!user) {
       // This case can happen if the user was deleted but the token is still valid.
       return res.status(404).json({ message: 'User not found' });
@@ -245,6 +265,30 @@ api.get('/me', authenticateToken, async (req, res) => {
     res.json(user.toObject());
   } catch (error) {
     res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// PUT /api/me - Update user profile
+api.put('/me', authenticateToken, async (req, res) => {
+  try {
+    let { name, phone } = req.body;
+    if (!name || !phone) return res.status(400).json({ message: 'Name and phone are required' });
+    name = name.trim();
+    phone = phone.trim();
+    
+    // Ensure the new phone isn't already taken by another account
+    const existing = await User.findOne({ phone, _id: { $ne: req.user.userId } });
+    if (existing) return res.status(400).json({ message: 'Phone number already in use' });
+
+    const updatedUser = await User.findByIdAndUpdate(
+      req.user.userId, { name, phone }, { new: true }
+    ).select('-password -__v');
+    
+    if (!updatedUser) return res.status(404).json({ message: 'User not found' });
+    io.emit('adminRefresh'); // Update admin dashboard lists
+    res.json(updatedUser.toObject());
+  } catch (error) {
+    res.status(500).json({ message: 'Internal server error updating profile' });
   }
 });
 
@@ -271,6 +315,7 @@ api.post('/jobs', authenticateToken, async (req, res) => {
     });
 
     await newJob.save();
+    io.emit('adminRefresh');
     
     res.status(201).json(newJob);
   } catch (error) {
@@ -346,6 +391,7 @@ api.put('/jobs/:id/accept', authenticateToken, async (req, res) => {
       const justAddedElectrician = updatedJob.electricians.find(e => e._id.equals(electricianId));
       io.to(jobId).emit('teamMemberJoined', { electrician: justAddedElectrician, teamSize: updatedJob.teamSize, currentSize: updatedJob.electricians.length });
     }
+    io.emit('adminRefresh');
 
     res.status(200).json(updatedJob);
   } catch (error) {
@@ -366,6 +412,7 @@ api.put('/jobs/:id/cancel', authenticateToken, async (req, res) => {
 
     // Notify any partially joined or tracking electricians that the job was cancelled
     io.to(req.params.id).emit('jobCancelled');
+    io.emit('adminRefresh');
 
     res.status(200).json({ message: 'Job cancelled successfully' });
   } catch (error) {
@@ -386,6 +433,7 @@ api.put('/admin/jobs/:id/verify-payment', authenticateToken, async (req, res) =>
     
     io.to(req.params.id).emit('paymentVerified');
     io.emit('newJobAvailable', job); // Now alert electricians!
+    io.emit('adminRefresh');
     res.status(200).json(job);
   } catch (error) {
     res.status(500).json({ message: 'Internal server error' });
@@ -414,6 +462,7 @@ api.put('/jobs/:id/complete', authenticateToken, async (req, res) => {
     }
 
     io.to(req.params.id).emit('jobCompleted'); // Notify all in room
+    io.emit('adminRefresh');
 
     res.status(200).json(job);
   } catch (error) {
@@ -473,14 +522,26 @@ api.post('/withdrawals', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'electrician') return res.status(403).json({ message: 'Forbidden' });
     
-    // FIX: Use atomic findOneAndUpdate to prevent double-spending race conditions
-    const user = await User.findOneAndUpdate(
-      { _id: req.user.userId, walletBalance: { $gte: 500 } },
-      { $set: { walletBalance: 0 } }
-    );
-    if (!user) return res.status(400).json({ message: 'Minimum ₹500 required for withdrawal or insufficient balance' });
+    const user = await User.findById(req.user.userId);
+    if (!user || user.walletBalance < 500) {
+      return res.status(400).json({ message: 'Minimum ₹500 required for withdrawal or insufficient balance' });
+    }
 
-    const withdrawal = await Withdrawal.create({ electrician: user._id, amount: user.walletBalance });
+    const amountToWithdraw = user.walletBalance;
+
+    // FIX: Deduct the exact amount to prevent overwriting concurrent earnings ($inc overwrites with $set: 0 bug)
+    const updatedUser = await User.findOneAndUpdate(
+      { _id: req.user.userId, walletBalance: { $gte: amountToWithdraw } },
+      { $inc: { walletBalance: -amountToWithdraw } },
+      { new: true }
+    );
+
+    if (!updatedUser) {
+      return res.status(400).json({ message: 'Transaction failed due to a concurrent balance change. Please try again.' });
+    }
+
+    const withdrawal = await Withdrawal.create({ electrician: user._id, amount: amountToWithdraw });
+    io.emit('adminRefresh');
     
     res.status(201).json({ message: 'Withdrawal requested', withdrawal });
   } catch (error) {
@@ -498,17 +559,30 @@ api.put('/admin/withdrawals/:id/approve', authenticateToken, async (req, res) =>
       { new: true }
     );
     if (!withdrawal) return res.status(404).json({ message: 'Request not found' });
+    io.emit('adminRefresh');
     res.status(200).json({ message: 'Withdrawal approved', withdrawal });
   } catch (error) {
     res.status(500).json({ message: 'Error approving withdrawal' });
   }
 });
 
+// POST /api/admin/broadcast - Admin global message broadcast
+api.post('/admin/broadcast', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    io.emit('systemBroadcast', req.body.message);
+    res.status(200).json({ success: true });
+  } catch (error) {
+    res.status(500).json({ message: 'Error broadcasting message' });
+  }
+});
+
 // POST /api/users/:id/rate - Rate an electrician
 api.post('/users/:id/rate', authenticateToken, async (req, res) => {
   try {
-    const { rating } = req.body;
-    if (!rating || rating < 1 || rating > 5) return res.status(400).json({ message: 'Invalid rating' });
+    // Parse rating to a strict number to prevent MongoDB $multiply aggregation type errors
+    const numericRating = Number(req.body.rating);
+    if (!numericRating || numericRating < 1 || numericRating > 5) return res.status(400).json({ message: 'Invalid rating' });
 
     if (!req.params.id || req.params.id === 'undefined' || !mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({ message: 'Invalid or missing Electrician ID' });
@@ -518,20 +592,19 @@ api.post('/users/:id/rate', authenticateToken, async (req, res) => {
     if (!electrician || electrician.role !== 'electrician') return res.status(404).json({ message: 'Electrician not found' });
 
     // BUG FIX: Verify that the requesting user (customer) has a completed job with this electrician.
-    const completedJob = await Job.findOne({
+    // Use atomic findOneAndUpdate with $addToSet to prevent race conditions on double-rating
+    const completedJob = await Job.findOneAndUpdate({
       customer: req.user.userId,
       electricians: req.params.id,
       status: 'completed',
-      isRated: { $ne: true }
+      ratedElectricians: { $ne: req.params.id }
+    }, {
+      $addToSet: { ratedElectricians: req.params.id }
     });
 
     if (!completedJob) {
-      return res.status(403).json({ message: 'Forbidden: You can only rate an electrician once after a completed job.' });
+      return res.status(403).json({ message: 'Forbidden: You can only rate this electrician once after a completed job.' });
     }
-
-    // Mark the job as rated to prevent rating spam
-    completedJob.isRated = true;
-    await completedJob.save();
 
     const updatedUser = await User.findByIdAndUpdate(
       req.params.id,
@@ -541,7 +614,7 @@ api.post('/users/:id/rate', authenticateToken, async (req, res) => {
           averageRating: {
             $round: [
               { $divide: [
-                { $add: [{ $multiply: [{ $ifNull: ["$averageRating", 0] }, { $ifNull: ["$totalReviews", 0] }] }, rating] },
+                    { $add: [{ $multiply: [{ $ifNull: ["$averageRating", 0] }, { $ifNull: ["$totalReviews", 0] }] }, numericRating] },
                 { $add: [{ $ifNull: ["$totalReviews", 0] }, 1] }
               ]},
               1
@@ -551,9 +624,25 @@ api.post('/users/:id/rate', authenticateToken, async (req, res) => {
       }],
       { new: true }
     );
+    io.emit('adminRefresh');
     res.status(200).json({ message: 'Rating submitted', rating: updatedUser.averageRating });
   } catch (error) {
     res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// GET /api/jobs/history - Fetch user job history
+api.get('/jobs/history', authenticateToken, async (req, res) => {
+  try {
+    let query = {};
+    if (req.user.role === 'customer') query.customer = req.user.userId;
+    else if (req.user.role === 'electrician') query.electricians = req.user.userId;
+    else return res.status(403).json({ message: 'Forbidden' });
+
+    const jobs = await Job.find(query).sort({ createdAt: -1 }).limit(20).populate('electricians', 'name phone').populate('customer', 'name phone');
+    res.status(200).json(jobs);
+  } catch (error) {
+    res.status(500).json({ message: 'Internal server error while fetching history' });
   }
 });
 
