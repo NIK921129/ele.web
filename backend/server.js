@@ -26,6 +26,14 @@ const io = new Server(server, { cors: corsOptions });
 app.use(cors(corsOptions));
 app.use(express.json());
 
+// Global Error Handler for malformed JSON to prevent the server from returning HTML stack traces
+app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    return res.status(400).json({ message: 'Invalid JSON payload format' });
+  }
+  next();
+});
+
 // Add a request logger to verify if the frontend is reaching the backend
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url} - Origin: ${req.headers.origin}`);
@@ -33,10 +41,11 @@ app.use((req, res, next) => {
 });
 
 const PORT = process.env.PORT || 5000;
-const JWT_SECRET = process.env.JWT_SECRET;
-const MONGO_URI = process.env.MONGO_URI;
+// Fix: Allow seamless local development by falling back to local credentials unless explicitly in production
+const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_fallback_key';
+const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/wattzen';
 
-if (!MONGO_URI || !JWT_SECRET) {
+if (process.env.NODE_ENV === 'production' && (!process.env.MONGO_URI || !process.env.JWT_SECRET)) {
   console.error('\n[FATAL ERROR] Missing real backend credentials!');
   console.error('Please define MONGO_URI and JWT_SECRET in your backend .env file.\n');
   process.exit(1);
@@ -45,6 +54,8 @@ if (!MONGO_URI || !JWT_SECRET) {
 // ==========================================
 // 1. MONGODB SCHEMAS & MODELS
 // ==========================================
+mongoose.set('strictQuery', false); // Silence strictQuery deprecation warnings on Mongoose 7+
+
 const connectDB = async () => {
   // Serverless DB caching: Prevent connection pool exhaustion by reusing active connections
   if (mongoose.connection.readyState >= 1) return;
@@ -53,7 +64,7 @@ const connectDB = async () => {
     console.log('Connected to MongoDB');
   } catch (err) {
     console.error('Could not connect to MongoDB.', err);
-    if (!process.env.VERCEL) process.exit(1); // Stop server if DB fails to prevent hanging connections
+    if (process.env.NODE_ENV === 'production' && !process.env.VERCEL) process.exit(1); // Stop server if DB fails to prevent hanging connections
     throw err; // Fix: Propagate the error so the .catch() block on initialization catches it
   }
 };
