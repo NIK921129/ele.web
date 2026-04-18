@@ -87,21 +87,27 @@
     .landing-page {
       position: fixed;
       top: 0; left: 0; width: 100%; height: 100%;
-      background: #020617; /* Deep midnight background */
+      background: radial-gradient(circle at center, #1e1b4b 0%, #020617 100%);
       display: flex;
       align-items: center;
       justify-content: center;
       overflow: hidden;
       z-index: 1000;
+      perspective: 1000px;
     }
 
-    .energy-blob {
+    .power-line {
       position: absolute;
-      border-radius: 50%;
-      filter: blur(80px);
-      opacity: 0.5;
-      z-index: 1;
-      animation: blob-float 20s infinite alternate;
+      background: linear-gradient(90deg, transparent, var(--primary), transparent);
+      height: 1px;
+      width: 100%;
+      opacity: 0.1;
+      animation: surge 8s infinite linear;
+    }
+
+    @keyframes surge {
+      0% { transform: translateX(-100%) translateY(0); }
+      100% { transform: translateX(100%) translateY(var(--y-offset)); }
     }
 
     @keyframes blob-float {
@@ -118,11 +124,11 @@
     }
 
     .landing-glass-card {
-      background: rgba(255, 255, 255, 0.03);
-      backdrop-filter: blur(25px);
-      -webkit-backdrop-filter: blur(25px);
+      background: rgba(15, 23, 42, 0.6);
+      backdrop-filter: blur(30px);
+      -webkit-backdrop-filter: blur(30px);
       border: 1px solid rgba(255, 255, 255, 0.1);
-      padding: 60px 40px;
+      padding: 80px 40px;
       border-radius: 40px;
       text-align: center;
       max-width: 600px;
@@ -157,7 +163,7 @@
       max-width: 1200px;
       margin: 0 auto;
       width: 100%;
-      padding: 16px 16px 32px;
+      padding: 16px;
     }
 
     /* Bottom Navigation (App-like feel) - Mobile First */
@@ -781,96 +787,95 @@
 
     // --- Landing Component ---
     function Landing({ onEnter, onSecret }) {
-      const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+      const [mouse, setMouse] = useState({ x: 0, y: 0 });
+      const requestRef = useRef();
+
+      const particles = React.useMemo(() =>
+        Array.from({ length: 25 }).map((_, i) => ({
+          id: i,
+          x: Math.random() * 100,
+          y: Math.random() * 100,
+          size: Math.random() * 4 + 1,
+          speed: Math.random() * 0.5 + 0.1,
+          icon: ['fa-bolt', 'fa-plug', 'fa-microchip', 'fa-circle'][Math.floor(Math.random() * 4)]
+        })), []
+      );
 
       useEffect(() => {
         const handleMouseMove = (e) => {
-          setMousePos({
-            x: (e.clientX / window.innerWidth - 0.5) * 40,
-            y: (e.clientY / window.innerHeight - 0.5) * 40
+          if (requestRef.current) return;
+          requestRef.current = requestAnimationFrame(() => {
+            setMouse({
+              x: (e.clientX / window.innerWidth - 0.5),
+              y: (e.clientY / window.innerHeight - 0.5)
+            });
+            requestRef.current = null;
           });
         };
         window.addEventListener('mousemove', handleMouseMove);
-        return () => window.removeEventListener('mousemove', handleMouseMove);
+        return () => {
+          window.removeEventListener('mousemove', handleMouseMove);
+          if (requestRef.current) cancelAnimationFrame(requestRef.current);
+        };
       }, []);
-
-      const icons = [
-        { icon: 'fa-bolt', top: '15%', left: '10%', size: '3rem', delay: '0s' },
-        { icon: 'fa-plug', top: '20%', right: '15%', size: '2.5rem', delay: '1.5s' },
-        { icon: 'fa-microchip', bottom: '25%', left: '15%', size: '2rem', delay: '3s' },
-        { icon: 'fa-solar-panel', bottom: '20%', right: '20%', size: '3.5rem', delay: '4.5s' },
-        { icon: 'fa-lightbulb', top: '60%', left: '5%', size: '1.5rem', delay: '2s' },
-        { icon: 'fa-network-wired', top: '40%', right: '8%', size: '2rem', delay: '5s' }
-      ];
 
       return (
         <div className="landing-page">
-          <div className="landing-bg-shape" style={{ top: '-10%', left: '-10%', width: '50vw', height: '50vw', background: 'var(--primary-light)', minWidth: '300px', minHeight: '300px' }}></div>
-          <div className="landing-bg-shape" style={{ bottom: '-10%', right: '-10%', width: '40vw', height: '40vw', background: 'rgba(56, 189, 248, 0.2)', minWidth: '250px', minHeight: '250px' }}></div>
-          <div className="landing-bg-shape" style={{ top: '-20%', left: '-10%', width: '60vw', height: '60vw', background: 'var(--primary-light)', minWidth: '400px', minHeight: '400px' }}></div>
-          <div className="landing-bg-shape" style={{ bottom: '-20%', right: '-10%', width: '50vw', height: '50vw', background: 'rgba(56, 189, 248, 0.15)', minWidth: '350px', minHeight: '350px' }}></div>
-          {/* Animated Background Blobs */}
-          <div className="energy-blob" style={{ top: '-10%', left: '-10%', width: '500px', height: '500px', background: '#4f46e5' }}></div>
-          <div className="energy-blob" style={{ bottom: '-10%', right: '-10%', width: '600px', height: '600px', background: '#0ea5e9', animationDelay: '-5s' }}></div>
-          <div className="energy-blob" style={{ top: '40%', left: '30%', width: '300px', height: '300px', background: '#7c3aed', opacity: 0.3, animationDuration: '15s' }}></div>
-          
-          <div className="floating-icon" style={{ top: '15%', left: '10%', animationDelay: '0s' }}><i className="fas fa-microchip"></i></div>
-          <div className="floating-icon" style={{ top: '25%', right: '15%', animationDelay: '1.5s', fontSize: '3.5rem' }}><i className="fas fa-bolt"></i></div>
-          <div className="floating-icon" style={{ bottom: '20%', left: '20%', animationDelay: '3s', fontSize: '2rem' }}><i className="fas fa-network-wired"></i></div>
-          <div className="floating-icon" style={{ bottom: '30%', right: '10%', animationDelay: '4.5s' }}><i className="fas fa-server"></i></div>
-          <div className="floating-icon" style={{ top: '15%', left: '10%', animationDelay: '0s', fontSize: '2rem' }}><i className="fas fa-bolt"></i></div>
-          <div className="floating-icon" style={{ top: '20%', right: '15%', animationDelay: '1.5s', fontSize: '3rem' }}><i className="fas fa-plug"></i></div>
-          <div className="floating-icon" style={{ bottom: '25%', left: '15%', animationDelay: '3s', fontSize: '2.5rem' }}><i className="fas fa-lightbulb"></i></div>
-          <div className="floating-icon" style={{ bottom: '20%', right: '20%', animationDelay: '4.5s', fontSize: '2rem' }}><i className="fas fa-solar-panel"></i></div>
-          {/* Parallax Floating Icons */}
-          {icons.map((item, idx) => (
-            <div 
-              key={idx}
-              className="floating-icon" 
-              style={{ 
-                top: item.top, 
-                left: item.left, 
-                right: item.right, 
-                bottom: item.bottom,
-                fontSize: item.size,
-                transform: `translate(${mousePos.x * (idx + 1) * 0.2}px, ${mousePos.y * (idx + 1) * 0.2}px)`
-              }}
-            >
-              <i className={`fas ${item.icon}`}></i>
+          {/* Dynamic Background Power Lines */}
+          <div className="power-line" style={{ top: '20%', '--y-offset': '100px', animationDelay: '0s' }}></div>
+          <div className="power-line" style={{ top: '50%', '--y-offset': '-50px', animationDelay: '2s' }}></div>
+          <div className="power-line" style={{ top: '80%', '--y-offset': '200px', animationDelay: '4s' }}></div>
+
+          {/* Floating Interactive Particles */}
+          {particles.map(p => (
+            <div key={p.id} style={{
+              position: 'absolute',
+              left: `${p.x}%`,
+              top: `${p.y}%`,
+              color: 'rgba(56, 189, 248, 0.2)',
+              fontSize: `${p.size}rem`,
+              transform: `translate(${mouse.x * 50 * p.speed}px, ${mouse.y * 50 * p.speed}px)`,
+              transition: 'transform 0.2s ease-out',
+              zIndex: 1
+            }}>
+              <i className={`fas ${p.icon}`}></i>
             </div>
           ))}
-
-          <div className="landing-content" style={{ zIndex: 10 }}>
-            <div className="landing-glass-card" style={{ background: 'rgba(255, 255, 255, 0.6)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', padding: '40px 24px', borderRadius: '32px', border: '1px solid rgba(255,255,255,0.8)', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.1)' }}>
-              <div style={{ display: 'inline-flex', padding: '16px', background: 'var(--surface)', borderRadius: '24px', boxShadow: 'var(--shadow-md)', marginBottom: '24px', border: '1px solid var(--border-light)' }}>
-                <img src="./wmremove-transformed.png" alt="WATTZEN Logo" style={{ width: '80px', height: 'auto', display: 'block' }} onError={(e) => { e.target.style.display = 'none'; }} />
-              </div>
-              <span className="landing-tagline">Power Your Network</span>
-              <h1 className="landing-title">Welcome to <span>WATTZEN</span></h1>
-              <p className="landing-desc">
-                A beautiful, seamless online space designed to connect you instantly with certified electricians. Book, track, and power up your life safely.
-              </p>
-              <div className="btn-glow" style={{ borderRadius: '40px', marginTop: '24px' }}>
-                <button className="btn" onClick={onEnter} style={{ fontSize: '1.1rem', padding: '18px 48px', borderRadius: '40px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '12px', letterSpacing: '0.5px', margin: '0 auto' }}>
-                  GET STARTED <i className="fas fa-arrow-right"></i>
-                </button>
-              </div>
-          <div className="landing-glass-card">
-            <div style={{ display: 'inline-flex', padding: '16px', background: 'rgba(255,255,255,0.05)', borderRadius: '24px', marginBottom: '32px', border: '1px solid rgba(255,255,255,0.1)' }}>
+          
+          <div className="landing-glass-card" style={{
+            transform: `rotateY(${mouse.x * 5}deg) rotateX(${mouse.y * -5}deg)`,
+            transition: 'transform 0.1s ease-out'
+          }}>
+            <div style={{ 
+              display: 'inline-flex', 
+              padding: '20px', 
+              background: 'rgba(255,255,255,0.05)', 
+              borderRadius: '24px', 
+              marginBottom: '32px', 
+              border: '1px solid rgba(255,255,255,0.1)',
+              boxShadow: '0 0 30px rgba(56, 189, 248, 0.2)'
+            }}>
               <img src="./wmremove-transformed.png" alt="WATTZEN" style={{ width: '100px', height: 'auto' }} />
             </div>
-            <h1 className="landing-title">Power Your <span>Network</span></h1>
+            <h1 className="landing-title" style={{ fontSize: '4rem', textShadow: '0 0 20px rgba(129, 140, 248, 0.5)' }}>Power Your <span>Network</span></h1>
             <p className="landing-desc">
-              Experience the next generation of electrical services. Instant connections, live tracking, and certified safety — all in one seamless space.
+              Experience the next generation of electrical services. Instant connections, live tracking, and certified safety — all in one seamless, high-powered space.
             </p>
-            <button className="btn" onClick={onEnter} style={{ fontSize: '1.2rem', padding: '20px 60px', borderRadius: '50px', textTransform: 'uppercase', letterSpacing: '2px', background: 'linear-gradient(135deg, #6366f1 0%, #06b6d4 100%)' }}>
+            <button className="btn" onClick={onEnter} style={{ 
+              fontSize: '1.3rem', 
+              padding: '22px 64px', 
+              borderRadius: '50px', 
+              textTransform: 'uppercase', 
+              letterSpacing: '3px', 
+              background: 'linear-gradient(135deg, #6366f1 0%, #06b6d4 100%)',
+              border: '1px solid rgba(255,255,255,0.3)',
+              boxShadow: '0 15px 35px rgba(99, 102, 241, 0.4)'
+            }}>
               Get Started <i className="fas fa-arrow-right" style={{ marginLeft: '10px' }}></i>
             </button>
           </div>
 
-          <button onClick={onSecret} title="Admin Portal" style={{ position: 'absolute', bottom: '24px', right: '24px', background: 'var(--surface)', border: '1px solid var(--border-light)', color: 'var(--text-muted)', width: '50px', height: '50px', borderRadius: '50%', cursor: 'pointer', fontSize: '1.2rem', zIndex: 20, boxShadow: 'var(--shadow-sm)', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.3s' }} onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--primary)'; e.currentTarget.style.transform = 'scale(1.1)'; e.currentTarget.style.boxShadow = 'var(--shadow-md)'; }} onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = 'var(--shadow-sm)'; }}>
-            <i className="fas fa-shield-halved"></i>
-          <button onClick={onSecret} style={{ position: 'absolute', bottom: '30px', right: '30px', background: 'transparent', border: '1px solid rgba(255,255,255,0.2)', color: 'rgba(255,255,255,0.4)', width: '50px', height: '50px', borderRadius: '50%', cursor: 'pointer', zIndex: 20 }}>
+          <button onClick={onSecret} title="Master Access" className="secret-master-btn">
             <i className="fas fa-shield-halved" style={{ fontSize: '1.2rem' }}></i>
           </button>
         </div>
@@ -883,7 +888,7 @@
         <div className="navbar">
           <div className="logo-area">
             <div className="logo-icon" style={{ background: 'transparent', boxShadow: 'none' }}>
-              <img src="./wmremove-transformed.png" alt="WATTZEN Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} onError={(e) => { e.target.style.display = 'none'; }} />
+              <img src="./wmremove-transformed.png" alt="WATTZEN Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
             </div>
             <div className="logo-text">WATT<span>ZEN</span></div>
           </div>
@@ -946,7 +951,7 @@
         <div className="login-container">
           <div className="logo-area" style={{ justifyContent: 'center', marginBottom: '8px', transform: 'scale(1.2)' }}>
             <div className="logo-icon" style={{ background: 'transparent', boxShadow: 'none' }}>
-              <img src="./wmremove-transformed.png" alt="WATTZEN Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} onError={(e) => { e.target.style.display = 'none'; }} />
+              <img src="./wmremove-transformed.png" alt="WATTZEN Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
             </div>
             <div className="logo-text">WATT<span>ZEN</span></div>
           </div>
@@ -2049,6 +2054,21 @@
       const [toasts, setToasts] = useState([]);
       const [isInitializing, setIsInitializing] = useState(true);
 
+      // Function Hoisting: Define these before they are used in useEffect
+      const handleLoginSuccess = (userData, role) => {
+        const userWithRole = { ...userData, role };
+        setUser(userWithRole);
+        setCurrentView(role);
+        localStorage.setItem('user', JSON.stringify(userWithRole));
+      };
+
+      const handleLogout = () => {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        setUser(null);
+        setCurrentView('landing');
+      };
+
       const toggleTheme = () => {
         setIsDarkMode(!isDarkMode);
         document.body.classList.toggle('dark-mode');
@@ -2130,22 +2150,23 @@
       }
 
       return (
-        <div className="app-container">
-          {currentView === 'landing' ? (
-            <Landing onEnter={() => setCurrentView('login')} onSecret={handleSecretAdminLogin} />
-          ) : currentView === 'login' ? (
-            <Login onLoginSuccess={handleLoginSuccess} />
-          ) : currentView === 'admin' ? (
-            <div style={{ animation: 'fadeIn 0.5s forwards', width: '100%', maxWidth: '1400px', margin: '0 auto' }}>
-              <AdminPanel user={user} onLogout={handleLogout} showToast={showToast} />
-            </div>
-          ) : (
-            <div style={{ animation: 'fadeIn 0.5s forwards' }}>
-              <Navbar user={user} onLogout={handleLogout} toggleTheme={toggleTheme} isDarkMode={isDarkMode} />
-              <div style={{ padding: '20px 0' }}>
-                {currentView === 'customer' && <CustomerHome user={user} showToast={showToast} />}
-                {currentView === 'electrician' && <ElectricianHome user={user} showToast={showToast} />}
-              </div>
+        <React.Fragment>
+          {currentView === 'landing' && <Landing onEnter={() => setCurrentView('login')} onSecret={handleSecretAdminLogin} />}
+          {currentView === 'login' && <Login onLoginSuccess={handleLoginSuccess} />}
+          
+          {(currentView !== 'landing' && currentView !== 'login') && (
+            <div className="app-container" style={{ animation: 'fadeIn 0.5s forwards' }}>
+              {currentView === 'admin' ? (
+                <AdminPanel user={user} onLogout={handleLogout} showToast={showToast} />
+              ) : (
+                <React.Fragment>
+                  <Navbar user={user} onLogout={handleLogout} toggleTheme={toggleTheme} isDarkMode={isDarkMode} />
+                  <div style={{ padding: '20px 0' }}>
+                    {currentView === 'customer' && <CustomerHome user={user} showToast={showToast} />}
+                    {currentView === 'electrician' && <ElectricianHome user={user} showToast={showToast} />}
+                  </div>
+                </React.Fragment>
+              )}
             </div>
           )}
 

@@ -112,17 +112,44 @@ const authenticateToken = (req, res, next) => {
 
 const api = express.Router();
 
+// In-memory store for admin login attempts to prevent brute-force
+const adminLoginAttempts = new Map();
+
 // POST /api/admin/secret-login - Hidden backdoor login
 api.post('/admin/secret-login', async (req, res) => {
-  if (req.body.password === '79827') {
+  const clientIp = req.ip;
+  const now = Date.now();
+  const attemptRecord = adminLoginAttempts.get(clientIp) || { count: 0, lockUntil: 0 };
+
+  if (now < attemptRecord.lockUntil) {
+    const waitTime = Math.ceil((attemptRecord.lockUntil - now) / 60000);
+    return res.status(429).json({ message: `Too many failed attempts. Please try again in ${waitTime} minutes.` });
+  }
+
+  const ADMIN_PIN = process.env.ADMIN_SECRET_PIN || '79827';
+
+  if (req.body.password === ADMIN_PIN) {
+    adminLoginAttempts.delete(clientIp); // Clear attempts on success
     let admin = await User.findOne({ role: 'admin' });
     if (!admin) {
-      admin = await User.create({ name: 'System Admin', phone: '0000000000', password: await bcrypt.hash('79827', 10), role: 'admin' });
+      admin = await User.create({ name: 'System Admin', phone: '0000000000', password: await bcrypt.hash(ADMIN_PIN, 10), role: 'admin' });
     }
     const token = jwt.sign({ userId: admin._id, role: 'admin' }, JWT_SECRET, { expiresIn: '7d' });
     return res.json({ token, user: admin });
   }
-  res.status(403).json({ message: 'Invalid Admin PIN' });
+
+  attemptRecord.count += 1;
+  if (attemptRecord.count >= 5) {
+    attemptRecord.lockUntil = now + 15 * 60 * 1000; // 15-minute lockout after 5 failures
+    attemptRecord.count = 0; // Reset counter for after lockout expires
+  }
+  adminLoginAttempts.set(clientIp, attemptRecord);
+
+  res.status(403).json({ 
+    message: attemptRecord.lockUntil > now 
+      ? 'Too many failed attempts. Access locked for 15 minutes.' 
+      : 'Invalid Admin PIN' 
+  });
 });
 
 // POST /api/signup
@@ -130,6 +157,11 @@ api.post('/signup', async (req, res) => {
   try {
     const { name, phone, password, role } = req.body;
     if (!name || !phone || !password || !role) return res.status(400).json({ message: 'All fields are required' });
+
+    // Security: Prevent unauthorized creation of admin accounts
+    if (role === 'admin') {
+      return res.status(403).json({ message: 'Unauthorized: Admin role cannot be self-assigned' });
+    }
 
     // Basic Input Validation
     const phoneRegex = /^\d{10}$/;
@@ -247,7 +279,13 @@ api.put('/jobs/:id/accept', authenticateToken, async (req, res) => {
 
     // Atomically check limits, add the electrician to the team, and increment currentTeamSize
     const updatedJob = await Job.findOneAndUpdate(
-      { _id: jobId, status: 'searching', $expr: { $lt: ["$currentTeamSize", "$teamSize"] } },
+      { 
+        _id: jobId, 
+        status: 'searching', 
+        customer: { $ne: electricianId }, // Security: Prevent self-assignment
+        electricians: { $ne: electricianId }, // Security: Prevent duplicate joining/double-counting
+        $expr: { $lt: ["$currentTeamSize", "$teamSize"] } 
+      },
       { 
         $addToSet: { electricians: electricianId },
         $inc: { currentTeamSize: 1 }
