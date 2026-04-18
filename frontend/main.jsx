@@ -4,6 +4,12 @@ import App from './App.jsx';
 import { SocketProvider } from './SocketContext.jsx';
 import ErrorBoundary from './ErrorBoundary.jsx';
 
+const root = ReactDOM.createRoot(document.getElementById('root'));
+const app = (
+  <ErrorBoundary>
+    <SocketProvider>
+      <App />
+    </SocketProvider>
   </ErrorBoundary>
 );
 
