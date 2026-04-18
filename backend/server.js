@@ -188,6 +188,16 @@ setInterval(() => {
 
 // In-memory OTP store (Use Redis for multi-instance production)
 const otpStore = new Map();
+// Rate limiter to prevent SMS API abuse and spam
+const otpRateLimits = new Map();
+
+// Graceful shutdown for MongoDB connection pool
+const shutdown = async () => {
+  if (isDbConnected) await mongoose.connection.close();
+  process.exit(0);
+};
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
 
 // POST /api/admin/secret-login - Hidden backdoor login
 api.post('/admin/secret-login', async (req, res) => {
@@ -302,6 +312,22 @@ api.post('/login', async (req, res) => {
   }
 });
 
+// GET /api/location/search - Proxy for Nominatim to prevent client-side CORS/ToS issues
+api.get('/location/search', async (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q) return res.status(400).json([]);
+
+    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&countrycodes=in&limit=5`, {
+      headers: { 'User-Agent': 'WattzenApp/1.0 (contact@wattzen.com)' }
+    });
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ message: 'Location search failed' });
+  }
+});
+
 // POST /api/auth/forgot-password - Trigger RapidAPI SMS
 api.post('/auth/forgot-password', async (req, res) => {
   try {
@@ -309,8 +335,19 @@ api.post('/auth/forgot-password', async (req, res) => {
     if (!phone) return res.status(400).json({ message: 'Phone number is required' });
 
     const cleanPhone = phone.trim();
+    
+    // Server-side rate limiting: 60-second cooldown per phone number
+    const now = Date.now();
+    if (otpRateLimits.has(cleanPhone) && now < otpRateLimits.get(cleanPhone)) {
+      return res.status(429).json({ message: 'Please wait 60 seconds before requesting another OTP.' });
+    }
+    otpRateLimits.set(cleanPhone, now + 60000);
+
     const user = await User.findOne({ phone: cleanPhone });
-    if (!user) return res.status(404).json({ message: 'No account found with this phone number' });
+    if (!user) {
+      // SECURITY: Prevent phone number enumeration by returning a generic success message
+      return res.status(200).json({ message: 'If an account matches this number, an OTP has been sent.' });
+    }
 
     // Generate 4-digit OTP
     const otp = Math.floor(1000 + Math.random() * 9000).toString();
@@ -336,7 +373,7 @@ api.post('/auth/forgot-password', async (req, res) => {
       // We swallow the error so development isn't blocked if the API key limit is reached
     }
 
-    res.status(200).json({ message: 'OTP sent! Check your messages (or server console).' });
+    res.status(200).json({ message: 'If an account matches this number, an OTP has been sent.' });
   } catch (error) {
     res.status(500).json({ message: 'Internal server error while requesting OTP' });
   }

@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.jsx';
 import { SocketProvider } from './SocketContext.jsx';
+import ErrorBoundary from './ErrorBoundary.jsx';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
@@ -11,9 +12,11 @@ if ('serviceWorker' in navigator) {
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 const app = (
-  <SocketProvider>
-    <App />
-  </SocketProvider>
+  <ErrorBoundary>
+    <SocketProvider>
+      <App />
+    </SocketProvider>
+  </ErrorBoundary>
 );
 
 if (import.meta.env.DEV) {

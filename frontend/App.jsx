@@ -18,23 +18,40 @@ const BASE_URL = _envUrl || (
 );
 const API_BASE_URL = `${BASE_URL}/api`;
 
-async function fetchJson(url, options = {}) {
+async function fetchJson(url, options = {}, retries = 1) {
   const token = localStorage.getItem('token');
-  const headers = {
-    'Content-Type': 'application/json',
-    ...options.headers,
-  };
+  const isFormData = options.body instanceof FormData;
+  const headers = { ...options.headers };
+
+  if (!isFormData && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
 
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), options.timeout || 15000); // 15-second default timeout
+
+  // Safely normalize URL to prevent double slashes or broken absolute routes
+  const cleanUrl = url.startsWith('/') ? url : `/${url}`;
+  const finalUrl = url.startsWith('http') ? url : `${API_BASE_URL}${cleanUrl}`;
+
   try {
-    const response = await fetch(`${API_BASE_URL}${url}`, {
+    const response = await fetch(finalUrl, {
       headers,
       ...options,
-      body: options.body && typeof options.body !== 'string' ? JSON.stringify(options.body) : options.body,
+      signal: controller.signal,
+      body: isFormData ? options.body : (options.body && typeof options.body !== 'string' ? JSON.stringify(options.body) : options.body),
     });
+    clearTimeout(timeoutId);
+
+    if (response.status === 401) {
+      window.dispatchEvent(new Event('auth-expired'));
+      throw new Error('Session expired. Please log in again.');
+    }
+
     if (!response.ok) {
       let errorMessage = 'Something went wrong';
       try {
@@ -53,6 +70,24 @@ async function fetchJson(url, options = {}) {
       return { data: text };
     }
   } catch (error) {
+    clearTimeout(timeoutId);
+
+    // Implement automatic exponential backoff/retry for transient network failures
+    const isNetworkError = error.name === 'AbortError' || error.message === 'Failed to fetch' || error.message.includes('Network');
+    if (isNetworkError && retries > 0) {
+      console.warn(`[Network] Transient failure, retrying ${url}...`);
+      return fetchJson(url, options, retries - 1);
+    }
+
+    if (error.name === 'AbortError') {
+      throw new Error('Network request timed out. Please check your connection.');
+    }
+    if (error.message === 'Failed to fetch' || error.message.includes('NetworkError')) {
+      throw new Error('Network error. Please check your internet connection.');
+    }
+    
+    // Log unexpected errors for external telemetry / debugging
+    console.error(`[API Error] ${options.method || 'GET'} ${url} -`, error.message);
     throw error;
   }
 }
@@ -77,46 +112,6 @@ function Landing({ onEnter, onSecret }) {
     })), []
   );
 
-  const handleForgotPassword = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetchJson('/auth/forgot-password', { method: 'POST', body: { phone } });
-      setOtpSent(true);
-      setResendCooldown(60); // Initialize a 60-second cooldown timer
-      showToast(res.message || 'OTP Sent successfully', 'success');
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleResetPassword = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetchJson('/auth/reset-password', { method: 'POST', body: { phone, otp, newPassword } });
-      showToast(res.message || 'Password reset successfully!', 'success');
-      
-      // Reset back to standard login screen
-      setIsForgotPassword(false);
-      setOtpSent(false);
-      setOtp('');
-      setNewPassword('');
-      setResendCooldown(0); // Clear the timer on success
-      setPassword('');
-      setIsLogin(true);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Reactivate animations when toggling views
   useEffect(() => {
     let isMounted = true;
     const updateMouse = (x, y) => {
@@ -159,11 +154,11 @@ function Landing({ onEnter, onSecret }) {
           targets: '.anime-element',
           translateY: [30, 0],
           opacity: [0, 1],
-          delay: window.anime.stagger(150),
+          delay: window.anime && typeof window.anime.stagger === 'function' ? window.anime.stagger(150) : 0,
           duration: 800
         }, '-=400');
     }
-  }, [isLogin, isForgotPassword, otpSent]);
+  }, []);
 
   return (
     <div className="landing-page">
@@ -263,6 +258,7 @@ function ProfileModal({ user, onClose, onUpdate, showToast, onLogout }) {
       onClose();
     } catch (err) {
       showToast(err.message, 'error');
+      showToast(err.message.includes('Network') ? err.message : 'Failed to update profile.', 'error');
     } finally {
       setLoading(false);
     }
@@ -275,7 +271,7 @@ function ProfileModal({ user, onClose, onUpdate, showToast, onLogout }) {
         targets: '.anime-form-item',
         translateX: [20, 0],
         opacity: [0, 1],
-        delay: window.anime.stagger(100),
+        delay: window.anime && typeof window.anime.stagger === 'function' ? window.anime.stagger(100) : 0,
         duration: 500,
         easing: 'easeOutQuad'
       });
@@ -288,7 +284,7 @@ function ProfileModal({ user, onClose, onUpdate, showToast, onLogout }) {
         <div className="modal-header"><h3>Edit Profile</h3><button onClick={onClose}>&times;</button></div>
         <form onSubmit={handleSubmit}>
           <div className="form-group anime-form-item"><label>Full Name</label><input type="text" className="form-control" value={name} onChange={e=>setName(e.target.value)} required /></div>
-          <div className="form-group anime-form-item"><label>Phone Number</label><input type="tel" className="form-control" value={phone} onChange={e=>setPhone(e.target.value)} required /></div>
+          <div className="form-group anime-form-item"><label>Phone Number</label><input type="tel" className="form-control" value={phone} onChange={e=>setPhone(e.target.value.replace(/\D/g, ''))} pattern="[0-9]{10}" maxLength="10" required /></div>
           <button type="submit" className="btn btn-block anime-form-item" disabled={loading}>{loading ? 'Saving...' : 'Save Changes'}</button>
           <button type="button" className="btn-outline btn btn-block" style={{ marginTop: '12px', borderColor: 'var(--danger)', color: 'var(--danger)' }} onClick={onLogout}>Log Out</button>
         </form>
@@ -335,17 +331,73 @@ function Login({ onLoginSuccess, showToast }) {
         throw new Error('Invalid response from server: Missing token or user data');
       }
     } catch (err) {
-      setError(err.message);
+      console.error('[Auth Error]', err);
+      setError(err.message.includes('Network') ? err.message : 'Authentication failed. Please check your details and try again.');
     } finally {
       setLoading(false);
     }
   };
 
+  const handleForgotPassword = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetchJson('/auth/forgot-password', { method: 'POST', body: { phone } });
+      setOtpSent(true);
+      setResendCooldown(60); // Initialize a 60-second cooldown timer
+      // SECURITY: Generic success message to prevent user enumeration
+      showToast(res.message || 'If an account matches this number, an OTP has been sent.', 'success');
+    } catch (err) {
+      setError('Failed to request OTP. Please try again later.'); // Sanitize error exposure
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetchJson('/auth/reset-password', { method: 'POST', body: { phone, otp, newPassword } });
+      showToast(res.message || 'Password reset successfully!', 'success');
+      
+      // Reset back to standard login screen
+      setIsForgotPassword(false);
+      setOtpSent(false);
+      setOtp('');
+      setNewPassword('');
+      setResendCooldown(0); // Clear the timer on success
+      setPassword('');
+      setIsLogin(true);
+    } catch (err) {
+      console.error('[Password Reset Error]', err);
+      setError('Failed to reset password. Please check your OTP and try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Anime.js Form Toggle Animation
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.anime) {
+      window.anime({
+        targets: '.anime-form-item',
+        translateX: [20, 0],
+        opacity: [0, 1],
+        delay: window.anime && typeof window.anime.stagger === 'function' ? window.anime.stagger(100) : 0,
+        duration: 500,
+        easing: 'easeOutQuad'
+      });
+    }
+  }, [isLogin, isForgotPassword, otpSent]);
+
   // Handle OTP Resend Cooldown Timer
   useEffect(() => {
     let timer;
     if (resendCooldown > 0) {
-      timer = setInterval(() => setResendCooldown(prev => prev - 1), 1000);
+          timer = setTimeout(() => setResendCooldown(prev => prev - 1), 1000);
     }
     return () => clearInterval(timer);
   }, [resendCooldown]);
@@ -378,7 +430,7 @@ function Login({ onLoginSuccess, showToast }) {
             <React.Fragment>
               <div className="form-group anime-form-item">
                 <label>Phone Number</label>
-                <input type="tel" className="form-control" value={phone} onChange={e => setPhone(e.target.value)} required placeholder="1234567890" disabled={otpSent} />
+                <input type="tel" className="form-control" value={phone} onChange={e => setPhone(e.target.value.replace(/\D/g, ''))} pattern="[0-9]{10}" maxLength="10" required placeholder="1234567890" disabled={otpSent} />
               </div>
               {otpSent && (
                 <React.Fragment>
@@ -414,7 +466,7 @@ function Login({ onLoginSuccess, showToast }) {
           )}
           <div className="form-group anime-form-item">
             <label>Phone Number</label>
-            <input type="tel" className="form-control" value={phone} onChange={e => setPhone(e.target.value)} required placeholder="1234567890" />
+            <input type="tel" className="form-control" value={phone} onChange={e => setPhone(e.target.value.replace(/\D/g, ''))} pattern="[0-9]{10}" maxLength="10" required placeholder="1234567890" />
           </div>
           <div className="form-group anime-form-item">
             <label>Password</label>
@@ -576,9 +628,8 @@ function CustomerHome({ user, showToast }) {
     if (address.length > 2 && showSuggestions) {
       const timeout = setTimeout(async () => {
         try {
-          const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&countrycodes=in&limit=5`);
-          const data = await res.json();
-          setSuggestions(data);
+          const data = await fetchJson(`/location/search?q=${encodeURIComponent(address)}`);
+          setSuggestions(Array.isArray(data) ? data : []);
         } catch (e) {
           console.error('Nominatim search failed', e);
         }
@@ -690,6 +741,7 @@ function CustomerHome({ user, showToast }) {
       setIsTeamFull(false);
     } catch (error) {
       showToast(error.message, 'error');
+      showToast(error.message.includes('Network') ? error.message : 'Failed to process payment.', 'error');
     } finally {
       setIsBooking(false);
     }
@@ -711,6 +763,7 @@ function CustomerHome({ user, showToast }) {
       showToast('Job cancelled successfully.', 'success');
     } catch (error) {
       showToast(error.message, 'error');
+      showToast(error.message.includes('Network') ? error.message : 'Failed to request withdrawal.', 'error');
     }
   };
 
@@ -736,8 +789,13 @@ function CustomerHome({ user, showToast }) {
           setCoordinates([position.coords.longitude, position.coords.latitude]);
         },
         (error) => {
-          showToast('Could not detect your location. Please check browser permissions.', 'error');
-        }
+          let msg = 'Could not detect your location.';
+          if (error.code === 1) msg = 'Location access denied. Please enable permissions.';
+          else if (error.code === 2) msg = 'Location unavailable. Try again later.';
+          else if (error.code === 3) msg = 'Location request timed out.';
+          showToast(msg, 'error');
+        },
+        { timeout: 10000 }
       );
     } else {
       showToast('Geolocation is not supported by your browser.', 'error');
@@ -752,6 +810,7 @@ function CustomerHome({ user, showToast }) {
       showToast('Job marked as completed. Please rate your experience!', 'success');
     } catch (error) {
       showToast(error.message, 'error');
+      showToast(error.message.includes('Network') ? error.message : 'Failed to submit rating.', 'error');
     }
   };
 
@@ -781,6 +840,7 @@ function CustomerHome({ user, showToast }) {
       setRating(0);
     } catch (error) {
       showToast(error.message, 'error');
+      showToast(error.message.includes('Network') ? error.message : 'Failed to complete job.', 'error');
     }
   };
 
@@ -892,7 +952,7 @@ function CustomerHome({ user, showToast }) {
               <h3 style={{ color: 'var(--text-main)', margin: '0 0 8px 0' }}>Upfront Payment Required</h3>
               <p style={{ color: 'var(--text-muted)', marginBottom: '16px' }}>To secure your booking, please pay the estimated service fee.</p>
               <h2 style={{ fontSize: '2.5rem', color: 'var(--success)', margin: '0 0 20px 0' }}>₹{bookingPrice}</h2>
-              <a href={`upi://pay?pa=9211293576@ptaxis&pn=WATTZEN&am=${bookingPrice}&cu=INR`} className="btn btn-block" style={{ background: '#10b981', display: 'block', textDecoration: 'none', marginBottom: '12px' }}>
+              <a href={`upi://pay?pa=9211293576@ptaxis&pn=WATTZEN&am=${Number(bookingPrice)}&cu=INR`} className="btn btn-block" style={{ background: '#10b981', display: 'block', textDecoration: 'none', marginBottom: '12px' }}>
                 <i className="fas fa-qrcode"></i> Pay via UPI App
               </a>
               <button className="btn-outline btn btn-block" onClick={handleConfirmPayment} disabled={isBooking}>
@@ -980,9 +1040,11 @@ function CustomerHome({ user, showToast }) {
                 <div style={{ padding: '10px', display: 'flex', gap: '8px', borderTop: '1px solid var(--border-light)' }}>
                   <input type="text" value={chatInput} onChange={(e) => {
                     setChatInput(e.target.value);
-                    socket.emit('typing', { jobId: activeJobId, senderName: user?.name?.split(' ')[0] || 'Customer' }); 
-                    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-                    typingTimeoutRef.current = setTimeout(() => socket.emit('stopTyping', { jobId: activeJobId }), 1500);
+                    if (socket?.connected) {
+                      socket.emit('typing', { jobId: activeJobId, senderName: user?.name?.split(' ')[0] || 'Customer' }); 
+                      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+                      typingTimeoutRef.current = setTimeout(() => socket.emit('stopTyping', { jobId: activeJobId }), 1500);
+                    }
                   }} onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()} placeholder="Type a message..." style={{ flex: 1, padding: '10px', borderRadius: '20px', border: '1px solid var(--border-light)', outline: 'none' }} /> 
                   <button className="btn" style={{ padding: '10px 16px', borderRadius: '20px' }} onClick={handleSendMessage}><i className="fas fa-paper-plane"></i></button>
                 </div>
@@ -1206,11 +1268,22 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
 
   // Render Job History Earnings Chart
   useEffect(() => {
+    let retryCount = 0;
+    let checkInterval;
+
+    const renderChart = () => {
     if (currentTab === 'history' && jobHistory.length > 0 && chartRef.current) {
-      if (!window.Chart) {
-        console.warn('Chart.js is not loaded. Cannot render earnings chart.');
-        return;
+      if (!window.Chart || !chartRef.current) {
+        if (retryCount < 10) {
+          retryCount++;
+          return; // Will be retried by interval
+        } else {
+          console.warn('Chart.js or canvas failed to load.');
+          if (checkInterval) clearInterval(checkInterval);
+          return;
+        }
       }
+      if (checkInterval) clearInterval(checkInterval);
       if (chartInstance.current) chartInstance.current.destroy();
       const ctx = chartRef.current.getContext('2d');
       
@@ -1235,7 +1308,13 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
         options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
       });
     }
+    };
+
+    renderChart();
+    checkInterval = setInterval(renderChart, 500); // Retry every 500ms if script is slow to load
+
     return () => {
+      if (checkInterval) clearInterval(checkInterval);
       if (chartInstance.current) {
         chartInstance.current.destroy();
         chartInstance.current = null;
@@ -1292,11 +1371,10 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
     if (isAccepting) return;
     setIsAccepting(true);
     try {
-      // Fix: Pre-join room to prevent race condition where server emits 'jobAccepted' 
-      // before the client finishes joining the room post-API call.
-      socket.emit('joinJobRoom', availableJob._id);
-      
       const acceptedJob = await fetchJson(`/jobs/${availableJob._id}/accept`, { method: 'PUT' });
+      
+      // Fix: Join room AFTER API responds successfully to prevent phantom socket connections if API fails
+      socket.emit('joinJobRoom', availableJob._id);
       setActiveJobId(availableJob._id); // Link the job and join the chat room only AFTER accepting
       setAvailableJob(null);
       setCurrentJob(acceptedJob); // Set the full job object
@@ -1307,6 +1385,7 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
       }
     } catch (error) {
       showToast(error.message, 'error');
+      showToast(error.message.includes('Network') ? error.message : 'Failed to accept job.', 'error');
       // FIX: Clear the stale job so polling can find a fresh one
       setAvailableJob(null);
       setActiveJobId(null);
@@ -1322,6 +1401,7 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
       setWalletBal(0); // Optimistically set to 0
     } catch (error) {
       showToast(error.message, 'error');
+      showToast(error.message.includes('Network') ? error.message : 'Failed to cancel job.', 'error');
     }
   };
 
@@ -1368,7 +1448,7 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
                   <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.2)', color: 'var(--success)', marginBottom: '12px', display: 'inline-block' }}>NEW MATCH FOUND</span>
                   <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-main)' }}><strong>Service:</strong> {availableJob.serviceType}</p>
                   <p style={{ margin: '4px 0 12px 0', fontSize: '0.9rem', color: 'var(--text-main)' }}>
-                    <strong>Location:</strong> <a href={`https://www.openstreetmap.org/?mlat=${availableJob.location?.coordinates[1]}&mlon=${availableJob.location?.coordinates[0]}#map=16/${availableJob.location?.coordinates[1]}/${availableJob.location?.coordinates[0]}`} target="_blank" rel="noreferrer" style={{ color: 'var(--primary)', textDecoration: 'none' }}>{availableJob.address} <i className="fas fa-external-link-alt"></i></a>
+                    <strong>Location:</strong> <a href={`https://www.openstreetmap.org/?mlat=${availableJob.location?.coordinates?.[1]}&mlon=${availableJob.location?.coordinates?.[0]}#map=16/${availableJob.location?.coordinates?.[1]}/${availableJob.location?.coordinates?.[0]}`} target="_blank" rel="noreferrer" style={{ color: 'var(--primary)', textDecoration: 'none' }}>{availableJob.address} <i className="fas fa-external-link-alt"></i></a>
                   </p>
                   <p style={{ margin: '0 0 12px 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>Job ID: <span style={{ fontFamily: 'monospace' }}>{availableJob._id}</span></p>
                   <button className="btn" style={{ width: '100%', background: 'var(--success)', marginTop: '8px' }} onClick={handleAcceptJob} disabled={isAccepting}>
@@ -1404,7 +1484,7 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
                   <h4 style={{ color: 'var(--primary)' }}>You Have Arrived</h4>
                   <p style={{ color: 'var(--text-main)' }}>You can now begin the service. Message the customer if needed.</p>
                   <p style={{ margin: '12px 0 0 0', fontSize: '0.9rem', color: 'var(--text-main)' }}>
-                    <strong>Job Location:</strong> <a href={`https://www.openstreetmap.org/?mlat=${currentJob.location?.coordinates[1]}&mlon=${currentJob.location?.coordinates[0]}#map=16/${currentJob.location?.coordinates[1]}/${currentJob.location?.coordinates[0]}`} target="_blank" rel="noreferrer" style={{ color: 'var(--primary)', textDecoration: 'none' }}>{currentJob.address} <i className="fas fa-external-link-alt"></i></a>
+                    <strong>Job Location:</strong> <a href={`https://www.openstreetmap.org/?mlat=${currentJob.location?.coordinates?.[1]}&mlon=${currentJob.location?.coordinates?.[0]}#map=16/${currentJob.location?.coordinates?.[1]}/${currentJob.location?.coordinates?.[0]}`} target="_blank" rel="noreferrer" style={{ color: 'var(--primary)', textDecoration: 'none' }}>{currentJob.address} <i className="fas fa-external-link-alt"></i></a>
                   </p>
                 </React.Fragment>
               ) : null}
@@ -1435,9 +1515,11 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
           <div style={{ padding: '10px', display: 'flex', gap: '8px', borderTop: '1px solid var(--border-light)' }}>
                 <input type="text" value={chatInput} onChange={(e) => {
                   setChatInput(e.target.value);
-                  socket.emit('typing', { jobId: activeJobId, senderName: user?.name?.split(' ')[0] || 'Electrician' }); 
-                  if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-                  typingTimeoutRef.current = setTimeout(() => socket.emit('stopTyping', { jobId: activeJobId }), 1500);
+                  if (socket?.connected) {
+                    socket.emit('typing', { jobId: activeJobId, senderName: user?.name?.split(' ')[0] || 'Electrician' }); 
+                    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+                    typingTimeoutRef.current = setTimeout(() => socket.emit('stopTyping', { jobId: activeJobId }), 1500);
+                  }
                 }} onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()} placeholder="Type a message..." style={{ flex: 1, padding: '10px', borderRadius: '20px', border: '1px solid var(--border-light)', outline: 'none' }} /> 
             <button className="btn" style={{ padding: '10px 16px', borderRadius: '20px' }} onClick={handleSendMessage}><i className="fas fa-paper-plane"></i></button>
           </div>
@@ -1634,6 +1716,8 @@ function AdminPanel({ user, onLogout, showToast }) {
       setFinanceData(fin && Array.isArray(fin.pendingJobs) ? fin : { pendingJobs: [], pendingWithdrawals: [] });
     } catch (error) {
       showToast(`Failed to fetch dashboard data: ${error.message}`, 'error');
+      console.error('Dashboard error:', error);
+      showToast('Failed to fetch dashboard data.', 'error');
     } finally {
       setIsLoading(false);
     }
@@ -1658,7 +1742,7 @@ function AdminPanel({ user, onLogout, showToast }) {
         targets: '.admin-metric-card',
         translateY: [30, 0],
         opacity: [0, 1],
-        delay: window.anime.stagger(150),
+        delay: window.anime && typeof window.anime.stagger === 'function' ? window.anime.stagger(150) : 0,
         duration: 800,
         easing: 'easeOutCubic'
       });
@@ -1715,6 +1799,8 @@ function AdminPanel({ user, onLogout, showToast }) {
       showToast('Report generated successfully!', 'success');
     } catch (error) {
       showToast(`Failed to generate report: ${error.message}`, 'error');
+      console.error('Report error:', error);
+      showToast('Failed to generate report.', 'error');
     } finally {
       setIsDownloading(false);
     }
@@ -1725,7 +1811,10 @@ function AdminPanel({ user, onLogout, showToast }) {
       await fetchJson(`/admin/jobs/${id}/verify-payment`, { method: 'PUT' });
       showToast('Payment verified. Job is now active.', 'success');
       // The WebSocket 'adminRefresh' event will automatically pull the fresh lists
-    } catch (e) { showToast(e.message, 'error'); }
+      } catch (e) {
+        console.error('Payment approval error:', e); 
+        showToast('Failed to verify payment.', 'error'); 
+    }
   };
 
   const handleApproveWithdrawal = async (id) => {
@@ -1733,7 +1822,10 @@ function AdminPanel({ user, onLogout, showToast }) {
       await fetchJson(`/admin/withdrawals/${id}/approve`, { method: 'PUT' });
       showToast('Withdrawal approved.', 'success');
       // The WebSocket 'adminRefresh' event will automatically pull the fresh lists
-    } catch (e) { showToast(e.message, 'error'); }
+      } catch (e) { 
+        console.error('Withdrawal error:', e);
+        showToast('Failed to approve withdrawal.', 'error'); 
+    }
   };
 
   const handleBroadcast = async () => {
@@ -1742,7 +1834,10 @@ function AdminPanel({ user, onLogout, showToast }) {
       await fetchJson('/admin/broadcast', { method: 'POST', body: { message: broadcastMsg.trim() } });
       showToast('Broadcast sent to all active users!', 'success');
       setBroadcastMsg('');
-    } catch(e) { showToast(e.message, 'error'); }
+      } catch(e) { 
+      console.error('Broadcast error:', e);
+      showToast('Failed to send broadcast.', 'error'); 
+    }
   };
 
   return (
@@ -1953,6 +2048,15 @@ function AppContent() {
     setToasts((prev) => [...prev, { id, message, type }]);
     setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4000);
   }, []);
+
+  useEffect(() => {
+    const handleAuthExpired = () => {
+      showToast('Session expired. Please log in again.', 'warning');
+      handleLogout();
+    };
+    window.addEventListener('auth-expired', handleAuthExpired);
+    return () => window.removeEventListener('auth-expired', handleAuthExpired);
+  }, [showToast]);
 
   useEffect(() => {
     let isMounted = true;
