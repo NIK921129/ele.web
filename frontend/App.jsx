@@ -10,12 +10,7 @@ import { useSocket } from './SocketContext.jsx';
 if (typeof window !== 'undefined' && window.location.protocol === 'http:' && window.location.hostname !== 'localhost' && !window.location.hostname.startsWith('192.168.') && !window.location.hostname.startsWith('10.')) {
   window.location.href = window.location.href.replace('http:', 'https:');
 }
-const _envUrl = import.meta.env.VITE_API_URL;
-const BASE_URL = _envUrl || (
-  typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname.startsWith('192.168.') || window.location.hostname.startsWith('10.'))
-    ? `http://${window.location.hostname}:5000`
-    : 'https://wattzen-backend.onrender.com' // Always use HTTPS in production
-);
+const BASE_URL = 'https://wattzen-backend.onrender.com';
 const API_BASE_URL = `${BASE_URL}/api`;
 
 async function fetchJson(url, options = {}, retries = 1) {
@@ -32,7 +27,7 @@ async function fetchJson(url, options = {}, retries = 1) {
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), options.timeout || 15000); // 15-second default timeout
+  const timeoutId = setTimeout(() => controller.abort(), options.timeout || 60000); // 60-second timeout for Render cold starts
 
   // Safely normalize URL to prevent double slashes or broken absolute routes
   const cleanUrl = url.startsWith('/') ? url : `/${url}`;
