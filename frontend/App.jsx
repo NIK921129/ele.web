@@ -7,11 +7,14 @@ import { useSocket } from './SocketContext.jsx';
 // ==========================================
 // 1. API & SOCKET UTILITIES
 // ==========================================
+if (typeof window !== 'undefined' && window.location.protocol === 'http:' && window.location.hostname !== 'localhost' && !window.location.hostname.startsWith('192.168.') && !window.location.hostname.startsWith('10.')) {
+  window.location.href = window.location.href.replace('http:', 'https:');
+}
 const _envUrl = import.meta.env.VITE_API_URL;
 const BASE_URL = _envUrl || (
-  typeof window !== 'undefined' && window.location.protocol === 'https:' 
-    ? 'https://wattzen-backend.onrender.com' 
-    : (typeof window !== 'undefined' && window.location.hostname !== 'localhost' ? `http://${window.location.hostname}:5000` : 'http://localhost:5000')
+  typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname.startsWith('192.168.') || window.location.hostname.startsWith('10.'))
+    ? `http://${window.location.hostname}:5000`
+    : 'https://wattzen-backend.onrender.com' // Always use HTTPS in production
 );
 const API_BASE_URL = `${BASE_URL}/api`;
 
@@ -74,11 +77,52 @@ function Landing({ onEnter, onSecret }) {
     })), []
   );
 
+  const handleForgotPassword = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetchJson('/auth/forgot-password', { method: 'POST', body: { phone } });
+      setOtpSent(true);
+      setResendCooldown(60); // Initialize a 60-second cooldown timer
+      showToast(res.message || 'OTP Sent successfully', 'success');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetchJson('/auth/reset-password', { method: 'POST', body: { phone, otp, newPassword } });
+      showToast(res.message || 'Password reset successfully!', 'success');
+      
+      // Reset back to standard login screen
+      setIsForgotPassword(false);
+      setOtpSent(false);
+      setOtp('');
+      setNewPassword('');
+      setResendCooldown(0); // Clear the timer on success
+      setPassword('');
+      setIsLogin(true);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Reactivate animations when toggling views
   useEffect(() => {
+    let isMounted = true;
     const updateMouse = (x, y) => {
       if (requestRef.current) return;
       requestRef.current = requestAnimationFrame(() => {
-        setMouse({ x: x / window.innerWidth - 0.5, y: y / window.innerHeight - 0.5 });
+        if (isMounted) setMouse({ x: x / window.innerWidth - 0.5, y: y / window.innerHeight - 0.5 });
         requestRef.current = null;
       });
     };
@@ -94,11 +138,32 @@ function Landing({ onEnter, onSecret }) {
     window.addEventListener('touchmove', handleTouchMove, { passive: true });
 
     return () => {
+      isMounted = false;
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('touchmove', handleTouchMove);
       if (requestRef.current) cancelAnimationFrame(requestRef.current);
     };
   }, []);
+
+  // Anime.js Entrance Animation
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.anime) {
+      window.anime.timeline({ easing: 'easeOutCubic' })
+        .add({
+          targets: '.landing-glass-card',
+          scale: [0.85, 1],
+          opacity: [0, 1],
+          duration: 800
+        })
+        .add({
+          targets: '.anime-element',
+          translateY: [30, 0],
+          opacity: [0, 1],
+          delay: window.anime.stagger(150),
+          duration: 800
+        }, '-=400');
+    }
+  }, [isLogin, isForgotPassword, otpSent]);
 
   return (
     <div className="landing-page">
@@ -139,11 +204,11 @@ function Landing({ onEnter, onSecret }) {
         }}>
           <img src={logoImage} alt="WATTZEN" style={{ width: '100px', height: 'auto' }} />
         </div>
-        <h1 className="landing-title">Power Your <span>Network</span></h1>
-        <p className="landing-desc">
+        <h1 className="landing-title anime-element" style={{ opacity: 0 }}>Power Your <span>Network</span></h1>
+        <p className="landing-desc anime-element" style={{ opacity: 0 }}>
           Experience the next generation of electrical services. Instant connections, live tracking, and certified safety — all in one seamless, high-powered space.
         </p>
-        <button className="btn landing-btn" onClick={onEnter}>
+        <button className="btn landing-btn anime-element" onClick={onEnter} style={{ opacity: 0 }}>
           Get Started <i className="fas fa-arrow-right" style={{ marginLeft: '10px' }}></i>
         </button>
       </div>
@@ -203,14 +268,28 @@ function ProfileModal({ user, onClose, onUpdate, showToast, onLogout }) {
     }
   };
 
+  // Anime.js Form Toggle Animation
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.anime) {
+      window.anime({
+        targets: '.anime-form-item',
+        translateX: [20, 0],
+        opacity: [0, 1],
+        delay: window.anime.stagger(100),
+        duration: 500,
+        easing: 'easeOutQuad'
+      });
+    }
+  }, []);
+
   return (
     <div className="modal-overlay visible">
       <div className="modal-content">
         <div className="modal-header"><h3>Edit Profile</h3><button onClick={onClose}>&times;</button></div>
         <form onSubmit={handleSubmit}>
-          <div className="form-group"><label>Full Name</label><input type="text" className="form-control" value={name} onChange={e=>setName(e.target.value)} required /></div>
-          <div className="form-group"><label>Phone Number</label><input type="tel" className="form-control" value={phone} onChange={e=>setPhone(e.target.value)} required /></div>
-          <button type="submit" className="btn btn-block" disabled={loading}>{loading ? 'Saving...' : 'Save Changes'}</button>
+          <div className="form-group anime-form-item"><label>Full Name</label><input type="text" className="form-control" value={name} onChange={e=>setName(e.target.value)} required /></div>
+          <div className="form-group anime-form-item"><label>Phone Number</label><input type="tel" className="form-control" value={phone} onChange={e=>setPhone(e.target.value)} required /></div>
+          <button type="submit" className="btn btn-block anime-form-item" disabled={loading}>{loading ? 'Saving...' : 'Save Changes'}</button>
           <button type="button" className="btn-outline btn btn-block" style={{ marginTop: '12px', borderColor: 'var(--danger)', color: 'var(--danger)' }} onClick={onLogout}>Log Out</button>
         </form>
       </div>
@@ -219,8 +298,12 @@ function ProfileModal({ user, onClose, onUpdate, showToast, onLogout }) {
 }
 
 // --- Login Component ---
-function Login({ onLoginSuccess }) {
+function Login({ onLoginSuccess, showToast }) {
   const [isLogin, setIsLogin] = useState(true);
+  const [isForgotPassword, setIsForgotPassword] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
+  const [otp, setOtp] = useState('');
+  const [newPassword, setNewPassword] = useState('');
   const [role, setRole] = useState('customer');
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -228,6 +311,7 @@ function Login({ onLoginSuccess }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -257,6 +341,15 @@ function Login({ onLoginSuccess }) {
     }
   };
 
+  // Handle OTP Resend Cooldown Timer
+  useEffect(() => {
+    let timer;
+    if (resendCooldown > 0) {
+      timer = setInterval(() => setResendCooldown(prev => prev - 1), 1000);
+    }
+    return () => clearInterval(timer);
+  }, [resendCooldown]);
+
   return (
     <div className="login-container">
       <div className="logo-area" style={{ justifyContent: 'center', marginBottom: '8px', transform: 'scale(1.2)' }}>
@@ -267,44 +360,96 @@ function Login({ onLoginSuccess }) {
       </div>
       <div style={{ textAlign: 'center', color: 'var(--primary)', fontWeight: '700', letterSpacing: '1.5px', marginBottom: '32px', fontSize: '0.85rem' }}>POWER YOUR NETWORK</div>
       <div className="login-card">
-        <h1>{isLogin ? 'Welcome Back' : 'Create Account'}</h1>
-        <p>{isLogin ? 'Log in to your account to continue.' : 'Join the best electrician network.'}</p>
+        <h1>{isForgotPassword ? 'Reset Password' : (isLogin ? 'Welcome Back' : 'Create Account')}</h1>
+        <p>{isForgotPassword ? 'Enter your details below to recover your account.' : (isLogin ? 'Log in to your account to continue.' : 'Join the best electrician network.')}</p>
         
         {error && <div style={{ color: 'white', background: 'var(--danger)', padding: '10px', borderRadius: '8px', marginBottom: '16px' }}>{error}</div>}
         
+        {!isForgotPassword && (
         <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
           <button type="button" className={`btn btn-block ${role === 'customer' ? '' : 'btn-outline'}`} onClick={() => setRole('customer')} style={{ padding: '10px' }}>Customer</button>
           <button type="button" className={`btn btn-block ${role === 'electrician' ? '' : 'btn-outline'}`} onClick={() => setRole('electrician')} style={{ padding: '10px' }}>Electrician</button>
         </div>
+        )}
 
-        <form onSubmit={handleSubmit} style={{ textAlign: 'left' }}>
-          {!isLogin && (
-            <div className="form-group">
+        <form onSubmit={isForgotPassword ? (otpSent ? handleResetPassword : handleForgotPassword) : handleSubmit} style={{ textAlign: 'left' }}>
+          
+          {isForgotPassword ? (
+            <React.Fragment>
+              <div className="form-group anime-form-item">
+                <label>Phone Number</label>
+                <input type="tel" className="form-control" value={phone} onChange={e => setPhone(e.target.value)} required placeholder="1234567890" disabled={otpSent} />
+              </div>
+              {otpSent && (
+                <React.Fragment>
+                  <div className="form-group anime-form-item">
+                    <label>4-Digit OTP</label>
+                    <input type="text" className="form-control" value={otp} onChange={e => setOtp(e.target.value)} required placeholder="1234" maxLength={4} style={{ letterSpacing: '4px', fontSize: '1.2rem', fontWeight: 'bold' }} />
+                  </div>
+                  <div className="form-group anime-form-item">
+                    <label>New Password</label>
+                    <div className="input-icon-wrapper">
+                      <input type={showPassword ? "text" : "password"} className="form-control" value={newPassword} onChange={e => setNewPassword(e.target.value)} required placeholder="••••••••" />
+                      <i className={`fas ${showPassword ? 'fa-eye-slash' : 'fa-eye'} action-icon`} onClick={() => setShowPassword(!showPassword)}></i>
+                    </div>
+                  </div>
+                  <div className="anime-form-item" style={{ textAlign: 'right', marginTop: '-8px', marginBottom: '12px' }}>
+                    <button type="button" onClick={handleForgotPassword} disabled={resendCooldown > 0 || loading} style={{ background: 'none', border: 'none', padding: 0, color: resendCooldown > 0 ? 'var(--text-muted)' : 'var(--primary)', cursor: resendCooldown > 0 ? 'not-allowed' : 'pointer', fontSize: '0.85rem', fontWeight: 'bold', outline: 'none', transition: 'color 0.2s' }}>
+                      {resendCooldown > 0 ? `Resend OTP in ${resendCooldown}s` : 'Resend OTP'}
+                    </button>
+                  </div>
+                </React.Fragment>
+              )}
+              <button type="submit" className="btn btn-block anime-form-item" disabled={loading} style={{ marginTop: '10px' }}>
+                {loading ? 'Processing...' : (otpSent ? 'Reset Password' : 'Send Recovery OTP')}
+              </button>
+            </React.Fragment>
+          ) : (
+            <React.Fragment>
+            {!isLogin && (
+            <div className="form-group anime-form-item">
               <label>Full Name</label>
               <input type="text" className="form-control" value={name} onChange={e => setName(e.target.value)} required placeholder="John Doe" />
             </div>
           )}
-          <div className="form-group">
+          <div className="form-group anime-form-item">
             <label>Phone Number</label>
             <input type="tel" className="form-control" value={phone} onChange={e => setPhone(e.target.value)} required placeholder="1234567890" />
           </div>
-          <div className="form-group">
+          <div className="form-group anime-form-item">
             <label>Password</label>
             <div className="input-icon-wrapper">
               <input type={showPassword ? "text" : "password"} className="form-control" value={password} onChange={e => setPassword(e.target.value)} required placeholder="••••••••" />
               <i className={`fas ${showPassword ? 'fa-eye-slash' : 'fa-eye'} action-icon`} onClick={() => setShowPassword(!showPassword)}></i>
             </div>
           </div>
-          <button type="submit" className="btn btn-block" disabled={loading} style={{ marginTop: '10px' }}>
+          
+          {isLogin && (
+            <div style={{ textAlign: 'right', marginTop: '-8px', marginBottom: '12px' }}>
+              <a href="#!" onClick={(e) => { e.preventDefault(); setIsForgotPassword(true); setError(null); }} style={{ color: 'var(--primary)', fontSize: '0.85rem', textDecoration: 'none' }}>Forgot Password?</a>
+            </div>
+          )}
+
+          <button type="submit" className="btn btn-block anime-form-item" disabled={loading} style={{ marginTop: '10px' }}>
             {loading ? 'Processing...' : (isLogin ? 'Log In' : 'Sign Up')}
           </button>
+            </React.Fragment>
+          )}
         </form>
         
         <div style={{ marginTop: '20px', fontSize: '0.9rem' }}>
-          {isLogin ? "Don't have an account? " : "Already have an account? "}
-          <a href="#!" onClick={(e) => { e.preventDefault(); setIsLogin(!isLogin); setError(null); }} style={{ color: 'var(--primary)', fontWeight: 'bold', textDecoration: 'none' }}>
-            {isLogin ? 'Sign Up' : 'Log In'}
+          {isForgotPassword ? (
+            <a href="#!" onClick={(e) => { e.preventDefault(); setIsForgotPassword(false); setOtpSent(false); setError(null); }} style={{ color: 'var(--text-muted)', textDecoration: 'none' }}>
+              <i className="fas fa-arrow-left"></i> Back to Login
+            </a>
+          ) : (
+            <React.Fragment>
+              {isLogin ? "Don't have an account? " : "Already have an account? "}
+              <a href="#!" onClick={(e) => { e.preventDefault(); setIsLogin(!isLogin); setError(null); }} style={{ color: 'var(--primary)', fontWeight: 'bold', textDecoration: 'none' }}>
+                {isLogin ? 'Sign Up' : 'Log In'}
           </a>
+            </React.Fragment>
+          )}
         </div>
       </div>
     </div>
@@ -320,42 +465,40 @@ function TrackingMap({ origin, destination }) {
   const boundsSet = useRef(false);
 
   useEffect(() => {
-    if (!window.google || !window.google.maps || !mapRef.current) return;
+    if (!window.L || !mapRef.current) return;
 
     if (!mapInstance.current) {
-      mapInstance.current = new window.google.maps.Map(mapRef.current, {
-        zoom: 14,
-        center: { lat: origin[1], lng: origin[0] },
-        disableDefaultUI: true,
+      mapInstance.current = window.L.map(mapRef.current, {
         zoomControl: true,
+        attributionControl: false
+      }).setView([origin[1], origin[0]], 14);
+
+      window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+      }).addTo(mapInstance.current);
+
+      const createIcon = (label, bg) => window.L.divIcon({
+        className: 'custom-osm-icon',
+        html: `<div style="background:${bg};color:white;width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:50%;border:2px solid white;box-shadow:0 2px 5px rgba(0,0,0,0.3);font-weight:bold;font-size:14px;">${label}</div>`,
+        iconSize: [30, 30],
+        iconAnchor: [15, 15]
       });
 
-      originMarker.current = new window.google.maps.Marker({
-        map: mapInstance.current,
-        label: { text: 'C', color: 'white', fontWeight: 'bold' },
-        title: 'Customer Location',
-      });
-
-      destMarker.current = new window.google.maps.Marker({
-        map: mapInstance.current,
-        label: { text: 'E', color: 'white', fontWeight: 'bold' },
-        title: 'Electrician Location',
-      });
+      originMarker.current = window.L.marker([origin[1], origin[0]], { icon: createIcon('C', '#0d9488') }).addTo(mapInstance.current);
+      destMarker.current = window.L.marker([destination[1], destination[0]], { icon: createIcon('E', '#f59e0b') }).addTo(mapInstance.current);
     }
 
-    if (origin && origin.length === 2) originMarker.current.setPosition({ lat: origin[1], lng: origin[0] });
-    if (destination && destination.length === 2) destMarker.current.setPosition({ lat: destination[1], lng: destination[0] });
+    if (origin && origin.length === 2) originMarker.current.setLatLng([origin[1], origin[0]]);
+    if (destination && destination.length === 2) destMarker.current.setLatLng([destination[1], destination[0]]);
 
     if (origin && destination && origin.length === 2 && destination.length === 2 && !boundsSet.current) {
-      const bounds = new window.google.maps.LatLngBounds();
-      bounds.extend({ lat: origin[1], lng: origin[0] });
-      bounds.extend({ lat: destination[1], lng: destination[0] });
-      mapInstance.current.fitBounds(bounds, { top: 40, bottom: 40, left: 40, right: 40 });
+      const bounds = window.L.latLngBounds([[origin[1], origin[0]], [destination[1], destination[0]]]);
+      mapInstance.current.fitBounds(bounds, { padding: [40, 40] });
       boundsSet.current = true;
     }
   }, [origin, destination]);
 
-  return <div ref={mapRef} style={{ width: '100%', height: '250px', borderRadius: '12px', marginTop: '16px', border: '1px solid var(--border-light)' }} />;
+  return <div ref={mapRef} style={{ width: '100%', height: '250px', borderRadius: '12px', marginTop: '16px', border: '1px solid var(--border-light)', zIndex: 1 }} />;
 }
 
 // --- Customer Dashboard Component ---
@@ -410,7 +553,8 @@ function CustomerHome({ user, showToast }) {
   const [jobHistory, setJobHistory] = useState([]);
   const [typingUser, setTypingUser] = useState(null);
   const typingTimeoutRef = useRef(null);
-  const addressInputRef = useRef(null);
+  const [suggestions, setSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
   
   const [activeCategory, setActiveCategory] = useState('repairs');
   const [teamSize, setTeamSize] = useState(1);
@@ -421,20 +565,36 @@ function CustomerHome({ user, showToast }) {
     { id: 'projects', name: 'Big Projects', icon: 'fa-hard-hat' }
   ];
 
-  const [mapsLoaded, setMapsLoaded] = useState(!!(window?.google?.maps?.places));
-
   useEffect(() => {
-    if (mapsLoaded) return;
-    const checkMaps = () => {
-      if (window?.google?.maps?.places) setMapsLoaded(true);
-    };
-    window.addEventListener('google-maps-loaded', checkMaps);
-    const interval = setInterval(checkMaps, 500); // Fallback interval
     return () => {
-      window.removeEventListener('google-maps-loaded', checkMaps);
-      clearInterval(interval);
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     };
-  }, [mapsLoaded]);
+  }, []);
+
+  // OpenStreetMap Nominatim Autocomplete
+  useEffect(() => {
+    if (address.length > 2 && showSuggestions) {
+      const timeout = setTimeout(async () => {
+        try {
+          const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&countrycodes=in&limit=5`);
+          const data = await res.json();
+          setSuggestions(data);
+        } catch (e) {
+          console.error('Nominatim search failed', e);
+        }
+      }, 500); // Debounce
+      return () => clearTimeout(timeout);
+    } else {
+      setSuggestions([]);
+    }
+  }, [address, showSuggestions]);
+
+  const handleSelectSuggestion = (place) => {
+    setAddress(place.display_name);
+    setCoordinates([parseFloat(place.lon), parseFloat(place.lat)]);
+    setSuggestions([]);
+    setShowSuggestions(false);
+  };
 
   const currentServices = SERVICES.filter(s => s.category === activeCategory);
   const selectedServiceObj = SERVICES.find(s => s.id === selectedService);
@@ -494,34 +654,18 @@ function CustomerHome({ user, showToast }) {
     setTeamSize(1);
   }, [selectedService]);
 
-  // Initialize Google Places Autocomplete
   useEffect(() => {
-    if (currentTab === 'active' && mapsLoaded && addressInputRef.current) {
-      const autocomplete = new window.google.maps.places.Autocomplete(addressInputRef.current, {
-        fields: ["formatted_address", "geometry"],
-        componentRestrictions: { country: 'in' } // Restrict to India (update as needed)
-      });
-      const listener = autocomplete.addListener('place_changed', () => {
-        const place = autocomplete.getPlace();
-        if (place.geometry && place.geometry.location) {
-          setAddress(place.formatted_address);
-          setCoordinates([place.geometry.location.lng(), place.geometry.location.lat()]);
-        }
-      });
-      return () => window.google.maps.event.removeListener(listener);
-    }
-  }, [currentTab]);
-
-  useEffect(() => {
+    let isMounted = true;
     if (currentTab === 'history') {
       const fetchHistory = async () => { 
         try {
           const data = await fetchJson('/jobs/history');
-          setJobHistory(Array.isArray(data) ? data : []);
-        } catch (e) { showToast('Failed to load history', 'error'); }
+          if (isMounted) setJobHistory(Array.isArray(data) ? data : []);
+        } catch (e) { if (isMounted) showToast('Failed to load history', 'error'); }
       }; 
       fetchHistory();
     }
+    return () => { isMounted = false; };
   }, [currentTab, showToast]);
 
   const handleInitiateBooking = () => {
@@ -646,9 +790,20 @@ function CustomerHome({ user, showToast }) {
         <div className="delivery-header">
           <div className="info">
             <span className="title">Service Location</span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
-              <i className="fas fa-location-dot" style={{ color: 'var(--primary)', fontSize: '1.2rem' }}></i>
-              <input type="text" ref={addressInputRef} value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Enter your full address..." style={{ background: 'transparent', border: 'none', outline: 'none', fontWeight: '800', color: 'var(--text-main)', fontSize: '1.05rem', width: '100%' }} />
+            <div style={{ position: 'relative', width: '100%' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
+                <i className="fas fa-location-dot" style={{ color: 'var(--primary)', fontSize: '1.2rem' }}></i>
+                <input type="text" value={address} maxLength={250} onChange={(e) => { setAddress(e.target.value); setShowSuggestions(true); }} placeholder="Enter your full address..." style={{ background: 'transparent', border: 'none', outline: 'none', fontWeight: '800', color: 'var(--text-main)', fontSize: '1.05rem', width: '100%' }} />
+              </div>
+              {suggestions.length > 0 && (
+                <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--surface)', border: '1px solid var(--border-light)', borderRadius: '8px', zIndex: 10, boxShadow: 'var(--shadow-md)', maxHeight: '200px', overflowY: 'auto', marginTop: '8px' }}>
+                  {suggestions.map((s, i) => (
+                    <div key={i} style={{ padding: '10px', borderBottom: '1px solid var(--border-light)', cursor: 'pointer', fontSize: '0.85rem', color: 'var(--text-main)' }} onClick={() => handleSelectSuggestion(s)}>
+                      {s.display_name}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
           <button className="btn" style={{ padding: '10px', borderRadius: '50%', width: '45px', height: '45px', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={handleLocateMe} title="Detect Location"><i className="fas fa-crosshairs"></i></button>
@@ -910,6 +1065,7 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
   const chartRef = useRef(null);
   const chartInstance = useRef(null);
   const [myLiveCoords, setMyLiveCoords] = useState(null);
+  const [isAccepting, setIsAccepting] = useState(false);
 
   const jobStatus = currentJob?.status;
   const teamSize = currentJob?.teamSize || 1;
@@ -978,6 +1134,12 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
   }, [isOnline, showToast, user, socket]);
 
   useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
     if (isOnline && activeJobId) {
       socket.emit('joinJobRoom', activeJobId);
     } 
@@ -985,10 +1147,12 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
 
   useEffect(() => {
     let pollInterval;
+    let isMounted = true;
     if (isOnline && !currentJob) {
       const checkJobs = async () => {
         try {
           const job = await fetchJson('/jobs/available?latitude=12.9716&longitude=77.5946&maxDistance=15');
+          if (!isMounted) return;
           // BUG FIX: Prevent setting empty objects as available jobs
           if (job && job._id) {
             setAvailableJob(job);
@@ -1013,6 +1177,7 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
       socket.on('newJobAvailable', handleNewJob);
 
       return () => {
+        isMounted = false;
         clearInterval(pollInterval);
         socket.off('newJobAvailable', handleNewJob);
       };
@@ -1026,15 +1191,17 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
   }, [messages]);
 
   useEffect(() => {
+    let isMounted = true;
     if (currentTab === 'history') {
       const fetchHistory = async () => {
         try {
           const data = await fetchJson('/jobs/history');
-          setJobHistory(Array.isArray(data) ? data : []);
-        } catch (e) { showToast('Failed to load history', 'error'); }
+          if (isMounted) setJobHistory(Array.isArray(data) ? data : []);
+        } catch (e) { if (isMounted) showToast('Failed to load history', 'error'); }
       };
       fetchHistory();
     }
+    return () => { isMounted = false; };
   }, [currentTab, showToast]);
 
   // Render Job History Earnings Chart
@@ -1068,6 +1235,12 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
         options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
       });
     }
+    return () => {
+      if (chartInstance.current) {
+        chartInstance.current.destroy();
+        chartInstance.current = null;
+      }
+    };
   }, [currentTab, jobHistory]);
 
   useEffect(() => {
@@ -1116,6 +1289,8 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
   };
 
   const handleAcceptJob = async () => {
+    if (isAccepting) return;
+    setIsAccepting(true);
     try {
       // Fix: Pre-join room to prevent race condition where server emits 'jobAccepted' 
       // before the client finishes joining the room post-API call.
@@ -1135,6 +1310,8 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
       // FIX: Clear the stale job so polling can find a fresh one
       setAvailableJob(null);
       setActiveJobId(null);
+    } finally {
+      setIsAccepting(false);
     }
   };
 
@@ -1191,11 +1368,11 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
                   <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.2)', color: 'var(--success)', marginBottom: '12px', display: 'inline-block' }}>NEW MATCH FOUND</span>
                   <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-main)' }}><strong>Service:</strong> {availableJob.serviceType}</p>
                   <p style={{ margin: '4px 0 12px 0', fontSize: '0.9rem', color: 'var(--text-main)' }}>
-                    <strong>Location:</strong> <a href={`https://www.google.com/maps/search/?api=1&query=${availableJob.location?.coordinates[1]},${availableJob.location?.coordinates[0]}`} target="_blank" rel="noreferrer" style={{ color: 'var(--primary)', textDecoration: 'none' }}>{availableJob.address} <i className="fas fa-external-link-alt"></i></a>
+                    <strong>Location:</strong> <a href={`https://www.openstreetmap.org/?mlat=${availableJob.location?.coordinates[1]}&mlon=${availableJob.location?.coordinates[0]}#map=16/${availableJob.location?.coordinates[1]}/${availableJob.location?.coordinates[0]}`} target="_blank" rel="noreferrer" style={{ color: 'var(--primary)', textDecoration: 'none' }}>{availableJob.address} <i className="fas fa-external-link-alt"></i></a>
                   </p>
                   <p style={{ margin: '0 0 12px 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>Job ID: <span style={{ fontFamily: 'monospace' }}>{availableJob._id}</span></p>
-                  <button className="btn" style={{ width: '100%', background: 'var(--success)', marginTop: '8px' }} onClick={handleAcceptJob}>
-                    Accept Job & Start Tracking
+                  <button className="btn" style={{ width: '100%', background: 'var(--success)', marginTop: '8px' }} onClick={handleAcceptJob} disabled={isAccepting}>
+                    {isAccepting ? 'Accepting...' : 'Accept Job & Start Tracking'}
                   </button>
                 </div>
               )}
@@ -1227,7 +1404,7 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
                   <h4 style={{ color: 'var(--primary)' }}>You Have Arrived</h4>
                   <p style={{ color: 'var(--text-main)' }}>You can now begin the service. Message the customer if needed.</p>
                   <p style={{ margin: '12px 0 0 0', fontSize: '0.9rem', color: 'var(--text-main)' }}>
-                    <strong>Job Location:</strong> <a href={`https://www.google.com/maps/search/?api=1&query=${currentJob.location?.coordinates[1]},${currentJob.location?.coordinates[0]}`} target="_blank" rel="noreferrer" style={{ color: 'var(--primary)', textDecoration: 'none' }}>{currentJob.address} <i className="fas fa-external-link-alt"></i></a>
+                    <strong>Job Location:</strong> <a href={`https://www.openstreetmap.org/?mlat=${currentJob.location?.coordinates[1]}&mlon=${currentJob.location?.coordinates[0]}#map=16/${currentJob.location?.coordinates[1]}/${currentJob.location?.coordinates[0]}`} target="_blank" rel="noreferrer" style={{ color: 'var(--primary)', textDecoration: 'none' }}>{currentJob.address} <i className="fas fa-external-link-alt"></i></a>
                   </p>
                 </React.Fragment>
               ) : null}
@@ -1381,7 +1558,7 @@ const mockLogs = [
 
 function MetricCard({ icon, title, value, trend, color }) {
   return (
-    <div style={{ background: 'var(--surface)', padding: '20px', borderRadius: '16px', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border-light)' }}>
+    <div className="admin-metric-card" style={{ background: 'var(--surface)', padding: '20px', borderRadius: '16px', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border-light)' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 500 }}>{title}</p>
@@ -1473,6 +1650,20 @@ function AdminPanel({ user, onLogout, showToast }) {
       socket.off('adminRefresh', handleAdminRefresh);
     };
   }, [socket, fetchDashboardData]);
+
+  // Anime.js Dashboard Entrance Animation
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.anime) {
+      window.anime({
+        targets: '.admin-metric-card',
+        translateY: [30, 0],
+        opacity: [0, 1],
+        delay: window.anime.stagger(150),
+        duration: 800,
+        easing: 'easeOutCubic'
+      });
+    }
+  }, []);
 
   const currentData = useMockData ? mockData : (Array.isArray(liveData) ? liveData : []);
 
@@ -1712,6 +1903,17 @@ function AppContent() {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // Dynamic Maps and Script Error Handlers
+  useEffect(() => {
+    const checkScripts = () => {
+      if (window.scriptLoadErrors && window.scriptLoadErrors.length > 0) {
+        showToast(`Failed to load: ${window.scriptLoadErrors.join(', ')}. Some features may not work.`, 'error');
+      }
+    };
+    const timer = setTimeout(checkScripts, 5000);
+    return () => clearTimeout(timer);
+  }, [showToast]);
+
   // CONSOLIDATED HANDLERS: These must only be declared once.
   const handleLoginSuccess = (userData, role) => {
     const userWithRole = { ...userData, role };
@@ -1753,23 +1955,27 @@ function AppContent() {
   }, []);
 
   useEffect(() => {
+    let isMounted = true;
     const validateSession = async () => {
       const token = localStorage.getItem('token');
       if (!token) {
         if (location.pathname !== '/' && location.pathname !== '/login') {
           navigate('/login');
         }
-        setIsInitializing(false);
+        if (isMounted) setIsInitializing(false);
         return;
       }
 
       // Add a timeout safeguard to ensure the UI eventually loads
-      const timeoutId = setTimeout(() => setIsInitializing(false), 5000);
+      const timeoutId = setTimeout(() => {
+        if (isMounted) setIsInitializing(false);
+      }, 5000);
 
       try {
         // BUG FIX: Stale user data in localStorage.
         // Verify token by fetching the latest user data from the server.
         const freshUser = await fetchJson('/me');
+        if (!isMounted) return;
         if (freshUser && freshUser._id) {
           const userWithRole = { ...freshUser, role: freshUser.role };
           setUser(userWithRole);
@@ -1784,20 +1990,23 @@ function AppContent() {
         }
       } catch (error) {
         console.error("Session validation failed:", error.message);
-        handleLogout();
+        if (isMounted) handleLogout();
       } finally {
-        setIsInitializing(false);
-        clearTimeout(timeoutId);
+        if (isMounted) {
+          setIsInitializing(false);
+          clearTimeout(timeoutId);
+        }
       }
     };
     validateSession();
+    return () => { isMounted = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Global socket listener for Admin Broadcasts and connection management
   useEffect(() => {
     if (user) {
-      socket.connect();
+      if (!socket.connected) socket.connect();
       const handleBroadcast = (msg) => showToast(`📢 Admin Broadcast: ${msg}`, 'warning');
       socket.on('systemBroadcast', handleBroadcast);
       
@@ -1806,7 +2015,7 @@ function AppContent() {
       };
     } else {
       // If there's no user, disconnect the socket.
-      socket.disconnect();
+      if (socket.connected) socket.disconnect();
     }
   }, [user, showToast, socket]);
 
@@ -1844,7 +2053,7 @@ function AppContent() {
     }}>
       <Routes>
         <Route path="/" element={user ? <Navigate to={`/${user.role}`} replace /> : <Landing onEnter={() => navigate('/login')} onSecret={handleSecretAdminLogin} />} />
-        <Route path="/login" element={user ? <Navigate to={`/${user.role}`} replace /> : <Login onLoginSuccess={handleLoginSuccess} />} />
+        <Route path="/login" element={user ? <Navigate to={`/${user.role}`} replace /> : <Login onLoginSuccess={handleLoginSuccess} showToast={showToast} />} />
         
         <Route path="/admin" element={user?.role === 'admin' ? <AdminPanel user={user} onLogout={handleLogout} showToast={showToast} /> : <Navigate to="/login" replace />} />
         

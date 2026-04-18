@@ -186,6 +186,9 @@ setInterval(() => {
   }
 }, 60 * 60 * 1000); // Clean up every hour
 
+// In-memory OTP store (Use Redis for multi-instance production)
+const otpStore = new Map();
+
 // POST /api/admin/secret-login - Hidden backdoor login
 api.post('/admin/secret-login', async (req, res) => {
   try {
@@ -296,6 +299,72 @@ api.post('/login', async (req, res) => {
     res.json({ token, user: { _id: user._id, name: user.name, phone: user.phone, role: user.role } });
   } catch (error) {
     res.status(500).json({ message: 'Internal server error during authentication' });
+  }
+});
+
+// POST /api/auth/forgot-password - Trigger RapidAPI SMS
+api.post('/auth/forgot-password', async (req, res) => {
+  try {
+    const { phone } = req.body;
+    if (!phone) return res.status(400).json({ message: 'Phone number is required' });
+
+    const cleanPhone = phone.trim();
+    const user = await User.findOne({ phone: cleanPhone });
+    if (!user) return res.status(404).json({ message: 'No account found with this phone number' });
+
+    // Generate 4-digit OTP
+    const otp = Math.floor(1000 + Math.random() * 9000).toString();
+    otpStore.set(cleanPhone, { otp, expiresAt: Date.now() + 10 * 60 * 1000 }); // 10 min expiry
+    
+    console.log(`[OTP GENERATED] Phone: ${cleanPhone} | Code: ${otp}`);
+
+    // Trigger RapidAPI SMS Verify Service
+    try {
+      const targetPhone = cleanPhone.startsWith('+') ? cleanPhone : `+91${cleanPhone}`;
+      await fetch('https://sms-verify3.p.rapidapi.com/send-numeric-verify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-rapidapi-host': 'sms-verify3.p.rapidapi.com',
+          'x-rapidapi-key': '555ce5482cmshbd501fa2db0bb62p1b08fejsnc93f81bcae7a'
+        },
+        // Removing 'estimate: true' so it actually dispatches the text message
+        body: JSON.stringify({ target: targetPhone })
+      });
+    } catch (smsError) {
+      console.error('[SMS ERROR] Failed to hit RapidAPI:', smsError.message);
+      // We swallow the error so development isn't blocked if the API key limit is reached
+    }
+
+    res.status(200).json({ message: 'OTP sent! Check your messages (or server console).' });
+  } catch (error) {
+    res.status(500).json({ message: 'Internal server error while requesting OTP' });
+  }
+});
+
+// POST /api/auth/reset-password - Verify OTP and update password
+api.post('/auth/reset-password', async (req, res) => {
+  try {
+    const { phone, otp, newPassword } = req.body;
+    if (!phone || !otp || !newPassword) return res.status(400).json({ message: 'All fields are required' });
+    
+    const cleanPhone = phone.trim();
+    const record = otpStore.get(cleanPhone);
+    
+    if (!record) return res.status(400).json({ message: 'OTP expired or not requested' });
+    if (Date.now() > record.expiresAt) {
+      otpStore.delete(cleanPhone);
+      return res.status(400).json({ message: 'OTP has expired. Please request a new one.' });
+    }
+    if (record.otp !== otp.trim()) return res.status(400).json({ message: 'Invalid OTP' });
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await User.findOneAndUpdate({ phone: cleanPhone }, { password: hashedPassword });
+    otpStore.delete(cleanPhone); // Clear token after success
+
+    res.status(200).json({ message: 'Password reset successfully. You can now log in.' });
+  } catch (error) {
+    res.status(500).json({ message: 'Internal server error during password reset' });
   }
 });
 

@@ -3,21 +3,28 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com https://unpkg.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: https: blob: https://*.tile.openstreetmap.org; connect-src 'self' https://wattzen-backend.onrender.com wss://wattzen-backend.onrender.com http://localhost:5000 ws://localhost:5000 https://nominatim.openstreetmap.org ws: wss:; frame-src 'none'; object-src 'none';">
   <title>WATTZEN — POWER YOUR NETWORK</title>
   <!-- Fonts & Icons -->
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
-  <!-- Map & Chart libraries (for dashboard simulation) -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   
-  <!-- Google Maps API -->
+  <!-- Script Error Handler -->
   <script>
-    window.initMap = function() {
-      // Global callback for Google Maps Initialization
-      window.dispatchEvent(new Event('google-maps-loaded'));
+    window.scriptLoadErrors = [];
+    window.handleScriptError = function(scriptName) {
+      window.scriptLoadErrors.push(scriptName);
+      console.error(`Failed to load ${scriptName}`);
     };
   </script>
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAOVYRIgupAurZup5y1PRh8Ismb1A3lLao&libraries=places&callback=initMap&loading=async" async defer></script>
+
+  <!-- Map & Chart libraries (for dashboard simulation) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" onerror="window.handleScriptError('Chart.js')"></script>
+  <script src="https://cdn.jsdelivr.net/npm/animejs@3.2.1/lib/anime.min.js" onerror="window.handleScriptError('Anime.js')"></script>
+  
+  <!-- Leaflet API (OpenStreetMap) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" onerror="window.handleScriptError('Leaflet')"></script>
   <style>
     * {
       margin: 0;
@@ -510,6 +517,11 @@
     }
     .btn-block { width: 100%; }
 
+    /* Delivery Header */
+    .delivery-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 16px; background: var(--surface); border-radius: var(--radius-card); margin-bottom: 16px; border: 1px solid var(--border-light); box-shadow: var(--shadow-sm); }
+    .delivery-header .info { flex: 1; min-width: 0; }
+    .delivery-header .title { display: block; font-size: 0.85rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+
     /* Electrician card */
     .electrician-row {
       display: flex;
@@ -699,6 +711,13 @@
       cursor: pointer;
       color: var(--text-muted);
     }
+
+    /* Mobile Bottom Nav (Global Base) */
+    .mobile-bottom-nav { display: none; position: fixed; bottom: 0; left: 0; right: 0; background: var(--surface); border-top: 1px solid var(--border-light); padding: 8px 0; justify-content: space-around; align-items: center; z-index: 1000; box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.1); }
+    .nav-item { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 16px; cursor: pointer; color: var(--text-muted); transition: all 0.2s; border-radius: 12px; }
+    .nav-item.active { color: var(--primary); background: var(--primary-light); }
+    .nav-item i { font-size: 1.2rem; }
+    .nav-item span { font-size: 0.75rem; font-weight: 600; }
 
     /* responsiveness */
     @media (min-width: 768px) { /* Tablet and larger */

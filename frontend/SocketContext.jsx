@@ -3,9 +3,9 @@ import { io } from 'socket.io-client';
 
 const _envUrl = import.meta.env.VITE_API_URL;
 const BASE_URL = _envUrl || (
-  typeof window !== 'undefined' && window.location.protocol === 'https:' 
-    ? 'https://wattzen-backend.onrender.com' 
-    : (typeof window !== 'undefined' && window.location.hostname !== 'localhost' ? `http://${window.location.hostname}:5000` : 'http://localhost:5000')
+  typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname.startsWith('192.168.') || window.location.hostname.startsWith('10.'))
+    ? `http://${window.location.hostname}:5000`
+    : 'https://wattzen-backend.onrender.com' // Always fallback to HTTPS in production
 );
 
 const socketInstance = io(BASE_URL, {
