@@ -12,12 +12,12 @@ const app = express();
 app.set('trust proxy', 1); // Enable trusting proxy headers for correct IP detection
 const server = http.createServer(app);
 
-// Remove trailing slash if it exists to prevent strict CORS mismatches
-// Allow dynamic origin for local dev, but lock to a specific URL in production via environment variables.
-const FRONTEND_URL = process.env.FRONTEND_URL ? process.env.FRONTEND_URL.replace(/\/$/, '') : undefined;
 const corsOptions = {
-  // Explicitly allow the known Vercel production domain along with the env variable and local dev origins
-  origin: FRONTEND_URL ? [FRONTEND_URL, 'https://wattzen.vercel.app'] : true,
+  // Explicitly list allowed origins to prevent Render proxy CORS dropping
+  origin: [
+    'https://wattzen.vercel.app', 
+    process.env.FRONTEND_URL ? process.env.FRONTEND_URL.replace(/\/$/, '') : null
+  ].filter(Boolean),
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
 };
@@ -42,6 +42,7 @@ app.use((req, res, next) => {
 });
 
 let criticalSystemError = null;
+let isDbConnected = false;
 
 const PORT = process.env.PORT || 5000;
 // Fix: Allow seamless local development by falling back to local credentials unless explicitly in production
@@ -58,6 +59,9 @@ app.use('/api', (req, res, next) => {
   if (criticalSystemError) {
     return res.status(503).json({ message: criticalSystemError });
   }
+  if (!isDbConnected) {
+    return res.status(503).json({ message: 'Server is starting and connecting to the database. Please wait a moment.' });
+  }
   next();
 });
 
@@ -72,6 +76,7 @@ const connectDB = async () => {
   if (mongoose.connection.readyState >= 1) return;
   try {
     await mongoose.connect(MONGO_URI);
+    isDbConnected = true;
     console.log('Connected to MongoDB');
   } catch (err) {
     console.error('Could not connect to MongoDB.', err);
@@ -79,13 +84,13 @@ const connectDB = async () => {
   }
 };
 
-connectDB().then(() => {
-  if (!process.env.VERCEL) {
-    server.listen(PORT, '0.0.0.0', () => {
-      console.log(`Server running on port ${PORT}`);
-    });
-  }
-});
+// START THE SERVER IMMEDIATELY so Render doesn't throw a 502 Bad Gateway during DB connection delays
+if (!process.env.VERCEL) {
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}
+connectDB(); // Initiate DB connection asynchronously
 
 const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
