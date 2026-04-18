@@ -728,6 +728,14 @@ function ElectricianHome({ user, showToast }) {
         // Refresh wallet balance
         fetchJson('/me').then(res => setWalletBal(res.walletBalance)).catch(() => {});
       });
+      socket.on('teamMemberJoined', (data) => {
+        setCurrentJob(prev => {
+          if (!prev) return prev;
+          // Prevent duplicates in case of network stutters
+          if (prev.electricians.some(e => String(e._id) === String(data.electrician._id))) return prev;
+          return { ...prev, electricians: [...prev.electricians, data.electrician] };
+        });
+      });
     } else {
       setIsTracking(false);
       socket.disconnect();
@@ -737,6 +745,7 @@ function ElectricianHome({ user, showToast }) {
       socket.off('jobAccepted');
       socket.off('jobCancelled');
       socket.off('jobCompleted');
+      socket.off('teamMemberJoined');
       socket.disconnect();
     };
   }, [isOnline]);
@@ -765,6 +774,9 @@ function ElectricianHome({ user, showToast }) {
         }
       };
       checkJobs();
+      
+      // FIX: Actually start the interval so electricians don't miss jobs if they log in late
+      pollInterval = setInterval(checkJobs, 10000); 
 
       const handleNewJob = (job) => {
         if (job.status === 'searching') {
@@ -774,6 +786,7 @@ function ElectricianHome({ user, showToast }) {
       socket.on('newJobAvailable', handleNewJob);
 
       return () => {
+        clearInterval(pollInterval);
         socket.off('newJobAvailable', handleNewJob);
       };
     }
@@ -829,6 +842,8 @@ function ElectricianHome({ user, showToast }) {
       setCurrentJob(acceptedJob); // Set the full job object
     } catch (error) {
       showToast(error.message, 'error');
+      // FIX: Clear the stale job so polling can find a fresh one
+      setAvailableJob(null);
     }
   };
 
