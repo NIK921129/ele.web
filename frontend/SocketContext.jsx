@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { io } from 'socket.io-client';
 
+const BASE_URL = 'https://wattzen-backend.onrender.com';
+
 const socketInstance = io(BASE_URL, {
   autoConnect: false, // We will connect manually when a user is logged in.
   reconnectionAttempts: 5,
