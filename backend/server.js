@@ -5,6 +5,7 @@ require('dotenv').config(); // Load environment variables from .env file
 const jwt = require('jsonwebtoken');
 const http = require('http');
 const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 const { Server } = require('socket.io');
 
 const app = express();
@@ -40,16 +41,25 @@ app.use((req, res, next) => {
   next();
 });
 
+let criticalSystemError = null;
+
 const PORT = process.env.PORT || 5000;
 // Fix: Allow seamless local development by falling back to local credentials unless explicitly in production
 const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_fallback_key';
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/wattzen';
 
 if (process.env.NODE_ENV === 'production' && (!process.env.MONGO_URI || !process.env.JWT_SECRET)) {
-  console.error('\n[FATAL ERROR] Missing real backend credentials!');
-  console.error('Please define MONGO_URI and JWT_SECRET in your backend .env file.\n');
-  process.exit(1);
+  criticalSystemError = 'Backend misconfigured: Missing MONGO_URI or JWT_SECRET on Render.';
+  console.error(`\n[FATAL ERROR] ${criticalSystemError}\n`);
 }
+
+// Prevent the server from crashing, instead returning a clean JSON error to the frontend so CORS doesn't break
+app.use('/api', (req, res, next) => {
+  if (criticalSystemError) {
+    return res.status(503).json({ message: criticalSystemError });
+  }
+  next();
+});
 
 // ==========================================
 // 1. MONGODB SCHEMAS & MODELS
@@ -57,6 +67,7 @@ if (process.env.NODE_ENV === 'production' && (!process.env.MONGO_URI || !process
 mongoose.set('strictQuery', false); // Silence strictQuery deprecation warnings on Mongoose 7+
 
 const connectDB = async () => {
+  if (criticalSystemError) return;
   // Serverless DB caching: Prevent connection pool exhaustion by reusing active connections
   if (mongoose.connection.readyState >= 1) return;
   try {
@@ -64,8 +75,7 @@ const connectDB = async () => {
     console.log('Connected to MongoDB');
   } catch (err) {
     console.error('Could not connect to MongoDB.', err);
-    if (process.env.NODE_ENV === 'production' && !process.env.VERCEL) process.exit(1); // Stop server if DB fails to prevent hanging connections
-    throw err; // Fix: Propagate the error so the .catch() block on initialization catches it
+    criticalSystemError = 'Database connection failed. Check your MongoDB Atlas Network Access.';
   }
 };
 
@@ -75,8 +85,6 @@ connectDB().then(() => {
       console.log(`Server running on port ${PORT}`);
     });
   }
-}).catch(() => {
-  console.error('Server initialization halted due to database connection failure.');
 });
 
 const userSchema = new mongoose.Schema({
@@ -126,11 +134,22 @@ const Withdrawal = mongoose.model('Withdrawal', withdrawalSchema);
 // 2. SOCKET.IO SETUP
 // ==========================================
 io.on('connection', (socket) => {
-  socket.on('joinJobRoom', (jobId) => socket.join(jobId));
-  socket.on('updateLocation', (data) => io.to(data.jobId).emit('electricianLocationChanged', data));
-  socket.on('sendMessage', (data) => socket.to(data.jobId).emit('receiveMessage', data));
-  socket.on('typing', (data) => socket.to(data.jobId).emit('userTyping', data));
-  socket.on('stopTyping', (data) => socket.to(data.jobId).emit('userStopTyping', data));
+  // Security: Validate payload types to prevent socket-based crashes or prototype pollution
+  socket.on('joinJobRoom', (jobId) => {
+    if (typeof jobId === 'string' && jobId.length > 0) socket.join(jobId);
+  });
+  socket.on('updateLocation', (data) => {
+    if (data && typeof data.jobId === 'string') io.to(data.jobId).emit('electricianLocationChanged', data);
+  });
+  socket.on('sendMessage', (data) => {
+    if (data && typeof data.jobId === 'string') socket.to(data.jobId).emit('receiveMessage', data);
+  });
+  socket.on('typing', (data) => {
+    if (data && typeof data.jobId === 'string') socket.to(data.jobId).emit('userTyping', data);
+  });
+  socket.on('stopTyping', (data) => {
+    if (data && typeof data.jobId === 'string') socket.to(data.jobId).emit('userStopTyping', data);
+  });
 });
 
 // ==========================================
@@ -329,15 +348,23 @@ api.post('/jobs', authenticateToken, async (req, res) => {
     const safePrice = Math.max(299, Number(estimatedPrice) || 299);
     const safeTeamSize = Math.max(1, Math.min(10, Number(teamSize) || 1));
 
+    // Security: Strict coordinate validation to prevent MongoDB 2dsphere index crashes
+    if (!Array.isArray(coordinates) || coordinates.length !== 2 || 
+        typeof coordinates[0] !== 'number' || typeof coordinates[1] !== 'number' ||
+        coordinates[0] < -180 || coordinates[0] > 180 || 
+        coordinates[1] < -90 || coordinates[1] > 90) {
+      return res.status(400).json({ message: 'Invalid GPS coordinates provided.' });
+    }
+
     const newJob = new Job({
       customer: req.user.userId,
       serviceType,
       address,
       teamSize: safeTeamSize,
-      location: { type: 'Point', coordinates: coordinates || [0, 0] },
+      location: { type: 'Point', coordinates },
       estimatedPrice: safePrice,
       paymentStatus: 'verifying',
-      jobOTP: Math.floor(1000 + Math.random() * 9000).toString(),
+      jobOTP: crypto.randomInt(1000, 10000).toString(), // Security: Cryptographically secure OTP
       status: 'verifying_payment'
     });
 
@@ -382,6 +409,8 @@ api.put('/jobs/:id/accept', authenticateToken, async (req, res) => {
     if (req.user.role !== 'electrician' && req.user.role !== 'admin') {
       return res.status(403).json({ message: 'Forbidden' });
     }
+
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ message: 'Invalid Job ID format' });
 
     const jobId = req.params.id;
     const electricianId = req.user.userId;
@@ -431,12 +460,18 @@ api.put('/jobs/:id/accept', authenticateToken, async (req, res) => {
 // PUT /api/jobs/:id/cancel - Cancel a job
 api.put('/jobs/:id/cancel', authenticateToken, async (req, res) => {
   try {
-    const job = await Job.findOneAndUpdate(
-      { _id: req.params.id, customer: req.user.userId, status: { $in: ['searching', 'verifying_payment'] } },
-      { status: 'cancelled' },
-      { new: true }
-    );
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ message: 'Invalid Job ID format' });
+
+    const job = await Job.findOne({ _id: req.params.id, customer: req.user.userId, status: { $in: ['searching', 'verifying_payment'] } });
     if (!job) return res.status(404).json({ message: 'Job not found or already assigned' });
+
+    // Logic Fix: Refund the customer if they had already paid upfront
+    if (job.status === 'searching' && job.paymentStatus === 'paid') {
+      await User.findByIdAndUpdate(req.user.userId, { $inc: { walletBalance: job.estimatedPrice } });
+    }
+
+    job.status = 'cancelled';
+    await job.save();
 
     // Notify any partially joined or tracking electricians that the job was cancelled
     io.to(req.params.id).emit('jobCancelled');
@@ -452,6 +487,8 @@ api.put('/jobs/:id/cancel', authenticateToken, async (req, res) => {
 api.put('/admin/jobs/:id/verify-payment', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ message: 'Invalid Job ID format' });
+    
     const job = await Job.findOneAndUpdate(
       { _id: req.params.id, status: 'verifying_payment' }, 
       { paymentStatus: 'paid', status: 'searching' }, 
@@ -472,6 +509,8 @@ api.put('/admin/jobs/:id/verify-payment', authenticateToken, async (req, res) =>
 api.put('/jobs/:id/complete', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'customer') return res.status(403).json({ message: 'Only customers can mark jobs complete' });
+    
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ message: 'Invalid Job ID format' });
 
     const job = await Job.findOneAndUpdate(
       { _id: req.params.id, customer: req.user.userId, status: { $in: ['assigned', 'in_progress', 'payment'] } },
@@ -483,10 +522,13 @@ api.put('/jobs/:id/complete', authenticateToken, async (req, res) => {
 
     // Payout: 80% to electricians (20% platform cut). Round to 2 decimal places.
     const earningsPerElectrician = Math.round(((job.estimatedPrice * 0.8) / Math.max(1, job.electricians.length)) * 100) / 100;
-    for (const electricianId of job.electricians) {
-      await User.findByIdAndUpdate(electricianId, { 
-        $inc: { walletBalance: earningsPerElectrician, jobsCompleted: 1 } 
-      });
+    
+    // Performance: Replace sequential loop with bulk updateMany operation
+    if (job.electricians.length > 0) {
+      await User.updateMany(
+        { _id: { $in: job.electricians } },
+        { $inc: { walletBalance: earningsPerElectrician, jobsCompleted: 1 } }
+      );
     }
 
     io.to(req.params.id).emit('jobCompleted'); // Notify all in room
@@ -556,6 +598,8 @@ api.post('/withdrawals', authenticateToken, async (req, res) => {
     }
 
     const amountToWithdraw = user.walletBalance;
+    // Logic Fix: Ensure withdrawal amount is strictly positive
+    if (amountToWithdraw <= 0) return res.status(400).json({ message: 'Invalid withdrawal amount' });
 
     // FIX: Deduct the exact amount to prevent overwriting concurrent earnings ($inc overwrites with $set: 0 bug)
     const updatedUser = await User.findOneAndUpdate(
@@ -581,6 +625,8 @@ api.post('/withdrawals', authenticateToken, async (req, res) => {
 api.put('/admin/withdrawals/:id/approve', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ message: 'Invalid Withdrawal ID format' });
+    
     const withdrawal = await Withdrawal.findOneAndUpdate(
       { _id: req.params.id, status: 'pending' }, 
       { status: 'approved' }, 
@@ -598,6 +644,12 @@ api.put('/admin/withdrawals/:id/approve', authenticateToken, async (req, res) =>
 api.post('/admin/broadcast', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    
+    const msg = req.body.message;
+    if (!msg || typeof msg !== 'string' || msg.trim().length === 0 || msg.length > 1000) {
+      return res.status(400).json({ message: 'Invalid broadcast message payload' });
+    }
+
     io.emit('systemBroadcast', req.body.message);
     res.status(200).json({ success: true });
   } catch (error) {
@@ -667,7 +719,12 @@ api.get('/jobs/history', authenticateToken, async (req, res) => {
     else if (req.user.role === 'electrician') query.electricians = req.user.userId;
     else return res.status(403).json({ message: 'Forbidden' });
 
-    const jobs = await Job.find(query).sort({ createdAt: -1 }).limit(20).populate('electricians', 'name phone').populate('customer', 'name phone');
+    // Performance: Add pagination boundaries to prevent massive payload loading
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = 20;
+    const skip = (page - 1) * limit;
+
+    const jobs = await Job.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).populate('electricians', 'name phone').populate('customer', 'name phone');
     res.status(200).json(jobs);
   } catch (error) {
     res.status(500).json({ message: 'Internal server error while fetching history' });
