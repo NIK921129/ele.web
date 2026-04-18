@@ -146,22 +146,29 @@ function Landing({ onEnter, onSecret }) {
 
   // Anime.js Entrance Animation
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.anime) {
-      window.anime.timeline({ easing: 'easeOutCubic' })
-        .add({
-          targets: '.landing-glass-card',
-          scale: [0.85, 1],
-          opacity: [0, 1],
-          duration: 800
-        })
-        .add({
-          targets: '.anime-element',
-          translateY: [30, 0],
-          opacity: [0, 1],
-          delay: window.anime && typeof window.anime.stagger === 'function' ? window.anime.stagger(150) : 0,
-          duration: 800
-        }, '-=400');
-    }
+    let checkInterval;
+    const triggerAnim = () => {
+      if (typeof window !== 'undefined' && window.anime) {
+        window.anime.timeline({ easing: 'easeOutCubic' })
+          .add({
+            targets: '.landing-glass-card',
+            scale: [0.85, 1],
+            opacity: [0, 1],
+            duration: 800
+          })
+          .add({
+            targets: '.anime-element',
+            translateY: [30, 0],
+            opacity: [0, 1],
+            delay: window.anime && typeof window.anime.stagger === 'function' ? window.anime.stagger(150) : 0,
+            duration: 800
+          }, '-=400');
+        return true;
+      }
+      return false;
+    };
+    if (!triggerAnim()) checkInterval = setInterval(() => { if (triggerAnim()) clearInterval(checkInterval); }, 200);
+    return () => { if (checkInterval) clearInterval(checkInterval); };
   }, []);
 
   return (
@@ -270,16 +277,16 @@ function ProfileModal({ user, onClose, onUpdate, showToast, onLogout }) {
 
   // Anime.js Form Toggle Animation
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.anime) {
-      window.anime({
-        targets: '.anime-form-item',
-        translateX: [20, 0],
-        opacity: [0, 1],
-        delay: window.anime && typeof window.anime.stagger === 'function' ? window.anime.stagger(100) : 0,
-        duration: 500,
-        easing: 'easeOutQuad'
-      });
-    }
+    let checkInterval;
+    const triggerAnim = () => {
+      if (typeof window !== 'undefined' && window.anime) {
+        window.anime({ targets: '.anime-form-item', translateX: [20, 0], opacity: [0, 1], delay: window.anime && typeof window.anime.stagger === 'function' ? window.anime.stagger(100) : 0, duration: 500, easing: 'easeOutQuad' });
+        return true;
+      }
+      return false;
+    };
+    if (!triggerAnim()) checkInterval = setInterval(() => { if (triggerAnim()) clearInterval(checkInterval); }, 200);
+    return () => { if (checkInterval) clearInterval(checkInterval); };
   }, []);
 
   return (
@@ -385,16 +392,16 @@ function Login({ onLoginSuccess, showToast }) {
 
   // Anime.js Form Toggle Animation
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.anime) {
-      window.anime({
-        targets: '.anime-form-item',
-        translateX: [20, 0],
-        opacity: [0, 1],
-        delay: window.anime && typeof window.anime.stagger === 'function' ? window.anime.stagger(100) : 0,
-        duration: 500,
-        easing: 'easeOutQuad'
-      });
-    }
+    let checkInterval;
+    const triggerAnim = () => {
+      if (typeof window !== 'undefined' && window.anime) {
+        window.anime({ targets: '.anime-form-item', translateX: [20, 0], opacity: [0, 1], delay: window.anime && typeof window.anime.stagger === 'function' ? window.anime.stagger(100) : 0, duration: 500, easing: 'easeOutQuad' });
+        return true;
+      }
+      return false;
+    };
+    if (!triggerAnim()) checkInterval = setInterval(() => { if (triggerAnim()) clearInterval(checkInterval); }, 200);
+    return () => { if (checkInterval) clearInterval(checkInterval); };
   }, [isLogin, isForgotPassword, otpSent]);
 
   // Handle OTP Resend Cooldown Timer
@@ -521,37 +528,46 @@ function TrackingMap({ origin, destination }) {
   const boundsSet = useRef(false);
 
   useEffect(() => {
-    if (!window.L || !mapRef.current) return;
+    if (!mapRef.current) return;
+    let checkInterval;
 
-    if (!mapInstance.current) {
-      mapInstance.current = window.L.map(mapRef.current, {
-        zoomControl: true,
-        attributionControl: false
-      }).setView([origin[1], origin[0]], 14);
+    const initMap = () => {
+      if (!window.L) return false;
 
-      window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-      }).addTo(mapInstance.current);
+      if (!mapInstance.current) {
+        mapInstance.current = window.L.map(mapRef.current, {
+          zoomControl: true,
+          attributionControl: false
+        }).setView([origin[1], origin[0]], 14);
 
-      const createIcon = (label, bg) => window.L.divIcon({
-        className: 'custom-osm-icon',
-        html: `<div style="background:${bg};color:white;width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:50%;border:2px solid white;box-shadow:0 2px 5px rgba(0,0,0,0.3);font-weight:bold;font-size:14px;">${label}</div>`,
-        iconSize: [30, 30],
-        iconAnchor: [15, 15]
-      });
+        window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+        }).addTo(mapInstance.current);
 
-      originMarker.current = window.L.marker([origin[1], origin[0]], { icon: createIcon('C', '#0d9488') }).addTo(mapInstance.current);
-      destMarker.current = window.L.marker([destination[1], destination[0]], { icon: createIcon('E', '#f59e0b') }).addTo(mapInstance.current);
-    }
+        const createIcon = (label, bg) => window.L.divIcon({
+          className: 'custom-osm-icon',
+          html: `<div style="background:${bg};color:white;width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:50%;border:2px solid white;box-shadow:0 2px 5px rgba(0,0,0,0.3);font-weight:bold;font-size:14px;">${label}</div>`,
+          iconSize: [30, 30],
+          iconAnchor: [15, 15]
+        });
 
-    if (origin && origin.length === 2) originMarker.current.setLatLng([origin[1], origin[0]]);
-    if (destination && destination.length === 2) destMarker.current.setLatLng([destination[1], destination[0]]);
+        originMarker.current = window.L.marker([origin[1], origin[0]], { icon: createIcon('C', '#0d9488') }).addTo(mapInstance.current);
+        destMarker.current = window.L.marker([destination[1], destination[0]], { icon: createIcon('E', '#f59e0b') }).addTo(mapInstance.current);
+      }
 
-    if (origin && destination && origin.length === 2 && destination.length === 2 && !boundsSet.current) {
-      const bounds = window.L.latLngBounds([[origin[1], origin[0]], [destination[1], destination[0]]]);
-      mapInstance.current.fitBounds(bounds, { padding: [40, 40] });
-      boundsSet.current = true;
-    }
+      if (origin && origin.length === 2) originMarker.current.setLatLng([origin[1], origin[0]]);
+      if (destination && destination.length === 2) destMarker.current.setLatLng([destination[1], destination[0]]);
+
+      if (origin && destination && origin.length === 2 && destination.length === 2 && !boundsSet.current) {
+        const bounds = window.L.latLngBounds([[origin[1], origin[0]], [destination[1], destination[0]]]);
+        mapInstance.current.fitBounds(bounds, { padding: [40, 40] });
+        boundsSet.current = true;
+      }
+      return true;
+    };
+    
+    if (!initMap()) checkInterval = setInterval(() => { if (initMap()) clearInterval(checkInterval); }, 500);
+    return () => { if (checkInterval) clearInterval(checkInterval); };
   }, [origin, destination]);
 
   // Clean up Leaflet instance on unmount to prevent memory leaks and "map already initialized" errors
@@ -1759,16 +1775,16 @@ function AdminPanel({ user, onLogout, showToast }) {
 
   // Anime.js Dashboard Entrance Animation
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.anime) {
-      window.anime({
-        targets: '.admin-metric-card',
-        translateY: [30, 0],
-        opacity: [0, 1],
-        delay: window.anime && typeof window.anime.stagger === 'function' ? window.anime.stagger(150) : 0,
-        duration: 800,
-        easing: 'easeOutCubic'
-      });
-    }
+    let checkInterval;
+    const triggerAnim = () => {
+      if (typeof window !== 'undefined' && window.anime) {
+        window.anime({ targets: '.admin-metric-card', translateY: [30, 0], opacity: [0, 1], delay: window.anime && typeof window.anime.stagger === 'function' ? window.anime.stagger(150) : 0, duration: 800, easing: 'easeOutCubic' });
+        return true;
+      }
+      return false;
+    };
+    if (!triggerAnim()) checkInterval = setInterval(() => { if (triggerAnim()) clearInterval(checkInterval); }, 200);
+    return () => { if (checkInterval) clearInterval(checkInterval); };
   }, []);
 
   const currentData = useMockData ? mockData : (Array.isArray(liveData) ? liveData : []);
