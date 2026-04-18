@@ -13,7 +13,7 @@ if (typeof window !== 'undefined' && window.location.protocol === 'http:' && win
 
 // Dynamically connect Frontend -> Backend (Local port 5000 for dev, Render for production)
 const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-const BASE_URL = import.meta.env.VITE_API_URL || (isLocal ? `http://${window.location.hostname}:5000` : 'https://wattzen-backend.onrender.com');
+const BASE_URL = import.meta.env.VITE_API_URL || (isLocal ? `http://${window.location.hostname}:5000` : 'https://voltflow-backend.onrender.com');
 const API_BASE_URL = `${BASE_URL}/api`;
 
 async function fetchJson(url, options = {}, retries = 2) {
