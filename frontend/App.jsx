@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 import { BrowserRouter, Routes, Route, useNavigate, Navigate, useLocation } from 'react-router-dom';
 
+import logoImage from './wmremove-transformed.png';
+
 // ==========================================
 // 1. API & SOCKET UTILITIES
 // ==========================================
@@ -131,7 +133,7 @@ function Landing({ onEnter, onSecret }) {
           border: '1px solid rgba(255,255,255,0.1)',
           boxShadow: '0 0 30px rgba(56, 189, 248, 0.2)'
         }}>
-          <img src="./wmremove-transformed.png" alt="WATTZEN" style={{ width: '100px', height: 'auto' }} />
+          <img src={logoImage} alt="WATTZEN" style={{ width: '100px', height: 'auto' }} />
         </div>
         <h1 className="landing-title">Power Your <span>Network</span></h1>
         <p className="landing-desc">
@@ -155,7 +157,7 @@ function Navbar({ user, onLogout, toggleTheme, isDarkMode }) {
     <div className="navbar">
       <div className="logo-area">
         <div className="logo-icon" style={{ background: 'transparent', boxShadow: 'none' }}>
-          <img src="./wmremove-transformed.png" alt="WATTZEN Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+          <img src={logoImage} alt="WATTZEN Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
         </div>
         <div className="logo-text">WATT<span>ZEN</span></div>
       </div>
@@ -218,7 +220,7 @@ function Login({ onLoginSuccess }) {
     <div className="login-container">
       <div className="logo-area" style={{ justifyContent: 'center', marginBottom: '8px', transform: 'scale(1.2)' }}>
         <div className="logo-icon" style={{ background: 'transparent', boxShadow: 'none' }}>
-          <img src="./wmremove-transformed.png" alt="WATTZEN Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+          <img src={logoImage} alt="WATTZEN Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
         </div>
         <div className="logo-text">WATT<span>ZEN</span></div>
       </div>
