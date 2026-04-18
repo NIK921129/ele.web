@@ -79,7 +79,7 @@ const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET || 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
 const MONGO_URI = process.env.MONGO_URI || 'mongodb+srv://barber:iamninja@cluster0.y4kvgub.mongodb.net/wattzen?appName=Cluster0';
 
-if (process.env.NODE_ENV === 'production' && (!process.env.MONGO_URI || !process.env.JWT_SECRET)) {
+if (process.env.NODE_ENV === 'production' && (!MONGO_URI || !JWT_SECRET)) {
   criticalSystemError = 'Backend misconfigured: Missing MONGO_URI or JWT_SECRET on Render.';
   console.error(`\n[FATAL ERROR] ${criticalSystemError}\n`);
 }
@@ -141,6 +141,10 @@ if (!process.env.VERCEL) {
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
   });
+  
+  // Render Load Balancer Fix: Keep-Alive timeout must exceed the LB's 100s timeout to prevent 502 errors
+  server.keepAliveTimeout = 120000; // 120 seconds
+  server.headersTimeout = 120000;
 }
 connectDB(); // Initiate DB connection asynchronously
 
@@ -753,7 +757,7 @@ api.delete('/me', authenticateToken, async (req, res) => {
   try {
     // 5. Security: Prevent Account Deletion Fraud (escaping active jobs)
     const activeCustomerJobs = await Job.countDocuments({ customer: req.user.userId, status: { $in: ['verifying_payment', 'searching', 'assigned', 'in_progress'] } });
-    const activeElectricianJobs = await Job.countDocuments({ electricians: req.user.userId, status: { $in: ['assigned', 'in_progress'] } });
+    const activeElectricianJobs = await Job.countDocuments({ electricians: req.user.userId, status: { $in: ['searching', 'assigned', 'in_progress'] } });
     if (activeCustomerJobs > 0 || activeElectricianJobs > 0) {
       return res.status(400).json({ message: 'Cannot delete account with active jobs. Please complete or cancel them first.' });
     }
@@ -886,7 +890,7 @@ api.put('/jobs/:id/accept', authenticateToken, async (req, res) => {
 
     // 3. Security: Prevent Electrician Job Hoarding (DDoS)
     if (req.user.role === 'electrician') {
-      const activeJobs = await Job.countDocuments({ electricians: req.user.userId, status: { $in: ['assigned', 'in_progress'] } });
+      const activeJobs = await Job.countDocuments({ electricians: req.user.userId, status: { $in: ['searching', 'assigned', 'in_progress'] } });
       if (activeJobs >= 1) return res.status(400).json({ message: 'You can only have 1 active job at a time. Complete your current job first.' });
     }
 
@@ -946,8 +950,12 @@ api.put('/jobs/:id/verify-otp', authenticateToken, async (req, res) => {
     const { otp } = req.body;
     if (!otp || String(otp).trim().length !== 4) return res.status(400).json({ message: 'A valid 4-digit OTP is required' }); // 8. Job OTP Format Strictness
 
-    const job = await Job.findOne({ _id: req.params.id, electricians: req.user.userId, status: 'assigned' });
-    if (!job) return res.status(404).json({ message: 'Job not found or not currently assigned' });
+    const job = await Job.findOne({ _id: req.params.id, electricians: req.user.userId, status: { $in: ['assigned', 'in_progress'] } });
+    if (!job) return res.status(404).json({ message: 'Job not found or not currently active' });
+    
+    if (job.status === 'in_progress') {
+      return res.status(200).json({ message: 'Job is already in progress. OTP was verified by a team member.' });
+    }
     
     // 4. Job OTP Brute Force Protection
     const attemptKey = `${req.user.userId}_${req.params.id}`;
@@ -976,7 +984,7 @@ api.put('/jobs/:id/drop', authenticateToken, async (req, res) => {
     if (req.user.role !== 'electrician') return res.status(403).json({ message: 'Forbidden' });
     
     const job = await Job.findOneAndUpdate(
-      { _id: req.params.id, electricians: req.user.userId, status: 'assigned' },
+      { _id: req.params.id, electricians: req.user.userId, status: { $in: ['assigned', 'searching'] } },
       { $pull: { electricians: req.user.userId }, $inc: { currentTeamSize: -1 }, status: 'searching' },
       { new: true, runValidators: true }
     );
@@ -1232,7 +1240,7 @@ api.post('/admin/broadcast', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'Invalid broadcast message payload' });
     }
 
-    io.emit('systemBroadcast', req.body.message);
+    io.emit('systemBroadcast', msg.trim());
     res.status(200).json({ success: true });
   } catch (error) {
     res.status(500).json({ message: 'Error broadcasting message' });
