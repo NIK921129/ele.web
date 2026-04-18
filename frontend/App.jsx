@@ -8,7 +8,11 @@ import { useSocket } from './SocketContext.jsx';
 // 1. API & SOCKET UTILITIES
 // ==========================================
 const _envUrl = import.meta.env.VITE_API_URL;
-const BASE_URL = _envUrl || (typeof window !== 'undefined' && window.location.hostname !== 'localhost' ? `http://${window.location.hostname}:5000` : 'http://localhost:5000');
+const BASE_URL = _envUrl || (
+  typeof window !== 'undefined' && window.location.protocol === 'https:' 
+    ? 'https://wattzen-backend.onrender.com' 
+    : (typeof window !== 'undefined' && window.location.hostname !== 'localhost' ? `http://${window.location.hostname}:5000` : 'http://localhost:5000')
+);
 const API_BASE_URL = `${BASE_URL}/api`;
 
 async function fetchJson(url, options = {}) {
