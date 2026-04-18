@@ -1370,8 +1370,9 @@ function AppContent() {
           const userWithRole = { ...freshUser, role: freshUser.role };
           setUser(userWithRole);
           localStorage.setItem('user', JSON.stringify(userWithRole));
-          if (location.pathname === '/' || location.pathname === '/login') {
-            navigate(`/${freshUser.role}`);
+          const targetPath = `/${freshUser.role}`;
+          if (location.pathname !== targetPath) {
+            navigate(targetPath);
           }
         } else {
           throw new Error('Invalid user data received from server.');
