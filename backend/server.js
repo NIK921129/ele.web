@@ -15,7 +15,8 @@ const server = http.createServer(app);
 // Allow dynamic origin for local dev, but lock to a specific URL in production via environment variables.
 const FRONTEND_URL = process.env.FRONTEND_URL ? process.env.FRONTEND_URL.replace(/\/$/, '') : undefined;
 const corsOptions = {
-  origin: FRONTEND_URL || true, // Reflect origin if FRONTEND_URL is not set (for local dev)
+  // Explicitly allow the known Vercel production domain along with the env variable and local dev origins
+  origin: FRONTEND_URL ? [FRONTEND_URL, 'https://wattzen.vercel.app'] : true,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
 };
