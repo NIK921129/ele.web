@@ -14,6 +14,7 @@
   <script>
     window.initMap = function() {
       // Global callback for Google Maps Initialization
+      window.dispatchEvent(new Event('google-maps-loaded'));
     };
   </script>
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAOVYRIgupAurZup5y1PRh8Ismb1A3lLao&libraries=places&callback=initMap&loading=async" async defer></script>

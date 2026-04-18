@@ -14,14 +14,9 @@ const server = http.createServer(app);
 
 const corsOptions = {
   // Explicitly list allowed origins to prevent Render proxy CORS dropping
-  origin: [
-    'https://wattzen.vercel.app', 
-    process.env.FRONTEND_URL ? process.env.FRONTEND_URL.replace(/\/$/, '') : null
-  ].filter(Boolean),
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+  origin: function(origin, callback) { callback(null, true); }, // Allow dynamically
+  credentials: true
 };
-
 // Configure Socket.io and CORS
 const io = new Server(server, { cors: corsOptions });
 app.use(cors(corsOptions));
@@ -73,7 +68,10 @@ mongoose.set('strictQuery', false); // Silence strictQuery deprecation warnings 
 const connectDB = async () => {
   if (criticalSystemError) return;
   // Serverless DB caching: Prevent connection pool exhaustion by reusing active connections
-  if (mongoose.connection.readyState >= 1) return;
+  if (mongoose.connection.readyState >= 1) {
+    isDbConnected = true;
+    return;
+  }
   try {
     await mongoose.connect(MONGO_URI);
     isDbConnected = true;
@@ -347,7 +345,8 @@ api.put('/me', authenticateToken, async (req, res) => {
 api.post('/jobs', authenticateToken, async (req, res) => {
   try {
     const { serviceType, address, coordinates, estimatedPrice, teamSize } = req.body;
-    if (!serviceType || !address) return res.status(400).json({ message: 'Service type and address required' });
+    const trimmedAddress = address?.trim();
+    if (!serviceType || !trimmedAddress) return res.status(400).json({ message: 'Service type and valid address required' });
 
     // Security: Prevent malicious injection of negative prices or absurd team sizes
     const safePrice = Math.max(299, Number(estimatedPrice) || 299);
@@ -364,7 +363,7 @@ api.post('/jobs', authenticateToken, async (req, res) => {
     const newJob = new Job({
       customer: req.user.userId,
       serviceType,
-      address,
+      address: trimmedAddress,
       teamSize: safeTeamSize,
       location: { type: 'Point', coordinates },
       estimatedPrice: safePrice,
@@ -386,8 +385,12 @@ api.post('/jobs', authenticateToken, async (req, res) => {
 api.get('/jobs/available', authenticateToken, async (req, res) => {
   try {
     const { latitude, longitude, maxDistance = 10 } = req.query;
-    // Ensure we don't return team jobs that this electrician has already joined
-    let query = { status: 'searching', electricians: { $ne: req.user.userId } };
+    // Ensure we don't return team jobs that this electrician has already joined OR jobs that are already full
+    let query = { 
+      status: 'searching', 
+      electricians: { $ne: req.user.userId },
+      $expr: { $lt: ["$currentTeamSize", "$teamSize"] }
+    };
 
     if (latitude && longitude) {
       const lat = parseFloat(latitude), lng = parseFloat(longitude), dist = parseFloat(maxDistance) * 1000;
@@ -691,38 +694,13 @@ api.post('/users/:id/rate', authenticateToken, async (req, res) => {
       return res.status(403).json({ message: 'Forbidden: You can only rate this electrician once after a completed job.' });
     }
 
-    const updatedUser = await User.findByIdAndUpdate(
-      req.params.id,
-      [{
-        $set: {
-          totalReviews: { $add: [{ $ifNull: ["$totalReviews", 0] }, 1] },
-          averageRating: {
-            $round: [
-              { $divide: [
-                    { $add: [{ $multiply: [{ $ifNull: ["$averageRating", 0] }, { $ifNull: ["$totalReviews", 0] }] }, numericRating] },
-                { $add: [{ $ifNull: ["$totalReviews", 0] }, 1] }
-              ]},
-              1
-            ]
-          }
-        }
-      }],
-      { new: true }
-    );
-    io.emit('adminRefresh');
-    res.status(200).json({ message: 'Rating submitted', rating: updatedUser.averageRating });
-  } catch (error) {
-    res.status(500).json({ message: 'Internal server error' });
-  }
-});
+    const electrician = await User.findById(req.params.id);
+    if (!electrician || electrician.role !== 'electrician') return res.status(404).json({ message: 'Electrician not found' });
 
-// GET /api/jobs/history - Fetch user job history
-api.get('/jobs/history', authenticateToken, async (req, res) => {
-  try {
-    let query = {};
-    if (req.user.role === 'customer') query.customer = req.user.userId;
-    else if (req.user.role === 'electrician') query.electricians = req.user.userId;
-    else return res.status(403).json({ message: 'Forbidden' });
+    const currentReviews = electrician.totalReviews || 0;
+
+
+pi/relse return res.status(403).json({ message: 'Forbidden' });
 
     // Performance: Add pagination boundaries to prevent massive payload loading
     const page = Math.max(1, parseInt(req.query.page) || 1);
@@ -732,8 +710,7 @@ api.get('/jobs/history', authenticateToken, async (req, res) => {
     const jobs = await Job.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).populate('electricians', 'name phone').populate('customer', 'name phone');
     res.status(200).json(jobs);
   } catch (error) {
-    res.status(500).json({ message: 'Internal server error while fetching history' });
-  }
+    res.status(500).json(
 });
 
 app.use('/api', api);

@@ -7,7 +7,8 @@ import { useSocket } from './SocketContext.jsx';
 // ==========================================
 // 1. API & SOCKET UTILITIES
 // ==========================================
-const BASE_URL = import.meta.env.VITE_API_URL || 'https://wattzen-backend.onrender.com';
+const _envUrl = import.meta.env.VITE_API_URL;
+const BASE_URL = _envUrl || (typeof window !== 'undefined' && window.location.hostname !== 'localhost' ? `http://${window.location.hostname}:5000` : 'http://localhost:5000');
 const API_BASE_URL = `${BASE_URL}/api`;
 
 async function fetchJson(url, options = {}) {
@@ -312,6 +313,7 @@ function TrackingMap({ origin, destination }) {
   const mapInstance = useRef(null);
   const originMarker = useRef(null);
   const destMarker = useRef(null);
+  const boundsSet = useRef(false);
 
   useEffect(() => {
     if (!window.google || !window.google.maps || !mapRef.current) return;
@@ -340,11 +342,12 @@ function TrackingMap({ origin, destination }) {
     if (origin && origin.length === 2) originMarker.current.setPosition({ lat: origin[1], lng: origin[0] });
     if (destination && destination.length === 2) destMarker.current.setPosition({ lat: destination[1], lng: destination[0] });
 
-    if (origin && destination && origin.length === 2 && destination.length === 2) {
+    if (origin && destination && origin.length === 2 && destination.length === 2 && !boundsSet.current) {
       const bounds = new window.google.maps.LatLngBounds();
       bounds.extend({ lat: origin[1], lng: origin[0] });
       bounds.extend({ lat: destination[1], lng: destination[0] });
       mapInstance.current.fitBounds(bounds, { top: 40, bottom: 40, left: 40, right: 40 });
+      boundsSet.current = true;
     }
   }, [origin, destination]);
 
@@ -414,6 +417,21 @@ function CustomerHome({ user, showToast }) {
     { id: 'projects', name: 'Big Projects', icon: 'fa-hard-hat' }
   ];
 
+  const [mapsLoaded, setMapsLoaded] = useState(!!(window?.google?.maps?.places));
+
+  useEffect(() => {
+    if (mapsLoaded) return;
+    const checkMaps = () => {
+      if (window?.google?.maps?.places) setMapsLoaded(true);
+    };
+    window.addEventListener('google-maps-loaded', checkMaps);
+    const interval = setInterval(checkMaps, 500); // Fallback interval
+    return () => {
+      window.removeEventListener('google-maps-loaded', checkMaps);
+      clearInterval(interval);
+    };
+  }, [mapsLoaded]);
+
   const currentServices = SERVICES.filter(s => s.category === activeCategory);
   const selectedServiceObj = SERVICES.find(s => s.id === selectedService);
 
@@ -474,7 +492,7 @@ function CustomerHome({ user, showToast }) {
 
   // Initialize Google Places Autocomplete
   useEffect(() => {
-    if (currentTab === 'active' && window.google && window.google.maps && window.google.maps.places && addressInputRef.current) {
+    if (currentTab === 'active' && mapsLoaded && addressInputRef.current) {
       const autocomplete = new window.google.maps.places.Autocomplete(addressInputRef.current, {
         fields: ["formatted_address", "geometry"],
         componentRestrictions: { country: 'in' } // Restrict to India (update as needed)
@@ -1095,6 +1113,10 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
 
   const handleAcceptJob = async () => {
     try {
+      // Fix: Pre-join room to prevent race condition where server emits 'jobAccepted' 
+      // before the client finishes joining the room post-API call.
+      socket.emit('joinJobRoom', availableJob._id);
+      
       const acceptedJob = await fetchJson(`/jobs/${availableJob._id}/accept`, { method: 'PUT' });
       setActiveJobId(availableJob._id); // Link the job and join the chat room only AFTER accepting
       setAvailableJob(null);
@@ -1108,6 +1130,7 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
       showToast(error.message, 'error');
       // FIX: Clear the stale job so polling can find a fresh one
       setAvailableJob(null);
+      setActiveJobId(null);
     }
   };
 
@@ -1164,7 +1187,7 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
                   <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.2)', color: 'var(--success)', marginBottom: '12px', display: 'inline-block' }}>NEW MATCH FOUND</span>
                   <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-main)' }}><strong>Service:</strong> {availableJob.serviceType}</p>
                   <p style={{ margin: '4px 0 12px 0', fontSize: '0.9rem', color: 'var(--text-main)' }}>
-                    <strong>Location:</strong> <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(availableJob.address)}`} target="_blank" rel="noreferrer" style={{ color: 'var(--primary)', textDecoration: 'none' }}>{availableJob.address} <i className="fas fa-external-link-alt"></i></a>
+                    <strong>Location:</strong> <a href={`https://www.google.com/maps/search/?api=1&query=${availableJob.location?.coordinates[1]},${availableJob.location?.coordinates[0]}`} target="_blank" rel="noreferrer" style={{ color: 'var(--primary)', textDecoration: 'none' }}>{availableJob.address} <i className="fas fa-external-link-alt"></i></a>
                   </p>
                   <p style={{ margin: '0 0 12px 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>Job ID: <span style={{ fontFamily: 'monospace' }}>{availableJob._id}</span></p>
                   <button className="btn" style={{ width: '100%', background: 'var(--success)', marginTop: '8px' }} onClick={handleAcceptJob}>
@@ -1200,7 +1223,7 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
                   <h4 style={{ color: 'var(--primary)' }}>You Have Arrived</h4>
                   <p style={{ color: 'var(--text-main)' }}>You can now begin the service. Message the customer if needed.</p>
                   <p style={{ margin: '12px 0 0 0', fontSize: '0.9rem', color: 'var(--text-main)' }}>
-                    <strong>Job Location:</strong> <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(currentJob.address)}`} target="_blank" rel="noreferrer" style={{ color: 'var(--primary)', textDecoration: 'none' }}>{currentJob.address} <i className="fas fa-external-link-alt"></i></a>
+                    <strong>Job Location:</strong> <a href={`https://www.google.com/maps/search/?api=1&query=${currentJob.location?.coordinates[1]},${currentJob.location?.coordinates[0]}`} target="_blank" rel="noreferrer" style={{ color: 'var(--primary)', textDecoration: 'none' }}>{currentJob.address} <i className="fas fa-external-link-alt"></i></a>
                   </p>
                 </React.Fragment>
               ) : null}
