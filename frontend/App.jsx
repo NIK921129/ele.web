@@ -1998,18 +1998,13 @@ function AppContent() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Dynamic Maps and Script Error Handlers
-  useEffect(() => {
-    const checkScripts = () => {
-      if (window.scriptLoadErrors && window.scriptLoadErrors.length > 0) {
-        showToast(`Failed to load: ${window.scriptLoadErrors.join(', ')}. Some features may not work.`, 'error');
-      }
-    };
-    const timer = setTimeout(checkScripts, 5000);
-    return () => clearTimeout(timer);
-  }, [showToast]);
+  // CONSOLIDATED HANDLERS: These must only be declared once and BEFORE useEffects that depend on them.
+  const showToast = React.useCallback((message, type = 'success') => {
+    const id = Date.now();
+    setToasts((prev) => [...prev, { id, message, type }]);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4000);
+  }, []);
 
-  // CONSOLIDATED HANDLERS: These must only be declared once.
   const handleLoginSuccess = (userData, role) => {
     const userWithRole = { ...userData, role };
     setUser(userWithRole);
@@ -2043,11 +2038,16 @@ function AppContent() {
     else document.body.classList.remove('dark-mode');
   }, [isDarkMode]);
 
-  const showToast = React.useCallback((message, type = 'success') => {
-    const id = Date.now();
-    setToasts((prev) => [...prev, { id, message, type }]);
-    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4000);
-  }, []);
+  // Dynamic Maps and Script Error Handlers
+  useEffect(() => {
+    const checkScripts = () => {
+      if (window.scriptLoadErrors && window.scriptLoadErrors.length > 0) {
+        showToast(`Failed to load: ${window.scriptLoadErrors.join(', ')}. Some features may not work.`, 'error');
+      }
+    };
+    const timer = setTimeout(checkScripts, 5000);
+    return () => clearTimeout(timer);
+  }, [showToast]);
 
   useEffect(() => {
     const handleAuthExpired = () => {
