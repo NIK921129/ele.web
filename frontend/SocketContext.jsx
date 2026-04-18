@@ -7,7 +7,11 @@ const BASE_URL = import.meta.env.VITE_API_URL || (isLocal ? `http://${window.loc
 
 const socketInstance = io(BASE_URL, {
   autoConnect: false, // We will connect manually when a user is logged in.
-  reconnectionAttempts: 5,
+  reconnectionAttempts: 10,
+  reconnectionDelay: 1000,
+  reconnectionDelayMax: 5000, // Socket Jitter to prevent Thundering Herd
+  randomizationFactor: 0.5,
+  transports: ['websocket', 'polling'], // Fallback for restrictive corporate firewalls/proxies
 });
 
 const SocketContext = createContext();

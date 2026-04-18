@@ -34,6 +34,12 @@ class ErrorBoundary extends React.Component {
     window.location.href = '/';
   };
 
+  handleClearCache = () => {
+    localStorage.clear();
+    sessionStorage.clear();
+    window.location.href = '/';
+  };
+
   render() {
     if (this.state.hasError) {
       return (
@@ -150,6 +156,23 @@ class ErrorBoundary extends React.Component {
             >
               <i className="fas fa-home"></i>
               Go Home
+            </button>
+            
+            <button 
+              onClick={this.handleClearCache}
+              className="btn-outline"
+              style={{
+                padding: '14px 28px',
+                fontSize: '1rem',
+                background: 'transparent',
+                color: 'var(--danger)',
+                border: '2px solid var(--danger)',
+                borderRadius: '12px',
+                cursor: 'pointer',
+                fontWeight: 600
+              }}
+            >
+              <i className="fas fa-trash-alt" style={{ marginRight: '8px' }}></i> Clear App Data & Restart
             </button>
           </div>
 

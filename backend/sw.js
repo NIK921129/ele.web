@@ -28,7 +28,14 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   event.respondWith(
-    fetch(event.request).catch(async () => {
+    fetch(event.request).then((networkResponse) => {
+      // Network-First Strategy: Seamlessly update cache with the latest deployment version
+      if (networkResponse && networkResponse.status === 200) {
+        const responseClone = networkResponse.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseClone));
+      }
+      return networkResponse;
+    }).catch(async () => {
       const cachedResponse = await caches.match(event.request);
       if (cachedResponse) return cachedResponse;
       

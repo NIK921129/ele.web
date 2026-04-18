@@ -7,7 +7,7 @@ import { useSocket } from './SocketContext.jsx';
 // ==========================================
 // 1. API & SOCKET UTILITIES
 // ==========================================
-if (typeof window !== 'undefined' && window.location.protocol === 'http:' && window.location.hostname !== 'localhost' && !window.location.hostname.startsWith('192.168.') && !window.location.hostname.startsWith('10.')) {
+if (typeof window !== 'undefined' && window.location.protocol === 'http:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1' && !window.location.hostname.startsWith('192.168.') && !window.location.hostname.startsWith('10.')) {
   window.location.href = window.location.href.replace('http:', 'https:');
 }
 
@@ -20,6 +20,14 @@ async function fetchJson(url, options = {}, retries = 2) {
   const token = localStorage.getItem('token');
   const isFormData = options.body instanceof FormData;
   const headers = { ...options.headers };
+
+  // 3. HTTP GET Payload Crash Protection
+  const method = (options.method || 'GET').toUpperCase();
+  if (method === 'GET' || method === 'HEAD') {
+    delete options.body;
+    headers['Cache-Control'] = 'no-cache'; // 4. Prevent stale iOS/Safari polling
+    headers['Pragma'] = 'no-cache';
+  }
 
   if (!isFormData && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json';
@@ -53,7 +61,9 @@ async function fetchJson(url, options = {}, retries = 2) {
     if (!response.ok) {
       let errorMessage = 'Something went wrong';
       try {
-        const errorData = await response.json();
+        // 10. Robust JSON Error Parser (Prevents 502 HTML parsing crash)
+        const errorText = await response.text();
+        const errorData = errorText ? JSON.parse(errorText) : {};
         errorMessage = errorData.message || errorMessage;
       } catch (parseError) {
         errorMessage = `HTTP Error ${response.status}: ${response.statusText}`;
@@ -79,7 +89,8 @@ async function fetchJson(url, options = {}, retries = 2) {
     const isNetworkError = error.name === 'AbortError' || error.message === 'Failed to fetch' || error.message.includes('Network');
     if (isNetworkError && retries > 0) {
       console.warn(`[Network] Transient failure, retrying ${url}... (${retries} attempts left)`);
-      await new Promise(resolve => setTimeout(resolve, 1000 * (3 - retries))); // 1s, then 2s delay
+      // 2. Thundering Herd Jitter
+      await new Promise(resolve => setTimeout(resolve, 1000 * (3 - retries) + Math.random() * 500));
       return fetchJson(url, options, retries - 1);
     }
 
@@ -93,6 +104,22 @@ async function fetchJson(url, options = {}, retries = 2) {
     // Log unexpected errors for external telemetry / debugging
     console.error(`[API Error] ${options.method || 'GET'} ${url} -`, error.message);
     throw error;
+  }
+}
+
+// Global helper to trigger native OS push notifications for 20+ events
+async function sendPush(title, body, data = null, actions = []) {
+  if (typeof document !== 'undefined' && document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+    try {
+      if ('serviceWorker' in navigator) {
+        const reg = await navigator.serviceWorker.ready;
+        reg.showNotification(title, { body, icon: '/wmremove-transformed.png', data, actions });
+      } else {
+        new Notification(title, { body, icon: '/wmremove-transformed.png' });
+      }
+    } catch (e) {
+      console.error('Push notification failed', e);
+    }
   }
 }
 
@@ -258,20 +285,26 @@ function ProfileModal({ user, onClose, onUpdate, showToast, onLogout }) {
   const [name, setName] = useState(user?.name || '');
   const [phone, setPhone] = useState(user?.phone || '');
   const [loading, setLoading] = useState(false);
+  const mounted = useRef(true);
+
+  useEffect(() => { return () => { mounted.current = false; }; }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
       const updatedUser = await fetchJson('/me', { method: 'PUT', body: { name, phone } });
-      onUpdate(updatedUser);
-      showToast('Profile updated successfully', 'success');
-      onClose();
+      if (mounted.current) {
+        onUpdate(updatedUser);
+        showToast('Profile updated successfully', 'success');
+        sendPush('Profile Updated', 'Your profile details have been saved.');
+        onClose();
+      }
     } catch (err) {
       showToast(err.message, 'error');
       showToast(err.message.includes('Network') ? err.message : 'Failed to update profile.', 'error');
     } finally {
-      setLoading(false);
+      if (mounted.current) setLoading(false);
     }
   };
 
@@ -294,7 +327,7 @@ function ProfileModal({ user, onClose, onUpdate, showToast, onLogout }) {
       <div className="modal-content">
         <div className="modal-header"><h3>Edit Profile</h3><button onClick={onClose}>&times;</button></div>
         <form onSubmit={handleSubmit}>
-          <div className="form-group anime-form-item"><label>Full Name</label><input type="text" className="form-control" value={name} onChange={e=>setName(e.target.value)} required /></div>
+          <div className="form-group anime-form-item"><label>Full Name</label><input type="text" className="form-control" value={name} onChange={e=>setName(e.target.value)} required maxLength="50" /></div>
           <div className="form-group anime-form-item"><label>Phone Number</label><input type="tel" className="form-control" value={phone} onChange={e=>setPhone(e.target.value.replace(/\D/g, ''))} pattern="[0-9]{10}" maxLength="10" required /></div>
           <button type="submit" className="btn btn-block anime-form-item" disabled={loading}>{loading ? 'Saving...' : 'Save Changes'}</button>
           <button type="button" className="btn-outline btn btn-block" style={{ marginTop: '12px', borderColor: 'var(--danger)', color: 'var(--danger)' }} onClick={onLogout}>Log Out</button>
@@ -430,8 +463,8 @@ function Login({ onLoginSuccess, showToast }) {
         
         {!isForgotPassword && (
         <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
-          <button type="button" className={`btn btn-block ${role === 'customer' ? '' : 'btn-outline'}`} onClick={() => setRole('customer')} style={{ padding: '10px' }}>Customer</button>
-          <button type="button" className={`btn btn-block ${role === 'electrician' ? '' : 'btn-outline'}`} onClick={() => setRole('electrician')} style={{ padding: '10px' }}>Electrician</button>
+          <button type="button" className={`btn btn-block ${role === 'customer' ? '' : 'btn-outline'}`} onClick={() => { setRole('customer'); setError(null); }} style={{ padding: '10px' }}>Customer</button>
+          <button type="button" className={`btn btn-block ${role === 'electrician' ? '' : 'btn-outline'}`} onClick={() => { setRole('electrician'); setError(null); }} style={{ padding: '10px' }}>Electrician</button>
         </div>
         )}
 
@@ -472,7 +505,7 @@ function Login({ onLoginSuccess, showToast }) {
             {!isLogin && (
             <div className="form-group anime-form-item">
               <label>Full Name</label>
-              <input type="text" className="form-control" value={name} onChange={e => setName(e.target.value)} required placeholder="John Doe" />
+              <input type="text" className="form-control" value={name} onChange={e => setName(e.target.value)} required placeholder="John Doe" maxLength="50" />
             </div>
           )}
           <div className="form-group anime-form-item">
@@ -558,7 +591,7 @@ function TrackingMap({ origin, destination }) {
       if (origin && origin.length === 2) originMarker.current.setLatLng([origin[1], origin[0]]);
       if (destination && destination.length === 2) destMarker.current.setLatLng([destination[1], destination[0]]);
 
-      if (origin && destination && origin.length === 2 && destination.length === 2 && !boundsSet.current) {
+      if (origin && destination && Array.isArray(origin) && Array.isArray(destination) && origin.length === 2 && destination.length === 2 && !boundsSet.current) {
         const bounds = window.L.latLngBounds([[origin[1], origin[0]], [destination[1], destination[0]]]);
         mapInstance.current.fitBounds(bounds, { padding: [40, 40] });
         boundsSet.current = true;
@@ -611,7 +644,7 @@ const SERVICES = [
   { id: 'renovation', name: 'Renovation', icon: 'fa-hammer', category: 'projects', team: true }
 ];
 
-function CustomerHome({ user, showToast }) {
+function CustomerHome({ user, showToast, onEditProfile }) {
   const { socket } = useSocket();
   const [selectedService, setSelectedService] = useState('wiring');
   const [address, setAddress] = useState('');
@@ -647,11 +680,42 @@ function CustomerHome({ user, showToast }) {
     { id: 'projects', name: 'Big Projects', icon: 'fa-hard-hat' }
   ];
 
+  // Restore Active Job and Chat History on Page Refresh
+  useEffect(() => {
+    let isMounted = true;
+    const fetchActiveJob = async () => {
+      try {
+        const job = await fetchJson('/jobs/active');
+        if (isMounted && job && job._id) {
+          setActiveJobId(job._id);
+          setSelectedService(job.serviceType);
+          setAddress(job.address);
+          setBookingPrice(job.estimatedPrice);
+          setTeamSize(job.teamSize || 1);
+          if (job.status === 'assigned' || job.status === 'in_progress') {
+            setAssignedElectricians(job.electricians || []);
+            setIsTeamFull(true);
+          } else if (job.status === 'searching') {
+            setTeamStatusMessage('Searching for nearby electricians...');
+          }
+          if (job.messages && job.messages.length > 0) {
+            setMessages(job.messages.map(m => ({ ...m, isSelf: String(m.senderId) === String(user?._id || user?.id) })));
+          }
+        }
+      } catch (e) { console.error('Failed to restore active job', e); }
+    };
+    fetchActiveJob();
+    return () => { isMounted = false; };
+  }, [user]);
+
   useEffect(() => {
     return () => {
-      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+        if (socket?.connected && activeJobId) socket.emit('stopTyping', { jobId: activeJobId });
+      }
     };
-  }, []);
+  }, [socket, activeJobId]);
 
   // OpenStreetMap Nominatim Autocomplete
   useEffect(() => {
@@ -682,21 +746,39 @@ function CustomerHome({ user, showToast }) {
 
   useEffect(() => {
     if (!activeJobId) return;
-    socket.emit('joinJobRoom', activeJobId);
+
+    // FIX: Ensure the user rejoins the room if their internet drops and the socket reconnects
+    const joinRoom = () => socket.emit('joinJobRoom', activeJobId);
+    joinRoom(); // Join immediately
+    socket.on('connect', joinRoom);
+
+    // Request push notification permission from the user
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
 
     // Store references to properly clean up specific listeners instead of wiping all global handlers
     const onLoc = (data) => setLiveLocation(data);
-    const onMsg = (data) => setMessages((prev) => [...prev, { ...data, isSelf: false }]);
+    const onMsg = (data) => {
+      setMessages((prev) => [...prev, { ...data, isSelf: false }]);
+      // Trigger a native push notification if the app is minimized/hidden
+      if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+        new Notification(`New message from ${data.senderName}`, { body: data.text, icon: '/wmremove-transformed.png' });
+      }
+      sendPush(`New message from ${data.senderName}`, data.text);
+    };
     const onType = (data) => setTypingUser(data.senderName);
     const onStopType = () => setTypingUser(null);
     const onPay = () => {
       setTeamStatusMessage('Payment verified! Searching for nearby electricians...');
       showToast('Payment verified by Admin!', 'success');
+      sendPush('Payment Verified', 'Admin verified your payment. Searching for electricians.');
     };
     const onAccept = (data) => {
       setAssignedElectricians(data.electricians || []);
       setIsTeamFull(true);
       setTeamStatusMessage(''); // Clear progress message
+      sendPush('Electrician Assigned!', 'Your job has been accepted by an electrician.');
     };
     const onJoin = (data) => {
         setAssignedElectricians(prev => {
@@ -705,8 +787,12 @@ function CustomerHome({ user, showToast }) {
         });
         setTeamStatusMessage(`${data.currentSize} of ${data.teamSize} electricians have joined.`);
         showToast(`${data.electrician.name} has joined the job!`, 'success');
+        sendPush('Team Update', `${data.electrician.name} has joined your project team.`);
     };
-    const onComplete = () => setJobCompleted(true);
+    const onComplete = () => {
+      setJobCompleted(true);
+      sendPush('Job Completed', 'The service has been finished. Please leave a rating!');
+    };
 
     socket.on('electricianLocationChanged', onLoc);
     socket.on('receiveMessage', onMsg);
@@ -718,6 +804,7 @@ function CustomerHome({ user, showToast }) {
     socket.on('jobCompleted', onComplete);
 
     return () => {
+      socket.off('connect', joinRoom);
       socket.off('electricianLocationChanged', onLoc);
       socket.off('receiveMessage', onMsg);
       socket.off('jobAccepted', onAccept);
@@ -731,7 +818,10 @@ function CustomerHome({ user, showToast }) {
 
   useEffect(() => {
     if (chatContainerRef.current) {
-      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+      const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
+      if (scrollHeight - scrollTop - clientHeight < 150 || messages.length <= 1) {
+        chatContainerRef.current.scrollTop = scrollHeight;
+      }
     }
   }, [messages]);
 
@@ -755,6 +845,7 @@ function CustomerHome({ user, showToast }) {
 
   const handleInitiateBooking = () => {
     if (!address) return showToast('Please enter your full address to book a service.', 'warning');
+    if (!coordinates) return showToast('Please select a valid address from the dropdown or use GPS.', 'warning');
     // Generate random price 300 - 700 per electrician needed
     const price = (Math.floor(Math.random() * 401) + 300) * teamSize;
     setBookingPrice(price);
@@ -771,6 +862,7 @@ function CustomerHome({ user, showToast }) {
       setBookingPrice(null);
       setTeamStatusMessage('Payment submitted. Waiting for Admin verification...');
       showToast(`Payment registered! Verifying...`, 'success');
+      sendPush('Payment Processing', 'Your payment is being verified by Admin.');
       setJobCompleted(false);
       setIsTeamFull(false);
     } catch (error) {
@@ -795,6 +887,7 @@ function CustomerHome({ user, showToast }) {
       setBookingPrice(null);
       setRating(0);
       showToast('Job cancelled successfully.', 'success');
+      sendPush('Job Cancelled', 'Your service request has been cancelled.');
     } catch (error) {
       showToast(error.message, 'error');
       showToast(error.message.includes('Network') ? error.message : 'Failed to cancel job.', 'error');
@@ -807,7 +900,7 @@ function CustomerHome({ user, showToast }) {
       jobId: activeJobId,
       senderId: user.id || user._id,
       senderName: user?.name || 'Customer',
-      text: chatInput,
+      text: chatInput.trim(),
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
     socket.emit('sendMessage', msgData);
@@ -842,6 +935,7 @@ function CustomerHome({ user, showToast }) {
       // Optimistically update the UI to prevent hanging if the socket packet drops
       setJobCompleted(true);
       showToast('Job marked as completed. Please rate your experience!', 'success');
+      sendPush('Job Completed', 'Thank you for confirming. Don\'t forget to rate!');
     } catch (error) {
       showToast(error.message, 'error');
       showToast(error.message.includes('Network') ? error.message : 'Failed to submit rating.', 'error');
@@ -861,6 +955,7 @@ function CustomerHome({ user, showToast }) {
         body: { rating }
       });
       showToast(`Thank you for your ${rating}-star feedback!`, 'success');
+      sendPush('Feedback Sent', 'Thank you for rating your electrician!');
       
       // Only clear state upon successful rating submission
       setActiveJobId(null);
@@ -887,7 +982,7 @@ function CustomerHome({ user, showToast }) {
             <div style={{ position: 'relative', width: '100%' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
                 <i className="fas fa-location-dot" style={{ color: 'var(--primary)', fontSize: '1.2rem' }}></i>
-                <input type="text" value={address} maxLength={250} onChange={(e) => { setAddress(e.target.value); setShowSuggestions(true); }} placeholder="Enter your full address..." style={{ background: 'transparent', border: 'none', outline: 'none', fontWeight: '800', color: 'var(--text-main)', fontSize: '1.05rem', width: '100%' }} />
+                <input type="text" value={address} maxLength={250} onChange={(e) => { setAddress(e.target.value); setCoordinates(null); setShowSuggestions(true); }} placeholder="Enter your full address..." style={{ background: 'transparent', border: 'none', outline: 'none', fontWeight: '800', color: 'var(--text-main)', fontSize: '1.05rem', width: '100%' }} />
               </div>
               {suggestions.length > 0 && (
                 <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--surface)', border: '1px solid var(--border-light)', borderRadius: '8px', zIndex: 10, boxShadow: 'var(--shadow-md)', maxHeight: '200px', overflowY: 'auto', marginTop: '8px' }}>
@@ -1079,7 +1174,7 @@ function CustomerHome({ user, showToast }) {
                       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
                       typingTimeoutRef.current = setTimeout(() => socket.emit('stopTyping', { jobId: activeJobId }), 1500);
                     }
-                  }} onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()} placeholder="Type a message..." style={{ flex: 1, padding: '10px', borderRadius: '20px', border: '1px solid var(--border-light)', outline: 'none' }} /> 
+                  }} onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()} placeholder="Type a message..." maxLength="1000" style={{ flex: 1, padding: '10px', borderRadius: '20px', border: '1px solid var(--border-light)', outline: 'none' }} /> 
                   <button className="btn" style={{ padding: '10px 16px', borderRadius: '20px' }} onClick={handleSendMessage}><i className="fas fa-paper-plane"></i></button>
                 </div>
               </div>
@@ -1149,7 +1244,7 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
   const [messages, setMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const [activeJobId, setActiveJobId] = useState(null);
-  const [availableJob, setAvailableJob] = useState(null);
+  const [availableJobs, setAvailableJobs] = useState([]);
   const [walletBal, setWalletBal] = useState(user?.walletBalance || 0);
   const [jobsCompleted, setJobsCompleted] = useState(user?.jobsCompleted || 0);
   const [currentJob, setCurrentJob] = useState(null); // Will hold the full job object
@@ -1161,7 +1256,8 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
   const chartRef = useRef(null);
   const chartInstance = useRef(null);
   const [myLiveCoords, setMyLiveCoords] = useState(null);
-  const [isAccepting, setIsAccepting] = useState(false);
+  const [acceptingJobId, setAcceptingJobId] = useState(null);
+  const realCoordsRef = useRef([77.5946, 12.9716]); // Fallback to Bangalore, dynamically updated
 
   const jobStatus = currentJob?.status;
   const teamSize = currentJob?.teamSize || 1;
@@ -1171,9 +1267,38 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
   const isJobActive = jobStatus === 'assigned' || jobStatus === 'in_progress';
   const hasArrived = isJobActive && !isTracking; // Simplified logic for arrival
 
+  // Restore Active Job and Chat History on Page Refresh
+  useEffect(() => {
+    let isMounted = true;
+    const fetchActiveJob = async () => {
+      try {
+        const job = await fetchJson('/jobs/active');
+        if (isMounted && job && job._id) {
+          setActiveJobId(job._id);
+          setCurrentJob(job);
+          if (job.status === 'assigned' || job.status === 'in_progress') {
+            setIsTracking(true);
+          }
+          if (job.messages && job.messages.length > 0) {
+            setMessages(job.messages.map(m => ({ ...m, isSelf: String(m.senderId) === String(user?._id || user?.id) })));
+          }
+        }
+      } catch (e) { console.error('Failed to restore active job', e); }
+    };
+    fetchActiveJob();
+    return () => { isMounted = false; };
+  }, [user]);
+
   useEffect(() => {
     if (isOnline) {
-      const onMsg = (data) => setMessages((prev) => [...prev, { ...data, isSelf: false }]);
+      const onMsg = (data) => {
+        setMessages((prev) => [...prev, { ...data, isSelf: false }]);
+        // Trigger a native push notification if the app is minimized/hidden
+        if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+          new Notification(`New message from ${data.senderName}`, { body: data.text, icon: '/wmremove-transformed.png' });
+        }
+        sendPush(`New message from ${data.senderName}`, data.text);
+      };
       const onType = (data) => setTypingUser(data.senderName);
       const onStopType = () => setTypingUser(null);
       const onAccept = (data) => {
@@ -1181,18 +1306,21 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
             setCurrentJob(prev => ({...prev, status: 'assigned', electricians: data.electricians}));
             setIsTracking(true); // All members start tracking when team is full
             showToast('Team is full! Job is now active.', 'success');
+            sendPush('Job Started', 'The team is full! You can now start the job.');
         }
       };
       const onCancel = () => {
         showToast('The customer cancelled the job.', 'warning');
+        sendPush('Job Cancelled', 'The customer has cancelled the active job.');
         setIsTracking(false);
         setActiveJobId(null);
         setCurrentJob(null);
-        setAvailableJob(null);
+        setAvailableJobs([]);
         setMessages([]);
       };
       const onComplete = () => {
         showToast('Customer marked job as complete! Earnings added to wallet.', 'success');
+        sendPush('Payment Received', 'Customer completed the job. Earnings have been added to your wallet.');
         fetchJson('/me').then(res => {
           setWalletBal(res.walletBalance);
           setJobsCompleted(res.jobsCompleted);
@@ -1209,6 +1337,7 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
           if (prev.electricians.some(e => String(e._id) === String(data.electrician._id))) return prev;
           return { ...prev, electricians: [...prev.electricians, data.electrician] };
         });
+        sendPush('Team Update', `${data.electrician.name} joined the job team.`);
       };
 
       socket.on('receiveMessage', onMsg);
@@ -1235,15 +1364,42 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
 
   useEffect(() => {
     return () => {
-      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+        if (socket?.connected && activeJobId) socket.emit('stopTyping', { jobId: activeJobId });
+      }
     };
-  }, []);
+  }, [socket, activeJobId]);
 
   useEffect(() => {
     if (isOnline && activeJobId) {
-      socket.emit('joinJobRoom', activeJobId);
+      // FIX: Ensure the electrician rejoins the room if their internet drops and the socket reconnects
+      const joinRoom = () => socket.emit('joinJobRoom', activeJobId);
+      joinRoom(); // Join immediately
+      socket.on('connect', joinRoom);
+      
+      return () => {
+        socket.off('connect', joinRoom);
+      };
     } 
   }, [isOnline, activeJobId, socket]);
+
+  useEffect(() => {
+    let geoId;
+    if (isOnline && 'geolocation' in navigator) {
+      geoId = navigator.geolocation.watchPosition(
+        (pos) => { realCoordsRef.current = [pos.coords.longitude, pos.coords.latitude]; },
+        (err) => {
+          console.warn('Geolocation error:', err);
+          if (err.code === 1) showToast('GPS permission denied. Tracking is disabled.', 'error');
+        },
+        { enableHighAccuracy: true, maximumAge: 10000 }
+      );
+    }
+    return () => {
+      if (geoId) navigator.geolocation.clearWatch(geoId);
+    };
+  }, [isOnline]);
 
   useEffect(() => {
     let pollInterval;
@@ -1251,15 +1407,12 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
     if (isOnline && !currentJob) {
       const checkJobs = async () => {
         try {
-          const job = await fetchJson('/jobs/available?latitude=12.9716&longitude=77.5946&maxDistance=15');
+          const coords = realCoordsRef.current;
+          // Fetch up to 10 nearby jobs to display in the feed
+          const data = await fetchJson(`/jobs/available?latitude=${coords[1]}&longitude=${coords[0]}&maxDistance=15&limit=10`);
           if (!isMounted) return;
-          // BUG FIX: Prevent setting empty objects as available jobs
-          if (job && job._id) {
-            setAvailableJob(job);
-          } else {
-            setAvailableJob(null);
-          }
-          // Do NOT set activeJobId here. It should only be set when the job is explicitly accepted.
+          
+          setAvailableJobs(Array.isArray(data) ? data : []);
         } catch (e) {
           console.error('Failed to fetch jobs:', e);
         }
@@ -1271,7 +1424,11 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
 
       const handleNewJob = (job) => {
         if (job.status === 'searching') {
-          setAvailableJob(job);
+          setAvailableJobs(prev => {
+            if (prev.some(j => String(j._id) === String(job._id))) return prev;
+            return [job, ...prev]; // Prepend the new job to the top of the list
+          });
+          sendPush('New Job Alert!', `A new ${job.serviceType.replace('_', ' ')} job is available nearby.`, { jobId: job._id }, [{ action: 'accept', title: 'Accept Job' }]);
         }
       };
       socket.on('newJobAvailable', handleNewJob);
@@ -1286,7 +1443,10 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
 
   useEffect(() => {
     if (chatContainerRef.current) {
-      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+      const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
+      if (scrollHeight - scrollTop - clientHeight < 150 || messages.length <= 1) {
+        chatContainerRef.current.scrollTop = scrollHeight;
+      }
     }
   }, [messages]);
 
@@ -1360,6 +1520,11 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
     };
   }, [currentTab, jobHistory]);
 
+  const trackingDestRef = useRef([77.5946, 12.9716]);
+  useEffect(() => {
+    if (currentJob?.location?.coordinates) trackingDestRef.current = currentJob.location.coordinates;
+  }, [currentJob]);
+
   useEffect(() => {
     let interval;
     if (isTracking) {
@@ -1369,8 +1534,7 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
         currentDist = Math.max(0, currentDist - 0.5);
         currentEta = Math.max(0, currentEta - 2);
 
-        // Dynamically simulate movement towards the customer's actual coordinates
-        const dest = currentJob?.location?.coordinates || [77.5946, 12.9716];
+        const dest = trackingDestRef.current;
         const simulatedCoords = [
           dest[0] - (currentDist * 0.002), 
           dest[1] - (currentDist * 0.002)
@@ -1397,7 +1561,7 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
       jobId: activeJobId,
       senderId: user.id || user._id,
       senderName: user?.name || 'Electrician',
-      text: chatInput,
+      text: chatInput.trim(),
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
     socket.emit('sendMessage', msgData);
@@ -1405,17 +1569,19 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
     setChatInput('');
   };
 
-  const handleAcceptJob = async () => {
-    if (isAccepting) return;
-    setIsAccepting(true);
+  const handleAcceptJob = async (jobId) => {
+    if (acceptingJobId) return;
+    setAcceptingJobId(jobId);
     try {
-      const acceptedJob = await fetchJson(`/jobs/${availableJob._id}/accept`, { method: 'PUT' });
+      const acceptedJob = await fetchJson(`/jobs/${jobId}/accept`, { method: 'PUT' });
       
       // Fix: Join room AFTER API responds successfully to prevent phantom socket connections if API fails
-      socket.emit('joinJobRoom', availableJob._id);
-      setActiveJobId(availableJob._id); // Link the job and join the chat room only AFTER accepting
-      setAvailableJob(null);
+      socket.emit('joinJobRoom', jobId);
+      setActiveJobId(jobId); // Link the job and join the chat room only AFTER accepting
+      setAvailableJobs([]); // Clear the list to focus on the active job
       setCurrentJob(acceptedJob); // Set the full job object
+      showToast('Job Accepted Successfully!', 'success');
+      sendPush('Job Accepted', 'You have successfully claimed the job!');
       
       // Prevent socket race condition: if the team is already full upon acceptance, start tracking instantly
       if (acceptedJob.status === 'assigned') {
@@ -1424,18 +1590,39 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
     } catch (error) {
       showToast(error.message, 'error');
       showToast(error.message.includes('Network') ? error.message : 'Failed to accept job.', 'error');
-      // FIX: Clear the stale job so polling can find a fresh one
-      setAvailableJob(null);
+      // Remove the failed job from the UI list so they can accept a different one
+      setAvailableJobs(prev => prev.filter(j => j._id !== jobId));
       setActiveJobId(null);
     } finally {
-      setIsAccepting(false);
+      setAcceptingJobId(null);
     }
   };
+
+  const acceptJobRef = useRef(handleAcceptJob);
+  useEffect(() => { acceptJobRef.current = handleAcceptJob; }, [handleAcceptJob]);
+
+  // Listen for the "Accept Job" action from the Service Worker Push Notification
+  useEffect(() => {
+    const handleSWMessage = (event) => {
+      if (event.data && event.data.type === 'ACCEPT_JOB' && event.data.jobId) {
+        acceptJobRef.current(event.data.jobId);
+      }
+    };
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', handleSWMessage);
+    }
+    return () => {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.removeEventListener('message', handleSWMessage);
+      }
+    };
+  }, []);
 
   const handleRequestWithdrawal = async () => {
     try {
       const res = await fetchJson('/withdrawals', { method: 'POST' });
       showToast('Withdrawal request sent to Admin.', 'success');
+      sendPush('Withdrawal Requested', 'Your fund withdrawal is pending approval.');
       setWalletBal(0); // Optimistically set to 0
     } catch (error) {
       showToast(error.message, 'error');
@@ -1449,7 +1636,18 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
         <div className="card">
           <div className="card-header">
             <h3 style={{ fontSize: '1.4rem' }}><i className="fas fa-toolbox" style={{ color: 'var(--primary)' }}></i> Welcome back, {user?.name?.split(' ')[0] || 'User'}</h3>
-            <button className={`btn ${isOnline ? '' : 'btn-outline'}`} onClick={() => setIsOnline(!isOnline)}>
+            <button 
+              className={`btn ${isOnline ? '' : 'btn-outline'}`} 
+              onClick={() => { 
+                if (isOnline && activeJobId) return showToast('Cannot go offline while on an active job.', 'warning'); 
+                setIsOnline(!isOnline); 
+                // Request Push Notification access on user interaction to prevent browser blocking
+                if (!isOnline && 'Notification' in window && Notification.permission === 'default') {
+                  Notification.requestPermission();
+                }
+              }} 
+              disabled={isOnline && !!activeJobId}
+            >
               {isOnline ? <React.Fragment><span className="pulse-dot" style={{ marginRight: '8px' }}></span>Online</React.Fragment> : 'Go Online'}
             </button>
           </div>
@@ -1479,19 +1677,26 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
                 <i className="fas fa-radar fa-spin fa-2x" style={{ color: 'var(--primary)' }}></i>
               </div>
               <h4>Searching for nearby jobs...</h4>
-              {!availableJob ? (
+              {availableJobs.length === 0 ? (
                 <p style={{ color: 'var(--text-muted)' }}>We are matching you with customers within a 10km radius.</p>
               ) : (
-                <div style={{ marginTop: '24px', padding: '20px', background: 'var(--surface)', borderRadius: '16px', border: '2px solid var(--success)', boxShadow: 'var(--shadow-lg)' }}>
-                  <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.2)', color: 'var(--success)', marginBottom: '12px', display: 'inline-block' }}>NEW MATCH FOUND</span>
-                  <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-main)' }}><strong>Service:</strong> {availableJob.serviceType}</p>
-                  <p style={{ margin: '4px 0 12px 0', fontSize: '0.9rem', color: 'var(--text-main)' }}>
-                    <strong>Location:</strong> <a href={`https://www.openstreetmap.org/?mlat=${availableJob.location?.coordinates?.[1]}&mlon=${availableJob.location?.coordinates?.[0]}#map=16/${availableJob.location?.coordinates?.[1]}/${availableJob.location?.coordinates?.[0]}`} target="_blank" rel="noreferrer" style={{ color: 'var(--primary)', textDecoration: 'none' }}>{availableJob.address} <i className="fas fa-external-link-alt"></i></a>
-                  </p>
-                  <p style={{ margin: '0 0 12px 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>Job ID: <span style={{ fontFamily: 'monospace' }}>{availableJob._id}</span></p>
-                  <button className="btn" style={{ width: '100%', background: 'var(--success)', marginTop: '8px' }} onClick={handleAcceptJob} disabled={isAccepting}>
-                    {isAccepting ? 'Accepting...' : 'Accept Job & Start Tracking'}
-                  </button>
+                <div style={{ marginTop: '24px', display: 'flex', flexDirection: 'column', gap: '16px', textAlign: 'left' }}>
+                  {availableJobs.map(job => (
+                    <div key={job._id} style={{ padding: '20px', background: 'var(--surface)', borderRadius: '16px', border: '2px solid var(--success)', boxShadow: 'var(--shadow-lg)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                        <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.2)', color: 'var(--success)' }}>NEW MATCH FOUND</span>
+                        <span style={{ fontWeight: 'bold', color: 'var(--primary)', fontSize: '1.2rem' }}>₹{job.estimatedPrice}</span>
+                      </div>
+                      <p style={{ margin: 0, fontSize: '0.95rem', color: 'var(--text-main)', textTransform: 'capitalize' }}><strong>Service:</strong> {job.serviceType.replace('_', ' ')}</p>
+                      <p style={{ margin: '4px 0 12px 0', fontSize: '0.9rem', color: 'var(--text-main)' }}>
+                        <strong>Location:</strong> <a href={`https://www.openstreetmap.org/?mlat=${job.location?.coordinates?.[1]}&mlon=${job.location?.coordinates?.[0]}#map=16/${job.location?.coordinates?.[1]}/${job.location?.coordinates?.[0]}`} target="_blank" rel="noreferrer" style={{ color: 'var(--primary)', textDecoration: 'none' }}>{job.address} <i className="fas fa-external-link-alt"></i></a>
+                      </p>
+                      <p style={{ margin: '0 0 12px 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>Job ID: <span style={{ fontFamily: 'monospace' }}>{job._id}</span></p>
+                      <button className="btn" style={{ width: '100%', background: 'var(--success)', marginTop: '8px' }} onClick={() => handleAcceptJob(job._id)} disabled={!!acceptingJobId}>
+                        {acceptingJobId === job._id ? 'Accepting...' : 'Accept Job & Start Tracking'}
+                      </button>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -1554,11 +1759,14 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
                 <input type="text" value={chatInput} onChange={(e) => {
                   setChatInput(e.target.value);
                   if (socket?.connected) {
-                    socket.emit('typing', { jobId: activeJobId, senderName: user?.name?.split(' ')[0] || 'Electrician' }); 
-                    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-                    typingTimeoutRef.current = setTimeout(() => socket.emit('stopTyping', { jobId: activeJobId }), 1500);
+                    if (!typingTimeoutRef.current) {
+                      socket.emit('typing', { jobId: activeJobId, senderName: user?.name?.split(' ')[0] || 'Electrician' }); 
+                    } else {
+                      clearTimeout(typingTimeoutRef.current);
+                    }
+                    typingTimeoutRef.current = setTimeout(() => { socket.emit('stopTyping', { jobId: activeJobId }); typingTimeoutRef.current = null; }, 1500);
                   }
-                }} onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()} placeholder="Type a message..." style={{ flex: 1, padding: '10px', borderRadius: '20px', border: '1px solid var(--border-light)', outline: 'none' }} /> 
+                }} onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()} placeholder="Type a message..." maxLength="1000" style={{ flex: 1, padding: '10px', borderRadius: '20px', border: '1px solid var(--border-light)', outline: 'none' }} /> 
             <button className="btn" style={{ padding: '10px 16px', borderRadius: '20px' }} onClick={handleSendMessage}><i className="fas fa-paper-plane"></i></button>
           </div>
         </div>
@@ -1815,7 +2023,7 @@ function AdminPanel({ user, onLogout, showToast }) {
         const electricians = job.electricians && job.electricians.length > 0 
           ? `"${job.electricians.map(e => e?.name || 'Unknown').join(' & ')}"` 
           : 'None';
-        const completedAt = new Date(job.updatedAt).toLocaleString();
+        const completedAt = job.updatedAt || job.createdAt ? new Date(job.updatedAt || job.createdAt).toLocaleString() : 'N/A';
         
         const row = [
           job._id, `"${job.serviceType}"`, `"${job.address}"`, job.estimatedPrice,
@@ -1849,6 +2057,7 @@ function AdminPanel({ user, onLogout, showToast }) {
     try {
       await fetchJson(`/admin/jobs/${id}/verify-payment`, { method: 'PUT' });
       showToast('Payment verified. Job is now active.', 'success');
+      sendPush('Payment Approved', 'The job is now live for electricians to accept.');
       // The WebSocket 'adminRefresh' event will automatically pull the fresh lists
       } catch (e) {
         console.error('Payment approval error:', e); 
@@ -1860,10 +2069,24 @@ function AdminPanel({ user, onLogout, showToast }) {
     try {
       await fetchJson(`/admin/withdrawals/${id}/approve`, { method: 'PUT' });
       showToast('Withdrawal approved.', 'success');
+      sendPush('Withdrawal Approved', 'Electrician funds have been marked as transferred.');
       // The WebSocket 'adminRefresh' event will automatically pull the fresh lists
       } catch (e) { 
         console.error('Withdrawal error:', e);
         showToast('Failed to approve withdrawal.', 'error'); 
+    }
+  };
+
+  const handleRejectWithdrawal = async (id) => {
+    if (!window.confirm('Are you sure you want to reject this withdrawal? The funds will be refunded back to the electrician\'s wallet.')) return;
+    try {
+      await fetchJson(`/admin/withdrawals/${id}/reject`, { method: 'PUT' });
+      showToast('Withdrawal rejected and refunded.', 'success');
+      sendPush('Withdrawal Rejected', 'The withdrawal request was rejected and funds were returned.');
+      // The WebSocket 'adminRefresh' event will automatically pull the fresh lists
+    } catch (e) {
+      console.error('Withdrawal rejection error:', e);
+      showToast('Failed to reject withdrawal.', 'error');
     }
   };
 
@@ -1872,6 +2095,7 @@ function AdminPanel({ user, onLogout, showToast }) {
     try {
       await fetchJson('/admin/broadcast', { method: 'POST', body: { message: broadcastMsg.trim() } });
       showToast('Broadcast sent to all active users!', 'success');
+      sendPush('Broadcast Sent', 'Your message was delivered to all online users.');
       setBroadcastMsg('');
       } catch(e) { 
       console.error('Broadcast error:', e);
@@ -1899,7 +2123,7 @@ function AdminPanel({ user, onLogout, showToast }) {
       </div>
 
       <div style={{ display: 'flex', gap: '10px', marginBottom: '24px' }}>
-        <input type="text" value={broadcastMsg} onChange={e => setBroadcastMsg(e.target.value)} placeholder="Type a system-wide broadcast message..." className="form-control" style={{ margin: 0, flex: 1 }} />
+        <input type="text" value={broadcastMsg} onChange={e => setBroadcastMsg(e.target.value)} placeholder="Type a system-wide broadcast message..." className="form-control" style={{ margin: 0, flex: 1 }} maxLength="1000" />
         <button className="btn" style={{ background: 'var(--warning)' }} onClick={handleBroadcast}><i className="fas fa-bullhorn"></i> Send Broadcast</button>
       </div>
 
@@ -1954,19 +2178,22 @@ function AdminPanel({ user, onLogout, showToast }) {
                         <p style={{ marginTop: '10px', color: 'var(--text-muted)' }}>Loading Live Data...</p>
                       </td>
                     </tr>
-                  ) : filteredDB.map((row, idx) => (
-                    <tr key={row._id} style={{ borderBottom: '1px solid var(--border-light)', background: idx % 2 === 0 ? 'transparent' : 'var(--secondary)' }}>
+                  ) : filteredDB.map((row, idx) => {
+                    const calcStatus = (r) => r.walletBalance > 0 || r.jobsCompleted > 0 ? 'Active' : 'New';
+                    return (
+                      <tr key={row._id} style={{ borderBottom: '1px solid var(--border-light)', background: idx % 2 === 0 ? 'transparent' : 'var(--secondary)' }}>
                       <td style={{ padding: '14px 16px', fontFamily: 'monospace', fontWeight: 'bold' }}>{row._id}</td>
                       <td style={{ padding: '14px 16px' }}><span className="badge" style={{ textTransform: 'capitalize', background: row.role === 'customer' ? 'var(--primary-light)' : '#fffbeb', color: row.role === 'customer' ? 'var(--primary)' : 'var(--warning)' }}>{row.role}</span></td>
                       <td style={{ padding: '14px 16px', fontWeight: 500 }}>{row.name}</td>
                       <td style={{ padding: '14px 16px' }}><i className="fas fa-phone" style={{ color: 'var(--text-muted)', marginRight: '8px' }}></i> {row.phone}</td>
                       <td style={{ padding: '14px 16px' }}>
-                        <span style={{ color: (row.status === 'Offline' || row.status === 'Inactive') ? 'var(--text-muted)' : 'var(--success)', fontWeight: 600 }}>
-                          • {row.status || 'Active'}
+                          <span style={{ color: calcStatus(row) === 'New' ? 'var(--warning)' : 'var(--success)', fontWeight: 600 }}>
+                            • {row.status || calcStatus(row)}
                         </span>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -2000,6 +2227,7 @@ function AdminPanel({ user, onLogout, showToast }) {
                   <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                     <strong style={{ fontSize: '1.2rem' }}>₹{req.amount}</strong>
                     <button className="btn" style={{ background: 'var(--primary)' }} onClick={() => handleApproveWithdrawal(req._id)}>Mark as Transferred</button>
+                    <button className="btn btn-outline" style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }} onClick={() => handleRejectWithdrawal(req._id)}>Reject</button>
                   </div>
                 </div>
               ))}
@@ -2027,7 +2255,7 @@ function AdminPanel({ user, onLogout, showToast }) {
 // 3. MAIN APP BOOTSTRAP
 // ==========================================
 function AppContent() {
-  const { socket } = useSocket();
+  const { socket, isConnected } = useSocket();
   const [user, setUser] = useState(null);
   const [isDarkMode, setIsDarkMode] = useState(() => localStorage.getItem('wattzen_theme') === 'dark');
   const [toasts, setToasts] = useState([]);
@@ -2048,6 +2276,10 @@ function AppContent() {
     const userWithRole = { ...userData, role };
     setUser(userWithRole);
     localStorage.setItem('user', JSON.stringify(userWithRole));
+    // Request push notification permission upon explicit user login
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
     navigate(`/${role}`);
   };
 
@@ -2077,6 +2309,18 @@ function AppContent() {
     else document.body.classList.remove('dark-mode');
   }, [isDarkMode]);
 
+  // Browser Native Offline/Online Listeners
+  useEffect(() => {
+    const handleOnline = () => showToast('Back online! Network connection restored.', 'success');
+    const handleOffline = () => showToast('You are offline. Live tracking and chat are disabled.', 'warning');
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [showToast]);
+
   // Dynamic Maps and Script Error Handlers
   useEffect(() => {
     const checkScripts = () => {
@@ -2090,7 +2334,9 @@ function AppContent() {
 
   useEffect(() => {
     const handleAuthExpired = () => {
+      if (!localStorage.getItem('token')) return; // 6. Prevent double auth-expired toasts/loops
       showToast('Session expired. Please log in again.', 'warning');
+      sendPush('Session Expired', 'Your secure session has expired. Please log in again.');
       handleLogout();
     };
     window.addEventListener('auth-expired', handleAuthExpired);
@@ -2109,10 +2355,6 @@ function AppContent() {
         return;
       }
 
-      // Add a timeout safeguard to ensure the UI eventually loads
-      const timeoutId = setTimeout(() => {
-        if (isMounted) setIsInitializing(false);
-      }, 5000);
 
       try {
         // BUG FIX: Stale user data in localStorage.
@@ -2133,11 +2375,14 @@ function AppContent() {
         }
       } catch (error) {
         console.error("Session validation failed:", error.message);
-        if (isMounted) handleLogout();
+        // FIX: Prevent forced logouts on Render cold starts or transient network drops. 
+        // Only log out if the backend explicitly rejected the token (Session expired).
+        if (isMounted && (error.message.includes('expired') || error.message.includes('Invalid user data'))) {
+          handleLogout();
+        }
       } finally {
         if (isMounted) {
           setIsInitializing(false);
-          clearTimeout(timeoutId);
         }
       }
     };
@@ -2149,8 +2394,19 @@ function AppContent() {
   // Global socket listener for Admin Broadcasts and connection management
   useEffect(() => {
     if (user) {
-      if (!socket.connected) socket.connect();
-      const handleBroadcast = (msg) => showToast(`📢 Admin Broadcast: ${msg}`, 'warning');
+      if (!socket.connected) {
+        socket.auth = { token: localStorage.getItem('token') };
+        socket.connect();
+        
+        // 5. Inject fresh token on reconnect attempts if the user logs out/in while offline
+        socket.io.on('reconnect_attempt', () => {
+          socket.auth = { token: localStorage.getItem('token') };
+        });
+      }
+      const handleBroadcast = (msg) => {
+        showToast(`📢 Admin Broadcast: ${msg}`, 'warning');
+        sendPush('Admin Broadcast', msg);
+      };
       socket.on('systemBroadcast', handleBroadcast);
       
       return () => {
@@ -2194,6 +2450,12 @@ function AppContent() {
       maxWidth: isAuthView ? '100%' : '1200px',
       padding: isAuthView ? '0' : '16px'
     }}>
+      {!isConnected && user && !isInitializing && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', background: 'var(--danger)', color: 'white', textAlign: 'center', padding: '6px', fontSize: '0.85rem', zIndex: 10000, fontWeight: 'bold', boxShadow: 'var(--shadow-md)' }}>
+          <i className="fas fa-wifi" style={{ marginRight: '8px' }}></i> Connection lost. Reconnecting to live server...
+        </div>
+      )}
+
       <Routes>
         <Route path="/" element={user ? <Navigate to={`/${user.role}`} replace /> : <Landing onEnter={() => navigate('/login')} onSecret={handleSecretAdminLogin} />} />
         <Route path="/login" element={user ? <Navigate to={`/${user.role}`} replace /> : <Login onLoginSuccess={handleLoginSuccess} showToast={showToast} />} />
