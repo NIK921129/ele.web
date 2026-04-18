@@ -31,9 +31,15 @@ app.use((req, res, next) => {
   next();
 });
 
-const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_fallback_key';
 const PORT = process.env.PORT || 5000;
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/wattzen';
+const JWT_SECRET = process.env.JWT_SECRET;
+const MONGO_URI = process.env.MONGO_URI;
+
+if (!MONGO_URI || !JWT_SECRET) {
+  console.error('\n[FATAL ERROR] Missing real backend credentials!');
+  console.error('Please define MONGO_URI and JWT_SECRET in your backend .env file.\n');
+  process.exit(1);
+}
 
 // ==========================================
 // 1. MONGODB SCHEMAS & MODELS
@@ -46,15 +52,19 @@ const connectDB = async () => {
     console.log('Connected to MongoDB');
   } catch (err) {
     console.error('Could not connect to MongoDB.', err);
+    if (!process.env.VERCEL) process.exit(1); // Stop server if DB fails to prevent hanging connections
+    throw err; // Fix: Propagate the error so the .catch() block on initialization catches it
   }
 };
 
 connectDB().then(() => {
   if (!process.env.VERCEL) {
-    server.listen(PORT, () => {
+    server.listen(PORT, '0.0.0.0', () => {
       console.log(`Server running on port ${PORT}`);
     });
   }
+}).catch(() => {
+  console.error('Server initialization halted due to database connection failure.');
 });
 
 const userSchema = new mongoose.Schema({
@@ -276,6 +286,9 @@ api.put('/me', authenticateToken, async (req, res) => {
     name = name.trim();
     phone = phone.trim();
     
+    const phoneRegex = /^\d{10}$/;
+    if (!phoneRegex.test(phone)) return res.status(400).json({ message: 'Invalid phone number format. Must be 10 digits.' });
+
     // Ensure the new phone isn't already taken by another account
     const existing = await User.findOne({ phone, _id: { $ne: req.user.userId } });
     if (existing) return res.status(400).json({ message: 'Phone number already in use' });
@@ -382,8 +395,9 @@ api.put('/jobs/:id/accept', authenticateToken, async (req, res) => {
 
     // Check if the team is now full
     if (updatedJob.currentTeamSize >= updatedJob.teamSize) {
-      updatedJob.status = 'assigned';
-      await updatedJob.save();
+      // Fix: Use updateOne to prevent Mongoose CastErrors when modifying a populated document
+      await Job.updateOne({ _id: updatedJob._id }, { $set: { status: 'assigned' } });
+      updatedJob.status = 'assigned'; // Keep local state updated for the socket emission
       // Notify everyone in the room (customer and all electricians) that the team is full
       io.to(jobId).emit('jobAccepted', { electricians: updatedJob.electricians, electrician: updatedJob.electricians[0] });
     } else {

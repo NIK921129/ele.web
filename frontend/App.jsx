@@ -7,7 +7,7 @@ import { useSocket } from './SocketContext.jsx';
 // ==========================================
 // 1. API & SOCKET UTILITIES
 // ==========================================
-const BASE_URL = import.meta.env.VITE_API_URL || (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? 'http://localhost:5000' : 'https://wattzen-backend.onrender.com');
+const BASE_URL = import.meta.env.VITE_API_URL || 'https://wattzen-backend.onrender.com';
 const API_BASE_URL = `${BASE_URL}/api`;
 
 async function fetchJson(url, options = {}) {
@@ -1018,6 +1018,10 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
   // Render Job History Earnings Chart
   useEffect(() => {
     if (currentTab === 'history' && jobHistory.length > 0 && chartRef.current) {
+      if (!window.Chart) {
+        console.warn('Chart.js is not loaded. Cannot render earnings chart.');
+        return;
+      }
       if (chartInstance.current) chartInstance.current.destroy();
       const ctx = chartRef.current.getContext('2d');
       
@@ -1052,9 +1056,18 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
       interval = setInterval(() => {
         currentDist = Math.max(0, currentDist - 0.5);
         currentEta = Math.max(0, currentEta - 2);
+
+        // Dynamically simulate movement towards the customer's actual coordinates
+        const dest = currentJob?.location?.coordinates || [77.5946, 12.9716];
+        const simulatedCoords = [
+          dest[0] - (currentDist * 0.002), 
+          dest[1] - (currentDist * 0.002)
+        ];
+        setMyLiveCoords(simulatedCoords);
+
         socket.emit('updateLocation', {
           jobId: activeJobId,
-          coordinates: [77.5946, 12.9716],
+          coordinates: simulatedCoords,
           distance: currentDist.toFixed(1),
           eta: currentEta
         });
