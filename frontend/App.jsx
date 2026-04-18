@@ -12,7 +12,7 @@ if (typeof window !== 'undefined' && window.location.protocol === 'http:' && win
 }
 
 // Dynamically connect Frontend -> Backend (Local port 5000 for dev, Render for production)
-const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.') || window.location.hostname.startsWith('10.'));
 const BASE_URL = import.meta.env.VITE_API_URL || (isLocal ? `http://${window.location.hostname}:5000` : 'https://voltflow-backend.onrender.com');
 const API_BASE_URL = `${BASE_URL}/api`;
 
@@ -486,7 +486,7 @@ function Login({ onLoginSuccess, showToast }) {
                     <label>New Password</label>
                     <div className="input-icon-wrapper">
                       <input type={showPassword ? "text" : "password"} className="form-control" value={newPassword} onChange={e => setNewPassword(e.target.value)} required placeholder="••••••••" />
-                      <i className={`fas ${showPassword ? 'fa-eye-slash' : 'fa-eye'} action-icon`} onClick={() => setShowPassword(!showPassword)}></i>
+                    <i className={`fas ${showPassword ? 'fa-eye-slash' : 'fa-eye'} action-icon`} role="button" tabIndex="0" aria-label="Toggle password visibility" onClick={() => setShowPassword(!showPassword)} onKeyDown={(e) => { if(e.key === 'Enter' || e.key === ' ') setShowPassword(!showPassword); }}></i>
                     </div>
                   </div>
                   <div className="anime-form-item" style={{ textAlign: 'right', marginTop: '-8px', marginBottom: '12px' }}>
@@ -516,7 +516,7 @@ function Login({ onLoginSuccess, showToast }) {
             <label>Password</label>
             <div className="input-icon-wrapper">
               <input type={showPassword ? "text" : "password"} className="form-control" value={password} onChange={e => setPassword(e.target.value)} required placeholder="••••••••" />
-              <i className={`fas ${showPassword ? 'fa-eye-slash' : 'fa-eye'} action-icon`} onClick={() => setShowPassword(!showPassword)}></i>
+            <i className={`fas ${showPassword ? 'fa-eye-slash' : 'fa-eye'} action-icon`} role="button" tabIndex="0" aria-label="Toggle password visibility" onClick={() => setShowPassword(!showPassword)} onKeyDown={(e) => { if(e.key === 'Enter' || e.key === ' ') setShowPassword(!showPassword); }}></i>
             </div>
           </div>
           
@@ -673,6 +673,9 @@ function CustomerHome({ user, showToast, onEditProfile }) {
   
   const [activeCategory, setActiveCategory] = useState('repairs');
   const [teamSize, setTeamSize] = useState(1);
+  const [isLocating, setIsLocating] = useState(false);
+  const [isLoadingActiveJob, setIsLoadingActiveJob] = useState(true);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
 
   const categories = [
     { id: 'repairs', name: 'Quick Repairs', icon: 'fa-screwdriver-wrench' },
@@ -703,6 +706,7 @@ function CustomerHome({ user, showToast, onEditProfile }) {
           }
         }
       } catch (e) { console.error('Failed to restore active job', e); }
+      finally { if (isMounted) setIsLoadingActiveJob(false); }
     };
     fetchActiveJob();
     return () => { isMounted = false; };
@@ -820,7 +824,7 @@ function CustomerHome({ user, showToast, onEditProfile }) {
     if (chatContainerRef.current) {
       const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
       if (scrollHeight - scrollTop - clientHeight < 150 || messages.length <= 1) {
-        chatContainerRef.current.scrollTop = scrollHeight;
+        chatContainerRef.current.scrollTo({ top: scrollHeight, behavior: 'smooth' });
       }
     }
   }, [messages]);
@@ -833,10 +837,12 @@ function CustomerHome({ user, showToast, onEditProfile }) {
     let isMounted = true;
     if (currentTab === 'history') {
       const fetchHistory = async () => { 
+        setIsLoadingHistory(true);
         try {
           const data = await fetchJson('/jobs/history');
           if (isMounted) setJobHistory(Array.isArray(data) ? data : []);
         } catch (e) { if (isMounted) showToast('Failed to load history', 'error'); }
+        finally { if (isMounted) setIsLoadingHistory(false); }
       }; 
       fetchHistory();
     }
@@ -910,10 +916,12 @@ function CustomerHome({ user, showToast, onEditProfile }) {
 
   const handleLocateMe = () => {
     if ('geolocation' in navigator) {
+      setIsLocating(true);
       navigator.geolocation.getCurrentPosition(
         (position) => {
           setAddress(`Lat: ${position.coords.latitude.toFixed(4)}, Lng: ${position.coords.longitude.toFixed(4)}`);
           setCoordinates([position.coords.longitude, position.coords.latitude]);
+          setIsLocating(false);
         },
         (error) => {
           let msg = 'Could not detect your location.';
@@ -921,6 +929,7 @@ function CustomerHome({ user, showToast, onEditProfile }) {
           else if (error.code === 2) msg = 'Location unavailable. Try again later.';
           else if (error.code === 3) msg = 'Location request timed out.';
           showToast(msg, 'error');
+          setIsLocating(false);
         },
         { timeout: 10000 }
       );
@@ -995,7 +1004,9 @@ function CustomerHome({ user, showToast, onEditProfile }) {
               )}
             </div>
           </div>
-          <button className="btn" style={{ padding: '10px', borderRadius: '50%', width: '45px', height: '45px', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={handleLocateMe} title="Detect Location"><i className="fas fa-crosshairs"></i></button>
+      <button className="btn" style={{ padding: '10px', borderRadius: '50%', width: '45px', height: '45px', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={handleLocateMe} title="Detect Location" disabled={isLocating}>
+        {isLocating ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-crosshairs"></i>}
+      </button>
         </div>
 
         <div className="promo-banner">
@@ -1072,7 +1083,12 @@ function CustomerHome({ user, showToast, onEditProfile }) {
             </div>
           )}
 
-          {!activeJobId && !bookingPrice ? (
+          {isLoadingActiveJob ? (
+            <div style={{ marginTop: '16px' }}>
+              <div className="skeleton" style={{ height: '54px', width: '100%', borderRadius: '14px', marginBottom: '16px' }}></div>
+              <div className="skeleton" style={{ height: '120px', width: '100%', borderRadius: '16px' }}></div>
+            </div>
+          ) : !activeJobId && !bookingPrice ? (
             <button className="btn btn-block" style={{ marginTop: '16px' }} onClick={handleInitiateBooking} disabled={isBooking}>
               <i className="fas fa-bolt"></i> {isBooking ? 'Creating Job...' : 'Find Electricians Near Me'}
             </button>
@@ -1087,7 +1103,7 @@ function CustomerHome({ user, showToast, onEditProfile }) {
               <button className="btn-outline btn btn-block" onClick={handleConfirmPayment} disabled={isBooking}>
                 {isBooking ? 'Verifying...' : 'I have completed the payment'}
               </button>
-              <button className="btn" style={{ background: 'transparent', color: 'var(--text-muted)', marginTop: '8px', boxShadow: 'none' }} onClick={() => setBookingPrice(null)}>Cancel</button>
+          <button className="btn" style={{ background: 'transparent', color: 'var(--danger)', marginTop: '12px', boxShadow: 'none', border: '1px solid var(--danger)', padding: '10px' }} onClick={() => setBookingPrice(null)}>Cancel Booking</button>
             </div>
           ) : !isTeamFull ? (
             <div style={{ marginTop: '16px', padding: '24px', background: 'var(--secondary)', borderRadius: '12px', textAlign: 'center', border: '1px dashed var(--primary)' }}>
@@ -1184,7 +1200,11 @@ function CustomerHome({ user, showToast, onEditProfile }) {
       ) : (
         <div className="card" style={{ animation: 'fadeInUp 0.4s forwards' }}>
           <h3 style={{ marginBottom: '16px' }}><i className="fas fa-history" style={{ color: 'var(--primary)' }}></i> Your Job History</h3>
-          {jobHistory.length === 0 ? <p style={{ color: 'var(--text-muted)' }}>No past jobs found.</p> : (
+          {isLoadingHistory ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {[1, 2, 3].map(i => <div key={i} className="skeleton" style={{ height: '100px', width: '100%', borderRadius: '12px' }}></div>)}
+            </div>
+          ) : jobHistory.length === 0 ? <p style={{ color: 'var(--text-muted)' }}>No past jobs found.</p> : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {jobHistory.map(job => (
                 <div key={job._id} style={{ background: 'var(--secondary)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-light)' }}>
@@ -1445,7 +1465,7 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
     if (chatContainerRef.current) {
       const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
       if (scrollHeight - scrollTop - clientHeight < 150 || messages.length <= 1) {
-        chatContainerRef.current.scrollTop = scrollHeight;
+        chatContainerRef.current.scrollTo({ top: scrollHeight, behavior: 'smooth' });
       }
     }
   }, [messages]);
@@ -1693,7 +1713,7 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
                       </p>
                       <p style={{ margin: '0 0 12px 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>Job ID: <span style={{ fontFamily: 'monospace' }}>{job._id}</span></p>
                       <button className="btn" style={{ width: '100%', background: 'var(--success)', marginTop: '8px' }} onClick={() => handleAcceptJob(job._id)} disabled={!!acceptingJobId}>
-                        {acceptingJobId === job._id ? 'Accepting...' : 'Accept Job & Start Tracking'}
+                    {acceptingJobId === job._id ? <><i className="fas fa-circle-notch fa-spin" style={{ marginRight: '8px' }}></i>Accepting...</> : 'Accept Job & Start Tracking'}
                       </button>
                     </div>
                   ))}
@@ -2261,6 +2281,8 @@ function AppContent() {
   const [toasts, setToasts] = useState([]);
   const [isInitializing, setIsInitializing] = useState(true);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [showConnectionWarning, setShowConnectionWarning] = useState(false);
+  const [isBrowserOffline, setIsBrowserOffline] = useState(!navigator.onLine);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -2311,8 +2333,8 @@ function AppContent() {
 
   // Browser Native Offline/Online Listeners
   useEffect(() => {
-    const handleOnline = () => showToast('Back online! Network connection restored.', 'success');
-    const handleOffline = () => showToast('You are offline. Live tracking and chat are disabled.', 'warning');
+    const handleOnline = () => { setIsBrowserOffline(false); showToast('Back online! Network connection restored.', 'success'); };
+    const handleOffline = () => { setIsBrowserOffline(true); showToast('You are offline. Live tracking and chat are disabled.', 'warning'); };
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     return () => {
@@ -2320,6 +2342,17 @@ function AppContent() {
       window.removeEventListener('offline', handleOffline);
     };
   }, [showToast]);
+
+  // Prevent the "Connection lost" banner from flashing instantly on page load
+  useEffect(() => {
+    let timer;
+    if (!isConnected && user && !isInitializing) {
+      timer = setTimeout(() => setShowConnectionWarning(true), 4000); // Wait 4s before showing warning
+    } else {
+      setShowConnectionWarning(false);
+    }
+    return () => clearTimeout(timer);
+  }, [isConnected, user, isInitializing]);
 
   // Dynamic Maps and Script Error Handlers
   useEffect(() => {
@@ -2407,10 +2440,18 @@ function AppContent() {
         showToast(`📢 Admin Broadcast: ${msg}`, 'warning');
         sendPush('Admin Broadcast', msg);
       };
+      const handleConnectError = (err) => {
+        if (err.message.includes('Authentication error')) {
+          window.dispatchEvent(new Event('auth-expired'));
+        }
+      };
+
       socket.on('systemBroadcast', handleBroadcast);
+      socket.on('connect_error', handleConnectError);
       
       return () => {
         socket.off('systemBroadcast', handleBroadcast);
+        socket.off('connect_error', handleConnectError);
       };
     } else {
       // If there's no user, disconnect the socket.
@@ -2450,11 +2491,15 @@ function AppContent() {
       maxWidth: isAuthView ? '100%' : '1200px',
       padding: isAuthView ? '0' : '16px'
     }}>
-      {!isConnected && user && !isInitializing && (
+      {isBrowserOffline ? (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', background: 'var(--danger)', color: 'white', textAlign: 'center', padding: '6px', fontSize: '0.85rem', zIndex: 10000, fontWeight: 'bold', boxShadow: 'var(--shadow-md)' }}>
-          <i className="fas fa-wifi" style={{ marginRight: '8px' }}></i> Connection lost. Reconnecting to live server...
+          <i className="fas fa-wifi" style={{ marginRight: '8px' }}></i> You are offline. Check your internet connection.
         </div>
-      )}
+      ) : showConnectionWarning ? (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', background: 'var(--warning)', color: '#0f172a', textAlign: 'center', padding: '6px', fontSize: '0.85rem', zIndex: 10000, fontWeight: 'bold', boxShadow: 'var(--shadow-md)' }}>
+          <i className="fas fa-satellite-dish" style={{ marginRight: '8px', animation: 'pulse 1.5s infinite' }}></i> Syncing real-time server... (This may take up to 50s)
+        </div>
+      ) : null}
 
       <Routes>
         <Route path="/" element={user ? <Navigate to={`/${user.role}`} replace /> : <Landing onEnter={() => navigate('/login')} onSecret={handleSecretAdminLogin} />} />
