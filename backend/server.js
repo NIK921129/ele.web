@@ -155,7 +155,8 @@ setInterval(() => {
 // POST /api/admin/secret-login - Hidden backdoor login
 api.post('/admin/secret-login', async (req, res) => {
   try {
-    const clientIp = req.ip;
+    // FIX: Better IP detection to prevent 'undefined' from sharing a single rate-limit pool behind proxies
+    const clientIp = req.headers['x-forwarded-for']?.split(',')[0] || req.socket?.remoteAddress || req.ip || 'unknown_ip';
     const now = Date.now();
     const attemptRecord = adminLoginAttempts.get(clientIp) || { count: 0, lockUntil: 0 };
 
@@ -164,7 +165,8 @@ api.post('/admin/secret-login', async (req, res) => {
       return res.status(429).json({ message: `Too many failed attempts. Please try again in ${waitTime} minutes.` });
     }
 
-    const ADMIN_PIN = process.env.ADMIN_SECRET_PIN || '79827';
+    // FIX: Trim the environment variable to prevent silent space/newline characters in .env files from breaking the master password
+    const ADMIN_PIN = (process.env.ADMIN_SECRET_PIN || '79827').trim();
     if (!ADMIN_PIN) {
       console.error(`[SECURITY ALERT] Admin login attempt at ${new Date().toISOString()} but ADMIN_SECRET_PIN is not configured.`);
       return res.status(500).json({ message: 'Internal server error: Admin access misconfigured' });
