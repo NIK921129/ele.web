@@ -694,13 +694,30 @@ api.post('/users/:id/rate', authenticateToken, async (req, res) => {
       return res.status(403).json({ message: 'Forbidden: You can only rate this electrician once after a completed job.' });
     }
 
-    const electrician = await User.findById(req.params.id);
-    if (!electrician || electrician.role !== 'electrician') return res.status(404).json({ message: 'Electrician not found' });
-
     const currentReviews = electrician.totalReviews || 0;
+    const currentAvg = electrician.averageRating || 0;
 
+    electrician.totalReviews = currentReviews + 1;
+    electrician.averageRating = Math.round(((currentAvg * currentReviews + numericRating) / electrician.totalReviews) * 10) / 10;
+    await electrician.save();
 
-pi/relse return res.status(403).json({ message: 'Forbidden' });
+    io.emit('adminRefresh');
+    res.status(200).json({ message: 'Rating submitted', rating: electrician.averageRating });
+  } catch (error) {
+    console.error('Rating Error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// GET /api/jobs/history - Fetch historical jobs securely
+api.get('/jobs/history', authenticateToken, async (req, res) => {
+  try {
+    const query = {};
+    if (req.user.role === 'customer') {
+      query.customer = req.user.userId;
+    } else if (req.user.role === 'electrician') {
+      query.electricians = req.user.userId;
+    } else return res.status(403).json({ message: 'Forbidden' });
 
     // Performance: Add pagination boundaries to prevent massive payload loading
     const page = Math.max(1, parseInt(req.query.page) || 1);
@@ -710,7 +727,8 @@ pi/relse return res.status(403).json({ message: 'Forbidden' });
     const jobs = await Job.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).populate('electricians', 'name phone').populate('customer', 'name phone');
     res.status(200).json(jobs);
   } catch (error) {
-    res.status(500).json(
+    res.status(500).json({ message: 'Internal server error' });
+  }
 });
 
 app.use('/api', api);
