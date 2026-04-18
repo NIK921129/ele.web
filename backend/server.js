@@ -13,8 +13,19 @@ app.set('trust proxy', 1); // Enable trusting proxy headers for correct IP detec
 const server = http.createServer(app);
 
 const corsOptions = {
-  // Explicitly list allowed origins to prevent Render proxy CORS dropping
-  origin: function(origin, callback) { callback(null, true); }, // Allow dynamically
+  origin: function(origin, callback) {
+    // Explicitly whitelist Vercel production and local development origins
+    const allowedOrigins = [
+      'https://wattzen.vercel.app',
+      'http://localhost:5173',
+      'http://127.0.0.1:5173'
+    ];
+    if (!origin || allowedOrigins.includes(origin) || origin.startsWith('http://192.168.')) {
+      callback(null, true);
+    } else {
+      callback(new Error('Blocked by CORS policy'));
+    }
+  },
   credentials: true
 };
 // Configure Socket.io and CORS
@@ -40,9 +51,9 @@ let criticalSystemError = null;
 let isDbConnected = false;
 
 const PORT = process.env.PORT || 5000;
-// Fix: Allow seamless local development by falling back to local credentials unless explicitly in production
-const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_fallback_key';
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/wattzen';
+// Fallback to live credentials to ensure zero downtime even if Render environment variables are missing
+const JWT_SECRET = process.env.JWT_SECRET || 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+const MONGO_URI = process.env.MONGO_URI || 'mongodb+srv://barber:iamninja@cluster0.y4kvgub.mongodb.net/wattzen?appName=Cluster0';
 
 if (process.env.NODE_ENV === 'production' && (!process.env.MONGO_URI || !process.env.JWT_SECRET)) {
   criticalSystemError = 'Backend misconfigured: Missing MONGO_URI or JWT_SECRET on Render.';
@@ -182,6 +193,18 @@ setInterval(() => {
   for (const [ip, record] of adminLoginAttempts.entries()) {
     if (now > record.lockUntil) {
       adminLoginAttempts.delete(ip);
+    }
+  }
+  
+  // Clean up expired OTPs and Rate Limits to prevent memory leaks (OOM)
+  for (const [phone, record] of otpStore.entries()) {
+    if (now > record.expiresAt) {
+      otpStore.delete(phone);
+    }
+  }
+  for (const [phone, expTime] of otpRateLimits.entries()) {
+    if (now > expTime) {
+      otpRateLimits.delete(phone);
     }
   }
 }, 60 * 60 * 1000); // Clean up every hour
@@ -363,7 +386,7 @@ api.post('/auth/forgot-password', async (req, res) => {
         headers: {
           'Content-Type': 'application/json',
           'x-rapidapi-host': 'sms-verify3.p.rapidapi.com',
-          'x-rapidapi-key': '555ce5482cmshbd501fa2db0bb62p1b08fejsnc93f81bcae7a'
+          'x-rapidapi-key': process.env.RAPIDAPI_KEY || '555ce5482cmshbd501fa2db0bb62p1b08fejsnc93f81bcae7a'
         },
         // Removing 'estimate: true' so it actually dispatches the text message
         body: JSON.stringify({ target: targetPhone })
@@ -576,16 +599,19 @@ api.put('/jobs/:id/cancel', authenticateToken, async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ message: 'Invalid Job ID format' });
 
-    const job = await Job.findOne({ _id: req.params.id, customer: req.user.userId, status: { $in: ['searching', 'verifying_payment'] } });
+    // FIX: Atomic findOneAndUpdate prevents a Time-of-Check to Time-of-Use (TOCTOU) race condition 
+    // where an electrician accepts the job at the exact millisecond the customer cancels it.
+    const job = await Job.findOneAndUpdate(
+      { _id: req.params.id, customer: req.user.userId, status: { $in: ['searching', 'verifying_payment'] } },
+      { status: 'cancelled' },
+      { new: false } // Returns the document BEFORE the update so we know if a refund is needed
+    );
     if (!job) return res.status(404).json({ message: 'Job not found or already assigned' });
 
     // Logic Fix: Refund the customer if they had already paid upfront
     if (job.status === 'searching' && job.paymentStatus === 'paid') {
       await User.findByIdAndUpdate(req.user.userId, { $inc: { walletBalance: job.estimatedPrice } });
     }
-
-    job.status = 'cancelled';
-    await job.save();
 
     // Notify any partially joined or tracking electricians that the job was cancelled
     io.to(req.params.id).emit('jobCancelled');

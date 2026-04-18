@@ -1,7 +1,9 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { io } from 'socket.io-client';
 
-const BASE_URL = 'https://wattzen-backend.onrender.com';
+// Dynamically connect WebSockets -> Backend
+const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+const BASE_URL = import.meta.env.VITE_API_URL || (isLocal ? `http://${window.location.hostname}:5000` : 'https://wattzen-backend.onrender.com');
 
 const socketInstance = io(BASE_URL, {
   autoConnect: false, // We will connect manually when a user is logged in.

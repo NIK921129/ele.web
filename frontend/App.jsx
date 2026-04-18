@@ -10,10 +10,13 @@ import { useSocket } from './SocketContext.jsx';
 if (typeof window !== 'undefined' && window.location.protocol === 'http:' && window.location.hostname !== 'localhost' && !window.location.hostname.startsWith('192.168.') && !window.location.hostname.startsWith('10.')) {
   window.location.href = window.location.href.replace('http:', 'https:');
 }
-const BASE_URL = 'https://wattzen-backend.onrender.com';
+
+// Dynamically connect Frontend -> Backend (Local port 5000 for dev, Render for production)
+const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+const BASE_URL = import.meta.env.VITE_API_URL || (isLocal ? `http://${window.location.hostname}:5000` : 'https://wattzen-backend.onrender.com');
 const API_BASE_URL = `${BASE_URL}/api`;
 
-async function fetchJson(url, options = {}, retries = 1) {
+async function fetchJson(url, options = {}, retries = 2) {
   const token = localStorage.getItem('token');
   const isFormData = options.body instanceof FormData;
   const headers = { ...options.headers };
@@ -67,15 +70,21 @@ async function fetchJson(url, options = {}, retries = 1) {
   } catch (error) {
     clearTimeout(timeoutId);
 
-    // Implement automatic exponential backoff/retry for transient network failures
+    // 1. Detect AdBlockers / Browser Extensions intercepting the request
+    if (error.stack && (error.stack.includes('requests.js') || error.stack.includes('extension'))) {
+      throw new Error('Network blocked by a browser extension. Please disable your AdBlocker or Brave Shields.');
+    }
+
+    // 2. Implement automatic exponential backoff/retry for transient network failures
     const isNetworkError = error.name === 'AbortError' || error.message === 'Failed to fetch' || error.message.includes('Network');
     if (isNetworkError && retries > 0) {
-      console.warn(`[Network] Transient failure, retrying ${url}...`);
+      console.warn(`[Network] Transient failure, retrying ${url}... (${retries} attempts left)`);
+      await new Promise(resolve => setTimeout(resolve, 1000 * (3 - retries))); // 1s, then 2s delay
       return fetchJson(url, options, retries - 1);
     }
 
     if (error.name === 'AbortError') {
-      throw new Error('Network request timed out. Please check your connection.');
+      throw new Error('Request timed out. The server might be waking up (can take up to 50s).');
     }
     if (error.message === 'Failed to fetch' || error.message.includes('NetworkError')) {
       throw new Error('Network error. Please check your internet connection.');
@@ -394,7 +403,7 @@ function Login({ onLoginSuccess, showToast }) {
     if (resendCooldown > 0) {
           timer = setTimeout(() => setResendCooldown(prev => prev - 1), 1000);
     }
-    return () => clearInterval(timer);
+    return () => clearTimeout(timer);
   }, [resendCooldown]);
 
   return (
@@ -545,6 +554,16 @@ function TrackingMap({ origin, destination }) {
     }
   }, [origin, destination]);
 
+  // Clean up Leaflet instance on unmount to prevent memory leaks and "map already initialized" errors
+  useEffect(() => {
+    return () => {
+      if (mapInstance.current) {
+        mapInstance.current.remove();
+        mapInstance.current = null;
+      }
+    };
+  }, []);
+
   return <div ref={mapRef} style={{ width: '100%', height: '250px', borderRadius: '12px', marginTop: '16px', border: '1px solid var(--border-light)', zIndex: 1 }} />;
 }
 
@@ -649,44 +668,48 @@ function CustomerHome({ user, showToast }) {
     if (!activeJobId) return;
     socket.emit('joinJobRoom', activeJobId);
 
-    socket.on('electricianLocationChanged', (data) => {
-      setLiveLocation(data);
-    });
-    socket.on('receiveMessage', (data) => {
-      setMessages((prev) => [...prev, { ...data, isSelf: false }]);
-    });
-    socket.on('userTyping', (data) => setTypingUser(data.senderName));
-    socket.on('userStopTyping', () => setTypingUser(null));
-    socket.on('paymentVerified', () => {
+    // Store references to properly clean up specific listeners instead of wiping all global handlers
+    const onLoc = (data) => setLiveLocation(data);
+    const onMsg = (data) => setMessages((prev) => [...prev, { ...data, isSelf: false }]);
+    const onType = (data) => setTypingUser(data.senderName);
+    const onStopType = () => setTypingUser(null);
+    const onPay = () => {
       setTeamStatusMessage('Payment verified! Searching for nearby electricians...');
       showToast('Payment verified by Admin!', 'success');
-    });
-    socket.on('jobAccepted', (data) => {
+    };
+    const onAccept = (data) => {
       setAssignedElectricians(data.electricians || []);
       setIsTeamFull(true);
       setTeamStatusMessage(''); // Clear progress message
-    });
-    socket.on('teamMemberJoined', (data) => {
+    };
+    const onJoin = (data) => {
         setAssignedElectricians(prev => {
             if (prev.some(e => String(e._id) === String(data.electrician._id))) return prev;
             return [...prev, data.electrician];
         });
         setTeamStatusMessage(`${data.currentSize} of ${data.teamSize} electricians have joined.`);
         showToast(`${data.electrician.name} has joined the job!`, 'success');
-    });
-    socket.on('jobCompleted', () => {
-      setJobCompleted(true);
-    });
+    };
+    const onComplete = () => setJobCompleted(true);
+
+    socket.on('electricianLocationChanged', onLoc);
+    socket.on('receiveMessage', onMsg);
+    socket.on('userTyping', onType);
+    socket.on('userStopTyping', onStopType);
+    socket.on('paymentVerified', onPay);
+    socket.on('jobAccepted', onAccept);
+    socket.on('teamMemberJoined', onJoin);
+    socket.on('jobCompleted', onComplete);
 
     return () => {
-      socket.off('electricianLocationChanged');
-      socket.off('receiveMessage');
-      socket.off('jobAccepted');
-      socket.off('paymentVerified');
-      socket.off('jobCompleted');
-      socket.off('teamMemberJoined');
-      socket.off('userTyping');
-      socket.off('userStopTyping');
+      socket.off('electricianLocationChanged', onLoc);
+      socket.off('receiveMessage', onMsg);
+      socket.off('jobAccepted', onAccept);
+      socket.off('paymentVerified', onPay);
+      socket.off('jobCompleted', onComplete);
+      socket.off('teamMemberJoined', onJoin);
+      socket.off('userTyping', onType);
+      socket.off('userStopTyping', onStopType);
     };
   }, [activeJobId, showToast, socket]);
 
@@ -758,7 +781,7 @@ function CustomerHome({ user, showToast }) {
       showToast('Job cancelled successfully.', 'success');
     } catch (error) {
       showToast(error.message, 'error');
-      showToast(error.message.includes('Network') ? error.message : 'Failed to request withdrawal.', 'error');
+      showToast(error.message.includes('Network') ? error.message : 'Failed to cancel job.', 'error');
     }
   };
 
@@ -1134,60 +1157,64 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
 
   useEffect(() => {
     if (isOnline) {
-      socket.on('receiveMessage', (data) => {
-        setMessages((prev) => [...prev, { ...data, isSelf: false }]);
-      });
-      socket.on('userTyping', (data) => setTypingUser(data.senderName));
-      socket.on('userStopTyping', () => setTypingUser(null));
-      socket.on('jobAccepted', (data) => {
-        // This event fires when the team is full. If this electrician is part of the team, update their state.
+      const onMsg = (data) => setMessages((prev) => [...prev, { ...data, isSelf: false }]);
+      const onType = (data) => setTypingUser(data.senderName);
+      const onStopType = () => setTypingUser(null);
+      const onAccept = (data) => {
         if (data.electricians.some(e => String(e._id) === String(user._id) || String(e.id) === String(user._id))) {
             setCurrentJob(prev => ({...prev, status: 'assigned', electricians: data.electricians}));
             setIsTracking(true); // All members start tracking when team is full
             showToast('Team is full! Job is now active.', 'success');
         }
-      });
-      socket.on('jobCancelled', () => {
+      };
+      const onCancel = () => {
         showToast('The customer cancelled the job.', 'warning');
         setIsTracking(false);
         setActiveJobId(null);
         setCurrentJob(null);
         setAvailableJob(null);
         setMessages([]);
-      });
-      socket.on('jobCompleted', () => {
+      };
+      const onComplete = () => {
         showToast('Customer marked job as complete! Earnings added to wallet.', 'success');
-        // Refresh wallet balance
         fetchJson('/me').then(res => {
           setWalletBal(res.walletBalance);
           setJobsCompleted(res.jobsCompleted);
         }).catch(() => {});
           
-          // Release the UI so the electrician can accept the next job
           setActiveJobId(null);
           setCurrentJob(null);
           setIsTracking(false);
           setMessages([]);
-      });
-      socket.on('teamMemberJoined', (data) => {
+      };
+      const onJoin = (data) => {
         setCurrentJob(prev => {
           if (!prev) return prev;
           if (prev.electricians.some(e => String(e._id) === String(data.electrician._id))) return prev;
           return { ...prev, electricians: [...prev.electricians, data.electrician] };
         });
-      });
+      };
+
+      socket.on('receiveMessage', onMsg);
+      socket.on('userTyping', onType);
+      socket.on('userStopTyping', onStopType);
+      socket.on('jobAccepted', onAccept);
+      socket.on('jobCancelled', onCancel);
+      socket.on('jobCompleted', onComplete);
+      socket.on('teamMemberJoined', onJoin);
+
+      return () => {
+        socket.off('receiveMessage', onMsg);
+        socket.off('jobAccepted', onAccept);
+        socket.off('jobCancelled', onCancel);
+        socket.off('jobCompleted', onComplete);
+        socket.off('teamMemberJoined', onJoin);
+        socket.off('userTyping', onType);
+        socket.off('userStopTyping', onStopType);
+      }; 
     } else {
       setIsTracking(false);
     }
-    return () => {
-      socket.off('receiveMessage');
-      socket.off('jobAccepted');
-      socket.off('jobCancelled');
-      socket.off('jobCompleted');
-      socket.off('teamMemberJoined');
-      socket.off('userTyping');
-      socket.off('userStopTyping');
-    }; 
   }, [isOnline, showToast, user, socket]);
 
   useEffect(() => {
@@ -1396,7 +1423,7 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
       setWalletBal(0); // Optimistically set to 0
     } catch (error) {
       showToast(error.message, 'error');
-      showToast(error.message.includes('Network') ? error.message : 'Failed to cancel job.', 'error');
+      showToast(error.message.includes('Network') ? error.message : 'Failed to request withdrawal.', 'error');
     }
   };
 
@@ -1790,6 +1817,7 @@ function AdminPanel({ user, onLogout, showToast }) {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
       
       showToast('Report generated successfully!', 'success');
     } catch (error) {
