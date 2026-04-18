@@ -15,7 +15,7 @@ const app = (
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js?v=1', { scope: '/' }).catch(err => {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(err => {
       console.error('Service worker registration failed:', err);
     });
   });
