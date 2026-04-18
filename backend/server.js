@@ -8,6 +8,7 @@ const bcrypt = require('bcrypt');
 const { Server } = require('socket.io');
 
 const app = express();
+app.set('trust proxy', 1); // Enable trusting proxy headers for correct IP detection
 const server = http.createServer(app);
 
 // Remove trailing slash if it exists to prevent strict CORS mismatches
@@ -38,12 +39,14 @@ const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/wattzen';
 // ==========================================
 mongoose.connect(MONGO_URI).then(() => {
   console.log('Connected to MongoDB');
-  // Start the server ONLY after the DB connection is successful
-  server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-  });
+  // Prevent port binding if deployed in a Serverless environment like Vercel
+  if (!process.env.VERCEL) {
+    server.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  }
 }).catch(err => {
-  console.error('Could not connect to MongoDB. Server not started.', err);
+  console.error('Could not connect to MongoDB.', err);
 });
 
 const userSchema = new mongoose.Schema({
@@ -70,7 +73,8 @@ const jobSchema = new mongoose.Schema({
   teamSize: { type: Number, default: 1 },
   jobOTP: { type: String },
   paymentStatus: { type: String, enum: ['pending', 'verifying', 'paid'], default: 'pending' },
-  status: { type: String, enum: ['verifying_payment', 'searching', 'assigned', 'in_progress', 'payment', 'completed', 'cancelled'], default: 'verifying_payment' }
+  status: { type: String, enum: ['verifying_payment', 'searching', 'assigned', 'in_progress', 'payment', 'completed', 'cancelled'], default: 'verifying_payment' },
+  isRated: { type: Boolean, default: false }
 }, { timestamps: true });
 
 jobSchema.index({ location: '2dsphere' });
@@ -115,6 +119,16 @@ const api = express.Router();
 // In-memory store for admin login attempts to prevent brute-force
 const adminLoginAttempts = new Map();
 
+// Security/Performance: Periodically clean up the admin login attempts map to prevent memory leaks (OOM)
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, record] of adminLoginAttempts.entries()) {
+    if (now > record.lockUntil) {
+      adminLoginAttempts.delete(ip);
+    }
+  }
+}, 60 * 60 * 1000); // Clean up every hour
+
 // POST /api/admin/secret-login - Hidden backdoor login
 api.post('/admin/secret-login', async (req, res) => {
   const clientIp = req.ip;
@@ -127,9 +141,14 @@ api.post('/admin/secret-login', async (req, res) => {
   }
 
   const ADMIN_PIN = process.env.ADMIN_SECRET_PIN || '79827';
+  if (!ADMIN_PIN) {
+    console.error(`[SECURITY ALERT] Admin login attempt at ${new Date().toISOString()} but ADMIN_SECRET_PIN is not configured.`);
+    return res.status(500).json({ message: 'Internal server error: Admin access misconfigured' });
+  }
 
   if (req.body.password === ADMIN_PIN) {
     adminLoginAttempts.delete(clientIp); // Clear attempts on success
+    console.log(`[AUDIT] Successful Admin Login from IP: ${clientIp} at ${new Date().toISOString()}`);
     let admin = await User.findOne({ role: 'admin' });
     if (!admin) {
       admin = await User.create({ name: 'System Admin', phone: '0000000000', password: await bcrypt.hash(ADMIN_PIN, 10), role: 'admin' });
@@ -138,6 +157,7 @@ api.post('/admin/secret-login', async (req, res) => {
     return res.json({ token, user: admin });
   }
 
+  console.warn(`[AUDIT] Failed Admin Login attempt from IP: ${clientIp} at ${new Date().toISOString()}`);
   attemptRecord.count += 1;
   if (attemptRecord.count >= 5) {
     attemptRecord.lockUntil = now + 15 * 60 * 1000; // 15-minute lockout after 5 failures
@@ -278,15 +298,16 @@ api.put('/jobs/:id/accept', authenticateToken, async (req, res) => {
     const electricianId = req.user.userId;
 
     // Atomically check limits, add the electrician to the team, and increment currentTeamSize
+    // This query ensures we ONLY update if the team isn't full and the user isn't already in it.
     const updatedJob = await Job.findOneAndUpdate(
       { 
         _id: jobId, 
         status: 'searching', 
         customer: { $ne: electricianId }, // Security: Prevent self-assignment
         electricians: { $ne: electricianId }, // Security: Prevent duplicate joining/double-counting
-        $expr: { $lt: ["$currentTeamSize", "$teamSize"] } 
+        $expr: { $lt: ["$currentTeamSize", "$teamSize"] }
       },
-      { 
+      {
         $addToSet: { electricians: electricianId },
         $inc: { currentTeamSize: 1 }
       },
@@ -320,7 +341,7 @@ api.put('/jobs/:id/accept', authenticateToken, async (req, res) => {
 api.put('/jobs/:id/cancel', authenticateToken, async (req, res) => {
   try {
     const job = await Job.findOneAndUpdate(
-      { _id: req.params.id, customer: req.user.userId, status: 'searching' },
+      { _id: req.params.id, customer: req.user.userId, status: { $in: ['searching', 'verifying_payment'] } },
       { status: 'cancelled' },
       { new: true }
     );
@@ -424,12 +445,15 @@ api.get('/admin/finance', authenticateToken, async (req, res) => {
 api.post('/withdrawals', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'electrician') return res.status(403).json({ message: 'Forbidden' });
-    const user = await User.findById(req.user.userId);
-    if (user.walletBalance < 500) return res.status(400).json({ message: 'Minimum ₹500 required for withdrawal' });
     
+    // FIX: Use atomic findOneAndUpdate to prevent double-spending race conditions
+    const user = await User.findOneAndUpdate(
+      { _id: req.user.userId, walletBalance: { $gte: 500 } },
+      { $set: { walletBalance: 0 } }
+    );
+    if (!user) return res.status(400).json({ message: 'Minimum ₹500 required for withdrawal or insufficient balance' });
+
     const withdrawal = await Withdrawal.create({ electrician: user._id, amount: user.walletBalance });
-    user.walletBalance = 0; // Deduct immediately to prevent double spend
-    await user.save();
     
     res.status(201).json({ message: 'Withdrawal requested', withdrawal });
   } catch (error) {
@@ -466,13 +490,17 @@ api.post('/users/:id/rate', authenticateToken, async (req, res) => {
     const completedJob = await Job.findOne({
       customer: req.user.userId,
       electricians: req.params.id,
-      status: 'completed'
+      status: 'completed',
+      isRated: { $ne: true }
     });
 
-    // To prevent re-rating, you could add a flag like `isRated` to the Job schema and check for it here.
     if (!completedJob) {
-      return res.status(403).json({ message: 'Forbidden: You can only rate an electrician after a completed job.' });
+      return res.status(403).json({ message: 'Forbidden: You can only rate an electrician once after a completed job.' });
     }
+
+    // Mark the job as rated to prevent rating spam
+    completedJob.isRated = true;
+    await completedJob.save();
 
     const updatedUser = await User.findByIdAndUpdate(
       req.params.id,
@@ -499,3 +527,6 @@ api.post('/users/:id/rate', authenticateToken, async (req, res) => {
 });
 
 app.use('/api', api);
+
+// Export the Express API for Vercel Serverless Functions
+module.exports = app;
