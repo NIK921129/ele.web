@@ -134,46 +134,51 @@ setInterval(() => {
 
 // POST /api/admin/secret-login - Hidden backdoor login
 api.post('/admin/secret-login', async (req, res) => {
-  const clientIp = req.ip;
-  const now = Date.now();
-  const attemptRecord = adminLoginAttempts.get(clientIp) || { count: 0, lockUntil: 0 };
+  try {
+    const clientIp = req.ip;
+    const now = Date.now();
+    const attemptRecord = adminLoginAttempts.get(clientIp) || { count: 0, lockUntil: 0 };
 
-  if (now < attemptRecord.lockUntil) {
-    const waitTime = Math.ceil((attemptRecord.lockUntil - now) / 60000);
-    return res.status(429).json({ message: `Too many failed attempts. Please try again in ${waitTime} minutes.` });
-  }
-
-  const ADMIN_PIN = process.env.ADMIN_SECRET_PIN || '79827';
-  if (!ADMIN_PIN) {
-    console.error(`[SECURITY ALERT] Admin login attempt at ${new Date().toISOString()} but ADMIN_SECRET_PIN is not configured.`);
-    return res.status(500).json({ message: 'Internal server error: Admin access misconfigured' });
-  }
-
-  if (req.body.password === ADMIN_PIN) {
-    adminLoginAttempts.delete(clientIp); // Clear attempts on success
-    console.log(`[AUDIT] Successful Admin Login from IP: ${clientIp} at ${new Date().toISOString()}`);
-    let admin = await User.findOne({ role: 'admin' });
-    if (!admin) {
-      // Use a non-numeric string to guarantee no collision with regular user phone numbers
-      admin = await User.create({ name: 'System Admin', phone: 'ADMIN_MASTER', password: await bcrypt.hash(ADMIN_PIN, 10), role: 'admin' });
+    if (now < attemptRecord.lockUntil) {
+      const waitTime = Math.ceil((attemptRecord.lockUntil - now) / 60000);
+      return res.status(429).json({ message: `Too many failed attempts. Please try again in ${waitTime} minutes.` });
     }
-    const token = jwt.sign({ userId: admin._id, role: 'admin' }, JWT_SECRET, { expiresIn: '7d' });
-    return res.json({ token, user: admin });
-  }
 
-  console.warn(`[AUDIT] Failed Admin Login attempt from IP: ${clientIp} at ${new Date().toISOString()}`);
-  attemptRecord.count += 1;
-  if (attemptRecord.count >= 5) {
-    attemptRecord.lockUntil = now + 15 * 60 * 1000; // 15-minute lockout after 5 failures
-    attemptRecord.count = 0; // Reset counter for after lockout expires
-  }
-  adminLoginAttempts.set(clientIp, attemptRecord);
+    const ADMIN_PIN = process.env.ADMIN_SECRET_PIN || '79827';
+    if (!ADMIN_PIN) {
+      console.error(`[SECURITY ALERT] Admin login attempt at ${new Date().toISOString()} but ADMIN_SECRET_PIN is not configured.`);
+      return res.status(500).json({ message: 'Internal server error: Admin access misconfigured' });
+    }
 
-  res.status(403).json({ 
-    message: attemptRecord.lockUntil > now 
-      ? 'Too many failed attempts. Access locked for 15 minutes.' 
-      : 'Invalid Admin PIN' 
-  });
+    if (req.body.password === ADMIN_PIN) {
+      adminLoginAttempts.delete(clientIp); // Clear attempts on success
+      console.log(`[AUDIT] Successful Admin Login from IP: ${clientIp} at ${new Date().toISOString()}`);
+      let admin = await User.findOne({ role: 'admin' });
+      if (!admin) {
+        // Use a non-numeric string to guarantee no collision with regular user phone numbers
+        admin = await User.create({ name: 'System Admin', phone: 'ADMIN_MASTER', password: await bcrypt.hash(ADMIN_PIN, 10), role: 'admin' });
+      }
+      const token = jwt.sign({ userId: admin._id, role: 'admin' }, JWT_SECRET, { expiresIn: '7d' });
+      return res.json({ token, user: admin });
+    }
+
+    console.warn(`[AUDIT] Failed Admin Login attempt from IP: ${clientIp} at ${new Date().toISOString()}`);
+    attemptRecord.count += 1;
+    if (attemptRecord.count >= 5) {
+      attemptRecord.lockUntil = now + 15 * 60 * 1000; // 15-minute lockout after 5 failures
+      attemptRecord.count = 0; // Reset counter for after lockout expires
+    }
+    adminLoginAttempts.set(clientIp, attemptRecord);
+
+    res.status(403).json({ 
+      message: attemptRecord.lockUntil > now 
+        ? 'Too many failed attempts. Access locked for 15 minutes.' 
+        : 'Invalid Admin PIN' 
+    });
+  } catch (error) {
+    console.error('[ERROR] Admin login failed:', error);
+    res.status(500).json({ message: 'Internal server error during admin authentication' });
+  }
 });
 
 // POST /api/signup

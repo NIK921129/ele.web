@@ -1422,14 +1422,15 @@ function AppContent() {
     const pwd = prompt("Enter Admin Secret PIN:");
     if (!pwd) return;
     try {
-      const data = await fetchJson('/admin/secret-login', { method: 'POST', body: { password: pwd } });
+      const data = await fetchJson('/admin/secret-login', { method: 'POST', body: { password: pwd.trim() } });
       localStorage.setItem('token', data.token);
       const userWithRole = { ...data.user, role: 'admin' };
       setUser(userWithRole);
+      localStorage.setItem('user', JSON.stringify(userWithRole));
       navigate('/admin');
       showToast('Master Access Granted', 'success');
     } catch(e) {
-      showToast('Access Denied', 'error');
+      showToast(e.message || 'Access Denied', 'error');
     }
   };
 
