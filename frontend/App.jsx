@@ -2165,34 +2165,6 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
             {walletBal >= 500 ? 'Request Bank Withdrawal' : 'Balance too low'}
           </button>
         </div>
-        
-        <div className="card" style={{ animationDelay: '0.2s', marginTop: '20px' }}>
-          <h4><i className="fas fa-certificate"></i> Your Active Skills</h4>
-          <div className="tag-container" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '12px' }}>
-            <span className="review-tag selected">Wiring Repair</span>
-            <span className="review-tag selected">AC Servicing</span>
-            <span className="review-tag selected">Smart Home Setup</span>
-          </div>
-          <button className="btn-outline btn btn-block" style={{ marginTop: '16px', fontSize: '0.9rem' }}>+ Add New Certification</button>
-        </div>
-
-        <div className="card" style={{ animationDelay: '0.25s', marginTop: '20px' }}>
-          <h4><i className="fas fa-calendar-check" style={{ color: 'var(--primary)' }}></i> Upcoming Schedule</h4>
-          <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '12px', background: 'var(--secondary)', borderRadius: '12px' }}>
-              <div style={{ background: 'var(--primary-light)', color: 'var(--primary)', padding: '10px', borderRadius: '8px', textAlign: 'center', minWidth: '55px' }}>
-                <strong style={{ display: 'block', fontSize: '1.1rem' }}>14</strong>
-                <small style={{ fontSize: '0.7rem', textTransform: 'uppercase', fontWeight: 'bold' }}>Aug</small>
-              </div>
-              <div>
-                <strong style={{ display: 'block', color: 'var(--text-main)' }}>AC Installation</strong>
-                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'block', marginTop: '4px' }}><i className="far fa-clock"></i> 10:00 AM - 12:00 PM</span>
-                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}><i className="fas fa-map-marker-alt"></i> Koramangala, BLR</span>
-              </div>
-            </div>
-            <button className="btn-outline btn btn-block" style={{ fontSize: '0.9rem' }}>View Full Calendar</button>
-          </div>
-        </div>
       </div>
     </div>
   );
@@ -2283,6 +2255,7 @@ function AdminPanel({ user, onLogout, showToast }) {
   const [newPasswordInput, setNewPasswordInput] = useState('');
   const [useMockData, setUseMockData] = useState(false);
   const [mockData, setMockData] = useState([]);
+  const [systemStatus, setSystemStatus] = useState({ uptime: 0, dbConnected: false });
   
   const mounted = useRef(true);
   useEffect(() => { return () => { mounted.current = false; }; }, []);
@@ -2302,6 +2275,8 @@ function AdminPanel({ user, onLogout, showToast }) {
       setSystemLogs(Array.isArray(logs) ? logs : []);
       const archives = await fetchJson('/admin/archives/users');
       setArchivedUsers(Array.isArray(archives) ? archives : []);
+      const health = await fetchJson('/health');
+      setSystemStatus(health || { uptime: 0, dbConnected: false });
     } catch (error) {
       showToast(`Failed to fetch dashboard data: ${error.message}`, 'error');
       console.error('Dashboard error:', error);
@@ -2337,6 +2312,9 @@ function AdminPanel({ user, onLogout, showToast }) {
     return () => { if (checkInterval) clearInterval(checkInterval); };
   }, []);
 
+  const totalElectricians = liveData.filter(u => u.role === 'electrician').length;
+  const totalCustomers = liveData.filter(u => u.role === 'customer').length;
+
   const currentData = useMockData ? [...(Array.isArray(liveData) ? liveData : []), ...mockData] : (Array.isArray(liveData) ? liveData : []);
 
   const filteredDB = currentData.filter(row => 
@@ -2344,6 +2322,16 @@ function AdminPanel({ user, onLogout, showToast }) {
       val != null && String(val).toLowerCase().includes(searchTerm.toLowerCase())
     )
   );
+
+  const formatUptime = (seconds) => {
+    if (!seconds) return 'Loading...';
+    const d = Math.floor(seconds / (3600*24));
+    const h = Math.floor(seconds % (3600*24) / 3600);
+    const m = Math.floor(seconds % 3600 / 60);
+    if (d > 0) return `${d}d ${h}h`;
+    if (h > 0) return `${h}h ${m}m`;
+    return `${m}m`;
+  };
 
   const handleDownloadReport = async () => {
     try {
@@ -2598,10 +2586,10 @@ function AdminPanel({ user, onLogout, showToast }) {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '16px', marginBottom: '24px' }}>
-        <MetricCard icon="fa-users" title="Total Users" value={currentData.length.toLocaleString()} trend="+12% this week" color="var(--primary)" />
-        <MetricCard icon="fa-helmet-safety" title="Active Electricians" value="842" trend="124 currently online" color="var(--warning)" />
-        <MetricCard icon="fa-indian-rupee-sign" title="Platform Revenue" value="₹12.4L" trend="3% fee taken" color="var(--success)" />
-        <MetricCard icon="fa-server" title="System Uptime" value="99.99%" trend="All systems nominal" color="var(--text-main)" />
+        <MetricCard icon="fa-users" title="Total Users" value={currentData.length.toLocaleString()} trend={`${totalCustomers} Customers, ${totalElectricians} Electricians`} color="var(--primary)" />
+        <MetricCard icon="fa-helmet-safety" title="Total Electricians" value={totalElectricians.toLocaleString()} trend="Verified professionals" color="var(--warning)" />
+        <MetricCard icon="fa-sack-dollar" title="Gross Revenue" value={`₹${(financeData.stats?.totalRevenue || 0).toLocaleString()}`} trend="From all completed jobs" color="var(--success)" />
+        <MetricCard icon="fa-server" title="Server Uptime" value={formatUptime(systemStatus.uptime)} trend={systemStatus.dbConnected ? "Database Connected" : "Database Offline"} color={systemStatus.dbConnected ? "var(--success)" : "var(--danger)"} />
       </div>
 
       <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
