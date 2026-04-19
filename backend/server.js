@@ -398,8 +398,6 @@ setInterval(() => {
   if (jobOtpAttempts.size > 10000) jobOtpAttempts.clear();
 }, 60 * 60 * 1000); // Clean up every hour
 
-// Background Job Sweeper: Auto-cancel "ghost jobs" searching for > 2 hours to refund customers
-setInterval(async () => {
 // Background Job Sweeper Logic
 const runGhostJobSweeper = async () => {
   if (!isDbConnected) return;
@@ -415,11 +413,8 @@ const runGhostJobSweeper = async () => {
       io.to(job._id.toString()).emit('jobCancelled');
     }
   } catch (err) { console.error('Ghost job cleanup failed:', err); }
-}, 30 * 60 * 1000);
 };
 
-// 8. Stuck Job Payout Lockup Sweeper (Auto-complete after 24h)
-setInterval(async () => {
 // Stuck Job Payout Sweeper Logic (Auto-complete after 24h)
 const runStuckJobSweeper = async () => {
   if (!isDbConnected) return;
@@ -441,7 +436,6 @@ const runStuckJobSweeper = async () => {
       io.to(job._id.toString()).emit('jobCompleted');
     }
   } catch (err) { console.error('Stuck job auto-complete failed:', err); }
-}, 60 * 60 * 1000); // Check every hour
 };
 
 // Background sweepers for Long-Running Environments (Render/PM2)
