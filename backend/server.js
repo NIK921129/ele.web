@@ -406,6 +406,13 @@ io.on('connection', (socket) => {
       if (socket.rooms.has(data.jobId)) socket.to(data.jobId).emit('userStopTyping', data);
     }
   });
+  socket.on('triggerSOS', (data) => {
+    if (data && typeof data.jobId === 'string') {
+      // Alert all active Admin clients via the systemBroadcast channel
+      io.emit('systemBroadcast', `🚨 EMERGENCY SOS TRIGGERED by ${String(data.role).toUpperCase()} in Job: ${data.jobId} 🚨`);
+      logSystemEvent('WARN', 'Safety', 'SOS Triggered', `SOS from ${data.userId} on Job ${data.jobId}`);
+    }
+  });
 
   socket.on('disconnect', () => socketRateLimits.delete(socket.id));
 });
@@ -1479,7 +1486,7 @@ api.delete('/admin/users/:id', authenticateToken, async (req, res) => {
     if (req.user.userId === req.params.id) return res.status(400).json({ message: 'Cannot delete your own admin account' });
     
     const userToArchive = await User.findById(req.params.id);
-    if (userToArchive) {
+    if (userToArchive && req.query.hard !== 'true') {
       await ArchivedUser.create({ ...userToArchive.toObject(), originalId: userToArchive._id, deletedBy: `Admin Force Delete (${req.user.userId})` });
     }
 
@@ -1738,6 +1745,17 @@ api.post('/users/:id/rate', authenticateToken, async (req, res) => {
       return res.status(403).json({ message: 'Forbidden: You can only rate this electrician once after a completed job.' });
     }
 
+    const tip = Math.max(0, Number(req.body.tip) || 0);
+    if (tip > 0) {
+      const customer = await User.findById(req.user.userId);
+      if (!customer || customer.walletBalance < tip) {
+        return res.status(400).json({ message: 'Insufficient wallet balance to pay the tip. Please recharge.' });
+      }
+      await User.findByIdAndUpdate(req.user.userId, { $inc: { walletBalance: -tip } });
+      await User.findByIdAndUpdate(electrician._id, { $inc: { walletBalance: tip } });
+      logSystemEvent('INFO', 'Finance', 'Tip Paid', `Customer ${req.user.userId} tipped ₹${tip} to Electrician ${electrician._id}`);
+    }
+
     // Atomic Rating Update using Mongoose Aggregation Pipeline to prevent Lost Update Anomalies
     const updatedElectrician = await User.findOneAndUpdate(
       { _id: electrician._id },
@@ -1920,6 +1938,22 @@ api.get('/admin/archives/users', authenticateToken, async (req, res) => {
     res.status(200).json(archives);
   } catch (error) {
     res.status(500).json({ message: 'Error fetching archives' });
+  }
+});
+
+// DELETE /api/admin/archives/users/:id - Admin permanently deletes an archived user
+api.delete('/admin/archives/users/:id', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ message: 'Invalid Archive ID format' });
+    
+    const archive = await ArchivedUser.findByIdAndDelete(req.params.id);
+    if (!archive) return res.status(404).json({ message: 'Archived record not found' });
+    
+    io.emit('adminRefresh');
+    res.status(200).json({ message: 'Archived record permanently purged' });
+  } catch (error) {
+    res.status(500).json({ message: 'Error purging archived record' });
   }
 });
 

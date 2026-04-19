@@ -82,7 +82,7 @@ async function fetchJson(url, options = {}, retries = 2) {
     clearTimeout(timeoutId);
 
     // 1. Detect AdBlockers / Browser Extensions intercepting the request
-    if (error.stack && (error.stack.includes('requests.js') || error.stack.includes('extension'))) {
+    if (error.stack && typeof error.stack === 'string' && (error.stack.includes('requests.js') || error.stack.includes('extension'))) {
       throw new Error('Network blocked by a browser extension. Please disable your AdBlocker or Brave Shields.');
     }
 
@@ -110,6 +110,9 @@ async function fetchJson(url, options = {}, retries = 2) {
 
 // Global helper to trigger native OS push notifications for 20+ events
 async function sendPush(title, body, data = null, actions = []) {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('new-notification', { detail: { title, body, time: new Date() } }));
+  }
   if (typeof document !== 'undefined' && document.hidden && 'Notification' in window && Notification.permission === 'granted') {
     try {
       if ('serviceWorker' in navigator) {
@@ -282,6 +285,15 @@ function Landing({ onEnter, onSecret }) {
 
 // --- Navbar Component ---
 function Navbar({ user, onLogout, toggleTheme, isDarkMode, onEditProfile }) {
+  const [notifications, setNotifications] = useState([]);
+  const [showDropdown, setShowDropdown] = useState(false);
+  
+  useEffect(() => {
+    const handleNotif = (e) => setNotifications(prev => [e.detail, ...prev].slice(0, 10)); // Keep last 10
+    window.addEventListener('new-notification', handleNotif);
+    return () => window.removeEventListener('new-notification', handleNotif);
+  }, []);
+
   return (
     <div className="navbar">
       <div className="logo-area">
@@ -295,6 +307,29 @@ function Navbar({ user, onLogout, toggleTheme, isDarkMode, onEditProfile }) {
           <i className={`fas ${isDarkMode ? 'fa-sun' : 'fa-moon'}`} style={{ fontSize: '1.2rem' }}></i>
         </button>
         <div className="notification-icon"><i className="far fa-bell"></i></div>
+        <div className="notification-icon" style={{ position: 'relative', cursor: 'pointer' }} onClick={() => setShowDropdown(!showDropdown)}>
+          <i className="far fa-bell"></i>
+          {notifications.length > 0 && <span style={{ position: 'absolute', top: '-5px', right: '-5px', background: 'var(--danger)', color: 'white', fontSize: '0.6rem', borderRadius: '50%', padding: '2px 5px', fontWeight: 'bold' }}>{notifications.length}</span>}
+          {showDropdown && (
+            <div style={{ position: 'absolute', top: '130%', right: '-10px', width: '320px', background: 'var(--surface)', border: '1px solid var(--border-light)', borderRadius: '12px', boxShadow: 'var(--shadow-lg)', zIndex: 1000, maxHeight: '350px', overflowY: 'auto', textAlign: 'left', cursor: 'default' }} onClick={e => e.stopPropagation()}>
+              <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-light)', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between' }}>
+                <span>Notifications</span>
+                {notifications.length > 0 && <span style={{ fontSize: '0.8rem', color: 'var(--primary)', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); setNotifications([]); }}>Clear All</span>}
+              </div>
+              {notifications.length === 0 ? (
+                <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem' }}>No new notifications</div>
+              ) : (
+                notifications.map((n, i) => (
+                  <div key={i} style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-light)' }}>
+                    <strong style={{ display: 'block', color: 'var(--text-main)', marginBottom: '4px', fontSize: '0.85rem' }}>{n.title}</strong>
+                    <span style={{ color: 'var(--text-muted)', display: 'block', lineHeight: '1.4', fontSize: '0.8rem' }}>{n.body}</span>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--primary)', marginTop: '6px', fontWeight: 'bold' }}>{n.time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
         <div className="desktop-only" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <span className="profile-name" style={{ fontWeight: 600 }}>{user?.name}</span>
           <div onClick={onEditProfile} title="Edit Profile" style={{ background: 'var(--surface)', width: '42px', height: '42px', borderRadius: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border-light)', cursor: 'pointer', transition: 'all 0.2s' }}>
@@ -558,9 +593,9 @@ function Login({ onLoginSuccess, showToast }) {
 
   return (
     <div className="login-container">
-      <div className="logo-area" style={{ justifyContent: 'center', marginBottom: '8px', transform: 'scale(1.2)' }}>
+      <div className="logo-area" style={{ justifyContent: 'center', marginBottom: '16px' }}>
         <div className="logo-icon" style={{ background: 'transparent', boxShadow: 'none' }}>
-          <img src={logoImage} alt="WATTZEN Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+          <img src={logoImage} alt="WATTZEN Logo" style={{ width: '120%', height: '120%', objectFit: 'contain' }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
         </div>
         <div className="logo-text">WATT<span>ZEN</span></div>
       </div>
@@ -711,6 +746,7 @@ function TrackingMap({ origin, destination }) {
   const originMarker = useRef(null);
   const destMarker = useRef(null);
   const boundsSet = useRef(false);
+  const observerRef = useRef(null);
 
   useEffect(() => {
     if (!mapRef.current) return;
@@ -746,10 +782,13 @@ function TrackingMap({ origin, destination }) {
             destMarker.current = window.L.marker([destLat, destLng], { icon: createIcon('E', '#f59e0b') }).addTo(mapInstance.current);
       }
 
-          // Prevent Leaflet "gray tile" rendering glitch when initialized in a dynamic container
-          setTimeout(() => {
-            if (mapInstance.current) mapInstance.current.invalidateSize();
-          }, 250);
+          // Use ResizeObserver to reliably fix the Leaflet "gray tile" rendering glitch in dynamic containers
+          if (!observerRef.current && window.ResizeObserver) {
+            observerRef.current = new ResizeObserver(() => {
+              if (mapInstance.current) mapInstance.current.invalidateSize();
+            });
+            observerRef.current.observe(mapRef.current);
+          }
 
       if (origin && origin.length === 2) originMarker.current.setLatLng([origin[1], origin[0]]);
       if (destination && destination.length === 2) destMarker.current.setLatLng([destination[1], destination[0]]);
@@ -771,6 +810,9 @@ function TrackingMap({ origin, destination }) {
   // Clean up Leaflet instance on unmount to prevent memory leaks and "map already initialized" errors
   useEffect(() => {
     return () => {
+      if (observerRef.current) {
+        observerRef.current.disconnect();
+      }
       if (mapInstance.current) {
         mapInstance.current.remove();
         mapInstance.current = null;
@@ -815,6 +857,7 @@ function CustomerHome({ user, showToast, onEditProfile }) {
   const [address, setAddress] = useState('');
   const [coordinates, setCoordinates] = useState([77.5946, 12.9716]); 
   const [liveLocation, setLiveLocation] = useState(null);
+  const [jobOTP, setJobOTP] = useState('');
   const [messages, setMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const [activeJobId, setActiveJobId] = useState(null);
@@ -827,6 +870,7 @@ function CustomerHome({ user, showToast, onEditProfile }) {
   const [showRating, setShowRating] = useState(false);
   const [rating, setRating] = useState(0);
   const [hoverRating, setHoverRating] = useState(0);
+  const [tipAmount, setTipAmount] = useState(0);
   const chatContainerRef = useRef(null);
   
   const [currentTab, setCurrentTab] = useState('active');
@@ -846,6 +890,10 @@ function CustomerHome({ user, showToast, onEditProfile }) {
   const [couponInput, setCouponInput] = useState('');
   const [appliedCoupon, setAppliedCoupon] = useState(null);
   const [isApplyingCoupon, setIsApplyingCoupon] = useState(false);
+  const [savedAddresses, setSavedAddresses] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('wattzen_saved_addresses')) || {}; }
+    catch { return {}; }
+  });
   
   const mounted = useRef(true);
   useEffect(() => { return () => { mounted.current = false; }; }, []);
@@ -868,6 +916,7 @@ function CustomerHome({ user, showToast, onEditProfile }) {
           setActiveJobId(job._id);
           setSelectedService(job.serviceType);
           setAddress(job.address);
+          if (job.jobOTP) setJobOTP(job.jobOTP);
           setBookingPrice(job.estimatedPrice);
           setTeamSize(job.teamSize || 1);
           if (job.status === 'assigned' || job.status === 'in_progress') {
@@ -972,6 +1021,19 @@ function CustomerHome({ user, showToast, onEditProfile }) {
         showToast(`${data.electrician.name} has joined the job!`, 'success');
         sendPush('Team Update', `${data.electrician.name} has joined your project team.`);
     };
+    const onDrop = (data) => {
+      setAssignedElectricians(prev => prev.filter(e => String(e._id) !== String(data.electricianId)));
+      setIsTeamFull(false);
+      setTeamStatusMessage('An electrician dropped. Searching for a replacement...');
+      showToast('An electrician left the team. Finding a replacement.', 'warning');
+    };
+    const onStatusUpdate = (data) => {
+      if (data.status === 'in_progress') {
+        setTeamStatusMessage('Service is currently in progress!');
+        showToast('Electrician has verified the OTP. Service started.', 'success');
+        sendPush('Service Started', 'The electrician has successfully verified the OTP.');
+      }
+    };
     const onComplete = () => {
       setJobCompleted(true);
       sendPush('Job Completed', 'The service has been finished. Please leave a rating!');
@@ -984,6 +1046,8 @@ function CustomerHome({ user, showToast, onEditProfile }) {
     socket.on('paymentVerified', onPay);
     socket.on('jobAccepted', onAccept);
     socket.on('teamMemberJoined', onJoin);
+    socket.on('electricianDropped', onDrop);
+    socket.on('jobStatusUpdated', onStatusUpdate);
     socket.on('jobCompleted', onComplete);
 
     return () => {
@@ -994,6 +1058,8 @@ function CustomerHome({ user, showToast, onEditProfile }) {
       socket.off('paymentVerified', onPay);
       socket.off('jobCompleted', onComplete);
       socket.off('teamMemberJoined', onJoin);
+      socket.off('electricianDropped', onDrop);
+      socket.off('jobStatusUpdated', onStatusUpdate);
       socket.off('userTyping', onType);
       socket.off('userStopTyping', onStopType);
     };
@@ -1001,10 +1067,14 @@ function CustomerHome({ user, showToast, onEditProfile }) {
 
   useEffect(() => {
     if (chatContainerRef.current) {
-      const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
-      if (scrollHeight - scrollTop - clientHeight < 150 || messages.length <= 1) {
-        chatContainerRef.current.scrollTo({ top: scrollHeight, behavior: 'smooth' });
-      }
+      // Wait for the DOM to paint the new messages before calculating scrollHeight
+      requestAnimationFrame(() => {
+        if (!chatContainerRef.current) return;
+        const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
+        if (scrollHeight - scrollTop - clientHeight < 200 || messages.length <= 1) {
+          chatContainerRef.current.scrollTo({ top: scrollHeight, behavior: 'smooth' });
+        }
+      });
     }
   }, [messages]);
 
@@ -1059,6 +1129,7 @@ function CustomerHome({ user, showToast, onEditProfile }) {
         body: { serviceType: selectedService, address, coordinates, estimatedPrice: bookingPrice, teamSize, couponCode: appliedCoupon?.code }
       });
       setActiveJobId(job._id);
+      setJobOTP(job.jobOTP);
       setBookingPrice(null);
       setTeamStatusMessage('Payment submitted. Waiting for Admin verification...');
       showToast(`Payment registered! Verifying...`, 'success');
@@ -1085,6 +1156,7 @@ function CustomerHome({ user, showToast, onEditProfile }) {
       setIsTeamFull(false);
       setJobCompleted(false);
       setShowRating(false);
+      setJobOTP('');
       setBookingPrice(null);
       setRating(0);
       showToast('Job cancelled successfully.', 'success');
@@ -1156,9 +1228,9 @@ function CustomerHome({ user, showToast, onEditProfile }) {
       }
       await fetchJson(`/users/${electricianId}/rate`, {
         method: 'POST',
-        body: { rating }
+        body: { rating, tip: tipAmount }
       });
-      showToast(`Thank you for your ${rating}-star feedback!`, 'success');
+      showToast(`Thank you for your ${rating}-star feedback!${tipAmount > 0 ? ' Tip added.' : ''}`, 'success');
       sendPush('Feedback Sent', 'Thank you for rating your electrician!');
       
       // Only clear state upon successful rating submission
@@ -1171,6 +1243,7 @@ function CustomerHome({ user, showToast, onEditProfile }) {
       setMessages([]);
       setShowRating(false);
       setRating(0);
+      setTipAmount(0);
     } catch (error) {
       showToast(error.message || 'Failed to submit rating.', 'error');
     }
@@ -1224,6 +1297,14 @@ Support: projects.nikunj.singh@gmail.com
 
   const finalPrice = appliedCoupon ? Math.max(0, bookingPrice - appliedCoupon.discount) : bookingPrice;
 
+  const handleSaveAddress = (type) => {
+    if (!address || !coordinates) return showToast('Please select a valid location first.', 'warning');
+    const updated = { ...savedAddresses, [type]: { address, coordinates } };
+    setSavedAddresses(updated);
+    localStorage.setItem('wattzen_saved_addresses', JSON.stringify(updated));
+    showToast(`Address saved as ${type}!`, 'success');
+  };
+
   return (
     <div className="dashboard-grid">
       <div>
@@ -1244,6 +1325,31 @@ Support: projects.nikunj.singh@gmail.com
                   ))}
                 </div>
               )}
+            </div>
+            <div style={{ display: 'flex', gap: '8px', marginTop: '12px', paddingLeft: '32px' }}>
+              {['Home', 'Work'].map(type => (
+                <div key={type} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <button className="btn btn-outline" style={{ padding: '4px 12px', fontSize: '0.75rem', borderRadius: '12px', borderColor: 'var(--border-light)', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '6px' }} onClick={() => {
+                    if (savedAddresses[type]) {
+                      setAddress(savedAddresses[type].address);
+                      setCoordinates(savedAddresses[type].coordinates);
+                      showToast(`Loaded ${type} address`, 'success');
+                    } else {
+                      handleSaveAddress(type);
+                    }
+                  }}>
+                    <i className={`fas fa-${type === 'Home' ? 'home' : 'briefcase'}`} style={{ color: 'var(--primary)' }}></i> {savedAddresses[type] ? type : `Save ${type}`}
+                  </button>
+                  {savedAddresses[type] && (
+                    <i className="fas fa-times-circle" style={{ fontSize: '0.9rem', color: 'var(--text-muted)', cursor: 'pointer', transition: 'color 0.2s' }} onMouseEnter={e => e.currentTarget.style.color = 'var(--danger)'} onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'} onClick={() => {
+                      const updated = { ...savedAddresses };
+                      delete updated[type];
+                      setSavedAddresses(updated);
+                      localStorage.setItem('wattzen_saved_addresses', JSON.stringify(updated));
+                    }} title={`Remove ${type}`}></i>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
       <button className="btn" style={{ padding: '10px', borderRadius: '50%', width: '45px', height: '45px', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={handleLocateMe} title="Detect Location" disabled={isLocating}>
@@ -1267,8 +1373,8 @@ Support: projects.nikunj.singh@gmail.com
 
       {currentTab === 'active' ? (
         <div className="card">
-          <div className="card-header">
-            <h3 style={{ fontSize: '1.4rem' }}><i className="fas fa-hand-sparkles" style={{ marginRight: '8px', color: 'var(--warning)' }}></i> Hello, {user?.name?.split(' ')[0] || 'User'}</h3>
+          <div className="card-header" style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h3 style={{ fontSize: '1.4rem', margin: 0 }}><i className="fas fa-hand-sparkles" style={{ marginRight: '8px', color: 'var(--warning)' }}></i> Hello, {user?.name?.split(' ')[0] || 'User'}</h3>
             <span className="badge" style={{ background: 'var(--gold)', color: '#854d0e', padding: '6px 12px' }}>
               <i className="fas fa-gem"></i> Premium
             </span>
@@ -1386,8 +1492,9 @@ Support: projects.nikunj.singh@gmail.com
                 Tracking Job ID: <span style={{ fontFamily: 'monospace' }}>{activeJobId}</span>
                 <button onClick={() => { 
                   if (navigator.clipboard) {
-                    navigator.clipboard.writeText(`Tracking WATTZEN Job: ${activeJobId}`); 
-                    showToast('Tracking ID copied!', 'success'); 
+                    navigator.clipboard.writeText(`Tracking WATTZEN Job: ${activeJobId}`)
+                      .then(() => showToast('Tracking ID copied!', 'success'))
+                      .catch(() => showToast('Failed to copy Tracking ID.', 'error'));
                   } else {
                     showToast('Clipboard access denied by browser.', 'error');
                   }
@@ -1403,6 +1510,14 @@ Support: projects.nikunj.singh@gmail.com
             <div style={{ marginTop: '16px', padding: '16px', background: 'rgba(16, 185, 129, 0.1)', borderRadius: '12px', border: '1px solid var(--success)' }}>
               <i className="fas fa-check-circle" style={{ color: 'var(--success)', marginBottom: '8px', fontSize: '1.5rem' }}></i>
               <div style={{ fontWeight: 'bold', color: 'var(--success)', textAlign: 'center' }}>Your Team is Assembled!</div>
+              
+              {jobOTP && (
+                <div style={{ margin: '16px 0', padding: '12px', background: 'var(--surface)', border: '2px dashed var(--primary)', borderRadius: '8px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '4px' }}>Share this 4-Digit OTP with your electrician upon arrival:</div>
+                  <div style={{ fontSize: '2rem', fontWeight: 'bold', letterSpacing: '4px', color: 'var(--primary)' }}>{jobOTP}</div>
+                </div>
+              )}
+
               <div style={{ fontSize: '0.85rem', color: 'var(--text-main)', marginTop: '8px' }}>
                 {assignedElectricians.map(e => (
                     <div key={e._id} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--surface)', padding: '12px', borderRadius: '8px', marginBottom: '8px', justifyContent: 'space-between', border: '1px solid var(--border-light)' }}>
@@ -1428,6 +1543,14 @@ Support: projects.nikunj.singh@gmail.com
               <a href={`mailto:projects.nikunj.singh@gmail.com?subject=Emergency%20Support%20-%20Job%20${activeJobId}`} className="btn btn-outline" style={{ padding: '14px', flex: '0 0 auto', borderColor: 'var(--danger)', color: 'var(--danger)', borderRadius: 'var(--radius-btn)' }} title="Contact Support">
                   <i className="fas fa-headset"></i>
                 </a>
+                <button className="btn" style={{ padding: '14px', flex: '0 0 auto', background: 'var(--danger)', color: 'white', borderRadius: 'var(--radius-btn)' }} onClick={() => {
+                  if(window.confirm('Trigger EMERGENCY SOS? This will alert the admin immediately.')) {
+                    if(socket?.connected) socket.emit('triggerSOS', { jobId: activeJobId, userId: user._id, role: 'customer' });
+                    showToast('SOS Alert Sent! Support is being notified.', 'success');
+                  }
+                }} title="Emergency SOS">
+                  <i className="fas fa-triangle-exclamation"></i>
+                </button>
               </div>
             </div>
           )}
@@ -1440,6 +1563,16 @@ Support: projects.nikunj.singh@gmail.com
                 {[1, 2, 3, 4, 5].map((star) => (
                   <i key={star} className="fas fa-star" style={{ cursor: 'pointer', color: star <= (hoverRating || rating) ? 'var(--gold)' : 'var(--border-light)', transition: 'color 0.2s, transform 0.2s' }} onMouseEnter={() => setHoverRating(star)} onMouseLeave={() => setHoverRating(0)} onClick={() => setRating(star)}></i>
                 ))}
+              </div>
+              <div style={{ marginBottom: '24px' }}>
+                <p style={{ margin: '0 0 8px 0', color: 'var(--text-main)', fontWeight: 'bold' }}>Add a Tip (Optional)</p>
+                <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  {[0, 50, 100, 200].map(amt => (
+                    <button key={amt} className={`btn ${tipAmount === amt ? '' : 'btn-outline'}`} style={{ padding: '6px 16px', borderRadius: '20px', borderColor: tipAmount === amt ? 'transparent' : 'var(--primary)', color: tipAmount === amt ? 'white' : 'var(--primary)' }} onClick={() => setTipAmount(amt)}>
+                      {amt === 0 ? 'No Tip' : `₹${amt}`}
+                    </button>
+                  ))}
+                </div>
               </div>
               <button className="btn btn-block" onClick={handleSubmitRating} disabled={rating === 0}>Submit Feedback</button>
             </div>
@@ -1567,6 +1700,18 @@ Support: projects.nikunj.singh@gmail.com
             <li>30-day post-service warranty guarantee</li>
           </ul>
         </div>
+        <div className="card" style={{ animationDelay: '0.2s', background: 'linear-gradient(135deg, var(--primary), var(--primary-light))', color: 'white', border: 'none' }}>
+          <h4 style={{ color: 'white', margin: '0 0 12px 0' }}><i className="fas fa-gift"></i> Refer & Earn</h4>
+          <p style={{ fontSize: '0.9rem', marginBottom: '12px', opacity: 0.9 }}>Share WATTZEN with friends! You both get ₹100 off when they book their first service.</p>
+          <div style={{ display: 'flex', gap: '8px', background: 'rgba(0,0,0,0.2)', padding: '8px', borderRadius: '8px', alignItems: 'center' }}>
+            <span style={{ flex: 1, fontFamily: 'monospace', fontWeight: 'bold', fontSize: '1.1rem', letterSpacing: '2px', textAlign: 'center' }}>{user?._id?.slice(-6).toUpperCase() || 'WATTZEN'}</span>
+            <button className="btn" style={{ background: 'white', color: 'var(--primary)', padding: '6px 12px', boxShadow: 'none' }} onClick={() => {
+              const text = `Join WATTZEN using my referral code ${user?._id?.slice(-6).toUpperCase() || 'WATTZEN'} and get ₹100 off your first booking!`;
+              if(navigator.share) navigator.share({ title: 'WATTZEN Invite', text }).catch(()=>{});
+              else { navigator.clipboard.writeText(text); showToast('Referral code copied!', 'success'); }
+            }}><i className="fas fa-share-nodes"></i> Share</button>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -1593,6 +1738,8 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
   const chartInstance = useRef(null);
   const [myLiveCoords, setMyLiveCoords] = useState(null);
   const [acceptingJobId, setAcceptingJobId] = useState(null);
+  const [onlineTime, setOnlineTime] = useState(0);
+  const [enteredOtp, setEnteredOtp] = useState('');
   const realCoordsRef = useRef([77.5946, 12.9716]); // Fallback to Bangalore, dynamically updated
   
   const mounted = useRef(true);
@@ -1620,6 +1767,23 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
     } catch(e) {
       showToast(e.message, 'error');
     }
+  };
+
+  useEffect(() => {
+    let interval;
+    if (isOnline) {
+      interval = setInterval(() => setOnlineTime(prev => prev + 1), 1000);
+    } else {
+      setOnlineTime(0);
+    }
+    return () => clearInterval(interval);
+  }, [isOnline]);
+
+  const formatOnlineTime = (secs) => {
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    const s = secs % 60;
+    return `${h > 0 ? h + 'h ' : ''}${m}m ${s}s`;
   };
 
   // Listen for Live Admin Approval
@@ -1707,12 +1871,22 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
         });
         sendPush('Team Update', `${data.electrician.name} joined the job team.`);
       };
+      const onDrop = (data) => {
+        setCurrentJob(prev => prev ? { ...prev, electricians: prev.electricians.filter(e => String(e._id) !== String(data.electricianId)) } : prev);
+        showToast('A team member dropped out of the job.', 'warning');
+      };
+      const onStatusUpdate = (data) => {
+        setCurrentJob(prev => prev ? { ...prev, status: data.status } : prev);
+        if (data.status === 'in_progress') setIsTracking(false);
+      };
 
       socket.on('receiveMessage', onMsg);
       socket.on('userTyping', onType);
       socket.on('userStopTyping', onStopType);
       socket.on('jobAccepted', onAccept);
       socket.on('jobCancelled', onCancel);
+      socket.on('electricianDropped', onDrop);
+      socket.on('jobStatusUpdated', onStatusUpdate);
       socket.on('jobCompleted', onComplete);
       socket.on('teamMemberJoined', onJoin);
 
@@ -1722,6 +1896,8 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
         socket.off('jobCancelled', onCancel);
         socket.off('jobCompleted', onComplete);
         socket.off('teamMemberJoined', onJoin);
+        socket.off('electricianDropped', onDrop);
+        socket.off('jobStatusUpdated', onStatusUpdate);
         socket.off('userTyping', onType);
         socket.off('userStopTyping', onStopType);
       }; 
@@ -1813,10 +1989,14 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
 
   useEffect(() => {
     if (chatContainerRef.current) {
-      const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
-      if (scrollHeight - scrollTop - clientHeight < 150 || messages.length <= 1) {
-        chatContainerRef.current.scrollTo({ top: scrollHeight, behavior: 'smooth' });
-      }
+      // Wait for the DOM to paint the new messages before calculating scrollHeight
+      requestAnimationFrame(() => {
+        if (!chatContainerRef.current) return;
+        const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
+        if (scrollHeight - scrollTop - clientHeight < 200 || messages.length <= 1) {
+          chatContainerRef.current.scrollTo({ top: scrollHeight, behavior: 'smooth' });
+        }
+      });
     }
   }, [messages]);
 
@@ -1967,6 +2147,32 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
     }
   };
 
+  const handleVerifyOtp = async () => {
+    if (!enteredOtp || enteredOtp.length !== 4) return showToast('Enter 4-digit OTP', 'error');
+    try {
+      await fetchJson(`/jobs/${activeJobId}/verify-otp`, { method: 'PUT', body: { otp: enteredOtp } });
+      showToast('OTP Verified! Job is now in progress.', 'success');
+      setCurrentJob(prev => ({ ...prev, status: 'in_progress' }));
+      setIsTracking(false);
+    } catch (e) {
+      showToast(e.message || 'Invalid OTP', 'error');
+    }
+  };
+
+  const handleDropJob = async () => {
+    if (!window.confirm('WARNING: Drop this job? This will negatively impact your rating and standing.')) return;
+    try {
+      await fetchJson(`/jobs/${activeJobId}/drop`, { method: 'PUT' });
+      showToast('You have dropped the job.', 'warning');
+      setActiveJobId(null);
+      setCurrentJob(null);
+      setIsTracking(false);
+      setMessages([]);
+    } catch (error) {
+      showToast(error.message || 'Failed to drop job.', 'error');
+    }
+  };
+
   const acceptJobRef = useRef(handleAcceptJob);
   useEffect(() => { acceptJobRef.current = handleAcceptJob; }, [handleAcceptJob]);
 
@@ -2002,8 +2208,11 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
     <div className="dashboard-grid">
       <div>
         <div className="card">
-          <div className="card-header">
-            <h3 style={{ fontSize: '1.4rem' }}><i className="fas fa-toolbox" style={{ color: 'var(--primary)' }}></i> Welcome back, {user?.name?.split(' ')[0] || 'User'}</h3>
+          <div className="card-header" style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div>
+              <h3 style={{ fontSize: '1.4rem', margin: 0 }}><i className="fas fa-toolbox" style={{ color: 'var(--primary)' }}></i> Welcome back, {user?.name?.split(' ')[0] || 'User'}</h3>
+              {isOnline && <div style={{ fontSize: '0.85rem', color: 'var(--success)', marginTop: '6px', fontWeight: 'bold' }}><i className="fas fa-clock"></i> Active Shift: {formatOnlineTime(onlineTime)}</div>}
+            </div>
             <button 
               className={`btn ${isOnline ? '' : 'btn-outline'}`} 
               onClick={() => { 
@@ -2120,9 +2329,27 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
                   </p>
                 </React.Fragment>
               ) : null}
+              {currentJob?.status === 'assigned' && !isTracking && (
+                <div style={{ marginTop: '16px', background: 'var(--surface)', padding: '16px', borderRadius: '12px', border: '1px dashed var(--primary)' }}>
+                  <p style={{ margin: '0 0 12px 0', fontSize: '0.9rem', fontWeight: 'bold' }}>Ask the customer for the 4-digit OTP to start the job.</p>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <input type="text" className="form-control" placeholder="0000" maxLength="4" value={enteredOtp} onChange={e => setEnteredOtp(e.target.value.replace(/\D/g, ''))} style={{ margin: 0, textAlign: 'center', fontSize: '1.2rem', letterSpacing: '4px', fontWeight: 'bold' }} />
+                    <button className="btn" onClick={handleVerifyOtp} style={{ whiteSpace: 'nowrap' }}>Verify OTP</button>
+                  </div>
+                </div>
+              )}
               <p style={{ color: 'var(--warning)', marginTop: '16px', fontWeight: 'bold' }}>
                 <i className="fas fa-info-circle"></i> Ask the customer to mark the job as 'Done' on their app when finished to receive your payout.
               </p>
+              <button className="btn-outline" style={{ marginTop: '12px', borderColor: 'var(--danger)', color: 'var(--danger)', padding: '8px 16px', width: '100%', borderRadius: '8px' }} onClick={() => {
+                if(window.confirm('Trigger EMERGENCY SOS? Support will be notified immediately.')) {
+                  if(socket?.connected) socket.emit('triggerSOS', { jobId: activeJobId, userId: user._id, role: 'electrician' });
+                  showToast('SOS Alert Sent!', 'success');
+                }
+              }}><i className="fas fa-triangle-exclamation"></i> Emergency SOS</button>
+              <button className="btn-outline" style={{ marginTop: '12px', borderColor: 'var(--warning)', color: 'var(--warning)', padding: '8px 16px', width: '100%', borderRadius: '8px' }} onClick={handleDropJob}>
+                <i className="fas fa-person-walking-arrow-right"></i> Emergency Drop Job
+              </button>
             </div>
         
         <div style={{ marginTop: '16px', background: 'var(--surface)', border: '1px solid var(--border-light)', borderRadius: '12px', overflow: 'hidden' }}>
@@ -2180,6 +2407,15 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
               <p style={{ fontSize: '0.85rem', margin: 0, color: 'var(--text-muted)' }}>Always wear protective shoe covers when entering a home. Clearly explain the issue and price breakdown before starting repairs.</p>
             </div>
           </div>
+        </div>
+        <div className="card" style={{ animationDelay: '0.25s', border: '1px dashed var(--gold)' }}>
+          <h4 style={{ margin: '0 0 8px 0' }}><i className="fas fa-users" style={{ color: 'var(--gold)' }}></i> Build the Network</h4>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '12px' }}>Invite other certified electricians. Get a ₹500 bonus when they complete 5 jobs!</p>
+          <button className="btn btn-outline" style={{ width: '100%', borderColor: 'var(--gold)', color: 'var(--gold)' }} onClick={() => {
+            const text = `Join WATTZEN as a verified Electrician! Use my referral code ${user?._id?.slice(-6).toUpperCase() || 'WATTZEN'}.`;
+            if(navigator.share) navigator.share({ title: 'WATTZEN Partner', text }).catch(()=>{});
+            else { navigator.clipboard.writeText(text); showToast('Invite link copied!', 'success'); }
+          }}><i className="fas fa-share-nodes"></i> Share Invite Link</button>
         </div>
         </React.Fragment>
         ) : (
@@ -2516,13 +2752,33 @@ function AdminPanel({ user, onLogout, showToast }) {
   };
 
   const handleDeleteUser = async (id) => {
-    if (!window.confirm('WARNING: Force delete this user? This cannot be undone.')) return;
+    const action = window.prompt('Type "ARCHIVE" to soft-delete, or "PURGE" to completely obliterate this user permanently:');
+    if (action !== 'ARCHIVE' && action !== 'PURGE') {
+      if (action !== null) showToast('Deletion cancelled.', 'warning');
+      return;
+    }
     try {
-      await fetchJson(`/admin/users/${id}`, { method: 'DELETE' });
-      showToast('User deleted successfully.', 'success');
+      const endpoint = action === 'PURGE' ? `/admin/users/${id}?hard=true` : `/admin/users/${id}`;
+      await fetchJson(endpoint, { method: 'DELETE' });
+      showToast(`User ${action === 'PURGE' ? 'permanently purged' : 'archived'} successfully.`, 'success');
       fetchDashboardData();
     } catch(e) {
       showToast(e.message || 'Failed to delete user', 'error');
+    }
+  };
+
+  const handlePermanentDeleteArchive = async (archiveId) => {
+    const confirmText = window.prompt('WARNING: This will permanently erase this user data from the database. Type "PURGE" to confirm:');
+    if (confirmText !== 'PURGE') {
+      if (confirmText !== null) showToast('Permanent deletion cancelled.', 'warning');
+      return;
+    }
+    try {
+      await fetchJson(`/admin/archives/users/${archiveId}`, { method: 'DELETE' });
+      showToast('Archived record permanently obliterated.', 'success');
+      fetchDashboardData();
+    } catch(e) {
+      showToast(e.message || 'Failed to purge record.', 'error');
     }
   };
 
@@ -3000,10 +3256,11 @@ function AdminPanel({ user, onLogout, showToast }) {
                     <th style={{ padding: '14px 16px' }}>Name & Phone</th>
                     <th style={{ padding: '14px 16px' }}>Deleted By</th>
                     <th style={{ padding: '14px 16px' }}>Deleted At</th>
+                    <th style={{ padding: '14px 16px' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {archivedUsers.length === 0 ? <tr><td colSpan="4" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>No archived records found.</td></tr> : archivedUsers.map(u => (
+                  {archivedUsers.length === 0 ? <tr><td colSpan="5" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>No archived records found.</td></tr> : archivedUsers.map(u => (
                     <tr key={u._id} style={{ borderBottom: '1px solid var(--border-light)' }}>
                       <td style={{ padding: '14px 16px', fontFamily: 'monospace', fontWeight: 'bold', color: 'var(--danger)' }}>{u.originalId}</td>
                       <td style={{ padding: '14px 16px' }}>
@@ -3013,6 +3270,11 @@ function AdminPanel({ user, onLogout, showToast }) {
                       </td>
                       <td style={{ padding: '14px 16px', color: 'var(--warning)' }}>{u.deletedBy}</td>
                       <td style={{ padding: '14px 16px', color: 'var(--text-muted)' }}>{new Date(u.deletedAt).toLocaleString()}</td>
+                      <td style={{ padding: '14px 16px' }}>
+                        <button className="btn btn-outline" style={{ padding: '6px 12px', fontSize: '0.8rem', color: 'white', background: 'var(--danger)', borderColor: 'var(--danger)' }} onClick={() => handlePermanentDeleteArchive(u._id)} title="Permanently Erase Record">
+                          <i className="fas fa-fire"></i> Purge
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -3237,11 +3499,12 @@ function AppContent() {
     if (user) {
       // Always ensure the token is up to date when the user state changes
       socket.auth = { token: localStorage.getItem('token') };
+      const handleReconnectAttempt = () => { socket.auth = { token: localStorage.getItem('token') }; };
+      
       if (!socket.connected) {
         socket.connect();
         
         // 5. Inject fresh token on reconnect attempts if the user logs out/in while offline
-        const handleReconnectAttempt = () => { socket.auth = { token: localStorage.getItem('token') }; };
         socket.io.on('reconnect_attempt', handleReconnectAttempt);
       }
       const handleBroadcast = (msg) => {
@@ -3298,7 +3561,8 @@ function AppContent() {
     <div className="app-container" style={{ 
       animation: isAuthView ? 'none' : 'fadeIn 0.5s forwards',
       maxWidth: isAuthView ? '100%' : '1200px',
-      padding: isAuthView ? '0' : '16px'
+      padding: isAuthView ? '0' : '16px',
+      margin: '0 auto'
     }}>
       {isBrowserOffline ? (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', background: 'var(--danger)', color: 'white', textAlign: 'center', padding: '6px', fontSize: '0.85rem', zIndex: 10000, fontWeight: 'bold', boxShadow: 'var(--shadow-md)' }}>
@@ -3319,14 +3583,14 @@ function AppContent() {
         <Route path="/customer" element={user?.role === 'customer' ? (
           <React.Fragment>
             <Navbar user={user} onLogout={handleLogout} toggleTheme={toggleTheme} isDarkMode={isDarkMode} onEditProfile={() => setIsProfileModalOpen(true)} />
-            <div style={{ padding: '20px 0' }}><CustomerHome user={user} showToast={showToast} onEditProfile={() => setIsProfileModalOpen(true)} /></div>
+            <div style={{ padding: '20px 0', paddingBottom: '90px' }}><CustomerHome user={user} showToast={showToast} onEditProfile={() => setIsProfileModalOpen(true)} /></div>
           </React.Fragment>
         ) : <Navigate to="/login" replace />} />
 
         <Route path="/electrician" element={user?.role === 'electrician' ? (
           <React.Fragment>
             <Navbar user={user} onLogout={handleLogout} toggleTheme={toggleTheme} isDarkMode={isDarkMode} onEditProfile={() => setIsProfileModalOpen(true)} />
-            <div style={{ padding: '20px 0' }}><ElectricianHome user={user} showToast={showToast} onEditProfile={() => setIsProfileModalOpen(true)} onUpdateUser={handleProfileUpdate} /></div>
+            <div style={{ padding: '20px 0', paddingBottom: '90px' }}><ElectricianHome user={user} showToast={showToast} onEditProfile={() => setIsProfileModalOpen(true)} onUpdateUser={handleProfileUpdate} /></div>
           </React.Fragment>
         ) : <Navigate to="/login" replace />} />
 
