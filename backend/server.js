@@ -441,6 +441,8 @@ const jobOtpAttempts = new Map();
 const otpStore = new Map();
 // Rate limiter to prevent SMS API abuse and spam
 const otpRateLimits = new Map();
+// In-memory store for signup OTPs
+const signupOtpStore = new Map();
 
 // Security/Performance: Periodically clean up the admin login attempts map to prevent memory leaks (OOM)
 setInterval(() => {
@@ -467,6 +469,11 @@ setInterval(() => {
       otpStore.delete(phone);
     }
   }
+  for (const [phone, record] of signupOtpStore.entries()) {
+    if (now > record.expiresAt) {
+      signupOtpStore.delete(phone);
+    }
+  }
   for (const [phone, expTime] of otpRateLimits.entries()) {
     if (now > expTime) {
       otpRateLimits.delete(phone);
@@ -476,6 +483,7 @@ setInterval(() => {
   // Emergency DDoS flush: Prevent Heap OOM if botnet floods the Maps
   if (otpStore.size > 10000) otpStore.clear();
   if (otpRateLimits.size > 10000) otpRateLimits.clear();
+  if (signupOtpStore.size > 10000) signupOtpStore.clear();
   if (jobOtpAttempts.size > 10000) jobOtpAttempts.clear();
   if (userLoginAttempts.size > 10000) userLoginAttempts.clear();
   if (adminLoginAttempts.size > 10000) adminLoginAttempts.clear();
@@ -642,6 +650,27 @@ api.post('/signup', async (req, res) => {
     // 7. Password Length DoS protection
     if (password.length < 6 || password.length > 100) return res.status(400).json({ message: 'Password must be between 6 and 100 characters.' });
 
+    const otp = String(req.body.otp || '').trim().substring(0, 10);
+    if (!otp) return res.status(400).json({ message: 'Verification OTP is required to sign up.' });
+
+    const record = signupOtpStore.get(phone);
+    if (!record) return res.status(400).json({ message: 'OTP expired or not requested. Please request a new OTP.' });
+    if (Date.now() > record.expiresAt) {
+      signupOtpStore.delete(phone);
+      return res.status(400).json({ message: 'OTP has expired. Please request a new one.' });
+    }
+
+    const providedOtp = Buffer.from(otp.padStart(4, '0'));
+    const actualOtp = Buffer.from(record.otp);
+    if (providedOtp.length !== actualOtp.length || !crypto.timingSafeEqual(providedOtp, actualOtp)) {
+      record.attempts = (record.attempts || 0) + 1;
+      if (record.attempts >= 5) {
+        signupOtpStore.delete(phone);
+        return res.status(429).json({ message: 'Too many failed attempts. OTP revoked.' });
+      }
+      return res.status(400).json({ message: 'Invalid OTP code.' });
+    }
+
     let existingUser = await User.findOne({ phone });
     if (existingUser) return res.status(400).json({ message: 'Phone number already registered' });
 
@@ -656,6 +685,7 @@ api.post('/signup', async (req, res) => {
     signupRecord.count += 1;
     if (signupRecord.count >= 3) signupRecord.lockUntil = now + 24 * 60 * 60 * 1000;
     signupRateLimits.set(clientIp, signupRecord);
+    signupOtpStore.delete(phone); // Clear OTP memory cache on success
     logSystemEvent('INFO', 'AuthService', 'User Signup', `New ${role} registered: ${user.phone}`);
 
     // Send automated Welcome SMS
@@ -789,6 +819,55 @@ api.post('/auth/forgot-password', async (req, res) => {
     }
 
     res.status(200).json({ message: 'If an account matches this number, an OTP has been sent.' });
+  } catch (error) {
+    res.status(500).json({ message: 'Internal server error while requesting OTP' });
+  }
+});
+
+// POST /api/auth/send-signup-otp - Trigger RapidAPI SMS for Signups
+api.post('/auth/send-signup-otp', async (req, res) => {
+  try {
+    const cleanPhone = String(req.body.phone || '').trim().substring(0, 15);
+    if (!cleanPhone) return res.status(400).json({ message: 'Phone number is required' });
+
+    const phoneRegex = /^\d{10}$/;
+    if (!phoneRegex.test(cleanPhone)) return res.status(400).json({ message: 'Invalid phone number format. Must be 10 digits.' });
+
+    const existingUser = await User.findOne({ phone: cleanPhone });
+    if (existingUser) return res.status(400).json({ message: 'Phone number is already registered.' });
+
+    const now = Date.now();
+    const clientIp = getClientIp(req);
+    
+    // Rate limiting
+    if (otpRateLimits.has(clientIp) && now < otpRateLimits.get(clientIp)) {
+      return res.status(429).json({ message: 'Too many requests from this IP. Please wait 30 seconds.' });
+    }
+    if (otpRateLimits.has(cleanPhone) && now < otpRateLimits.get(cleanPhone)) {
+      return res.status(429).json({ message: 'Please wait 60 seconds before requesting another OTP.' });
+    }
+    otpRateLimits.set(clientIp, now + 30000);
+    otpRateLimits.set(cleanPhone, now + 60000);
+
+    const otp = crypto.randomInt(1000, 10000).toString();
+    signupOtpStore.set(cleanPhone, { otp, expiresAt: Date.now() + 10 * 60 * 1000, attempts: 0 }); // 10 min expiry
+    console.log(`[SIGNUP OTP GENERATED] Phone: ${cleanPhone} | Code: ${otp}`);
+
+    try {
+      const targetPhone = cleanPhone.startsWith('+') ? cleanPhone : `+91${cleanPhone}`;
+      await fetch('https://sms-verify3.p.rapidapi.com/send-numeric-verify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-rapidapi-host': 'sms-verify3.p.rapidapi.com',
+          'x-rapidapi-key': process.env.RAPIDAPI_KEY || ''
+        },
+        body: JSON.stringify({ target: targetPhone })
+      });
+    } catch (smsError) {
+      console.error('[SMS ERROR] Failed to hit RapidAPI:', smsError.message);
+    }
+    res.status(200).json({ message: 'Verification OTP sent to your phone.' });
   } catch (error) {
     res.status(500).json({ message: 'Internal server error while requesting OTP' });
   }

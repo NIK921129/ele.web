@@ -20,11 +20,12 @@ async function fetchJson(url, options = {}, retries = 2) {
   const token = localStorage.getItem('token');
   const isFormData = options.body instanceof FormData;
   const headers = { ...options.headers };
+  const fetchOptions = { ...options }; // Create a shallow copy to prevent mutating the original object
 
   // 3. HTTP GET Payload Crash Protection
-  const method = (options.method || 'GET').toUpperCase();
+  const method = (fetchOptions.method || 'GET').toUpperCase();
   if (method === 'GET' || method === 'HEAD') {
-    delete options.body;
+    delete fetchOptions.body;
     headers['Cache-Control'] = 'no-cache'; // 4. Prevent stale iOS/Safari polling
     headers['Pragma'] = 'no-cache';
   }
@@ -38,7 +39,7 @@ async function fetchJson(url, options = {}, retries = 2) {
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), options.timeout || 60000); // 60-second timeout for Render cold starts
+  const timeoutId = setTimeout(() => controller.abort(), fetchOptions.timeout || 60000); // 60-second timeout for Render cold starts
 
   // Safely normalize URL to prevent double slashes or broken absolute routes
   const cleanUrl = url.startsWith('/') ? url : `/${url}`;
@@ -46,10 +47,10 @@ async function fetchJson(url, options = {}, retries = 2) {
 
   try {
     const response = await fetch(finalUrl, {
+      ...fetchOptions,
       headers,
-      ...options,
       signal: controller.signal,
-      body: isFormData ? options.body : (options.body && typeof options.body !== 'string' ? JSON.stringify(options.body) : options.body),
+      body: isFormData ? fetchOptions.body : (fetchOptions.body && typeof fetchOptions.body !== 'string' ? JSON.stringify(fetchOptions.body) : fetchOptions.body),
     });
     clearTimeout(timeoutId);
 
@@ -327,8 +328,7 @@ function ProfileModal({ user, onClose, onUpdate, showToast, onLogout }) {
         onClose();
       }
     } catch (err) {
-      showToast(err.message, 'error');
-      showToast(err.message.includes('Network') ? err.message : 'Failed to update profile.', 'error');
+      showToast(err.message || 'Failed to update profile.', 'error');
     } finally {
       if (mounted.current) setLoading(false);
     }
@@ -378,6 +378,8 @@ function Login({ onLoginSuccess, showToast }) {
   const [error, setError] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
+  const [signupOtpSent, setSignupOtpSent] = useState(false);
+  const [signupOtp, setSignupOtp] = useState('');
   
   const mounted = useRef(true);
   useEffect(() => { return () => { mounted.current = false; }; }, []);
@@ -420,23 +422,53 @@ function Login({ onLoginSuccess, showToast }) {
         const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
         setter(compressedBase64);
       };
+      img.onerror = () => showToast('Invalid file format. Please upload a valid image (JPG/PNG).', 'error');
       img.src = ev.target.result;
     };
     reader.readAsDataURL(file);
   };
 
+  const requestSignupOtp = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetchJson('/auth/send-signup-otp', { method: 'POST', body: { phone } });
+      if (mounted.current) {
+        setSignupOtpSent(true);
+        setResendCooldown(60);
+        showToast(res.message || 'OTP sent successfully!', 'success');
+      }
+    } catch (err) {
+      if (mounted.current) setError(err.message);
+    } finally {
+      if (mounted.current) setLoading(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!isLogin && role === 'electrician' && (!idCardBase64 || !address || !experienceYears || !bankDetails || !panCardBase64 || !photoBase64)) {
-      return setError('Please fill in all details, bank info, and upload all required documents.');
+    
+    if (!isLogin && !signupOtpSent) {
+      if (role === 'electrician' && (!idCardBase64 || !address || !experienceYears || !bankDetails || !panCardBase64 || !photoBase64)) {
+        return setError('Please fill in all details, bank info, and upload all required documents.');
+      }
+      if (!phone || phone.length !== 10) return setError('Enter a valid 10-digit phone number.');
+      return requestSignupOtp();
     }
+
     setLoading(true);
     setError(null);
     try {
       const endpoint = isLogin ? '/login' : '/signup';
-      const body = isLogin 
-        ? { phone, password, role } 
-        : { name, phone, password, role, address, experienceYears, idCardBase64, bankDetails, panCardBase64, photoBase64 };
+      let body;
+      if (isLogin) {
+        body = { phone, password, role };
+      } else {
+        body = { name, phone, password, role, otp: signupOtp };
+        if (role === 'electrician') {
+          body = { ...body, address, experienceYears: Number(experienceYears), idCardBase64, bankDetails, panCardBase64, photoBase64 };
+        }
+      }
 
       const userData = await fetchJson(endpoint, {
         method: 'POST',
@@ -451,7 +483,7 @@ function Login({ onLoginSuccess, showToast }) {
       }
     } catch (err) {
       console.error('[Auth Error]', err);
-      if (mounted.current) setError(err.message.includes('Network') ? err.message : 'Authentication failed. Please check your details and try again.');
+      if (mounted.current) setError(err.message);
     } finally {
       if (mounted.current) setLoading(false);
     }
@@ -513,7 +545,7 @@ function Login({ onLoginSuccess, showToast }) {
     };
     if (!triggerAnim()) checkInterval = setInterval(() => { if (triggerAnim()) clearInterval(checkInterval); }, 200);
     return () => { if (checkInterval) clearInterval(checkInterval); };
-  }, [isLogin, isForgotPassword, otpSent]);
+  }, [isLogin, isForgotPassword, otpSent, signupOtpSent]);
 
   // Handle OTP Resend Cooldown Timer
   useEffect(() => {
@@ -539,10 +571,10 @@ function Login({ onLoginSuccess, showToast }) {
         
         {error && <div style={{ color: 'white', background: 'var(--danger)', padding: '10px', borderRadius: '8px', marginBottom: '16px' }}>{error}</div>}
         
-        {!isForgotPassword && (
+        {!isForgotPassword && !signupOtpSent && (
         <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
-          <button type="button" className={`btn btn-block ${role === 'customer' ? '' : 'btn-outline'}`} onClick={() => { setRole('customer'); setError(null); }} style={{ padding: '10px' }}>Customer</button>
-          <button type="button" className={`btn btn-block ${role === 'electrician' ? '' : 'btn-outline'}`} onClick={() => { setRole('electrician'); setError(null); }} style={{ padding: '10px' }}>Electrician</button>
+          <button type="button" className={`btn btn-block ${role === 'customer' ? '' : 'btn-outline'}`} onClick={() => { setRole('customer'); setError(null); setSignupOtp(''); }} style={{ padding: '10px' }}>Customer</button>
+          <button type="button" className={`btn btn-block ${role === 'electrician' ? '' : 'btn-outline'}`} onClick={() => { setRole('electrician'); setError(null); setSignupOtp(''); }} style={{ padding: '10px' }}>Electrician</button>
         </div>
         )}
 
@@ -558,7 +590,7 @@ function Login({ onLoginSuccess, showToast }) {
                 <React.Fragment>
                   <div className="form-group anime-form-item">
                     <label htmlFor="resetOtp">4-Digit OTP</label>
-                    <input type="text" id="resetOtp" name="otp" className="form-control" value={otp} onChange={e => setOtp(e.target.value)} required placeholder="1234" maxLength={4} style={{ letterSpacing: '4px', fontSize: '1.2rem', fontWeight: 'bold' }} />
+                <input type="text" id="resetOtp" name="otp" className="form-control" value={otp} onChange={e => setOtp(e.target.value.replace(/\D/g, ''))} required placeholder="1234" maxLength={4} style={{ letterSpacing: '4px', fontSize: '1.2rem', fontWeight: 'bold' }} />
                   </div>
                   <div className="form-group anime-form-item">
                     <label htmlFor="resetNewPassword">New Password</label>
@@ -576,6 +608,24 @@ function Login({ onLoginSuccess, showToast }) {
               )}
               <button type="submit" className="btn btn-block anime-form-item" disabled={loading} style={{ marginTop: '10px' }}>
                 {loading ? 'Processing...' : (otpSent ? 'Reset Password' : 'Send Recovery OTP')}
+              </button>
+            </React.Fragment>
+          ) : signupOtpSent ? (
+            <React.Fragment>
+              <div className="form-group anime-form-item">
+                <label htmlFor="signupOtp">Enter OTP sent to {phone}</label>
+                <input type="text" id="signupOtp" className="form-control" value={signupOtp} onChange={e => setSignupOtp(e.target.value.replace(/\D/g, ''))} required placeholder="1234" maxLength={4} style={{ letterSpacing: '4px', fontSize: '1.2rem', fontWeight: 'bold', textAlign: 'center' }} />
+              </div>
+              <div className="anime-form-item" style={{ textAlign: 'right', marginTop: '-8px', marginBottom: '12px' }}>
+                <button type="button" onClick={requestSignupOtp} disabled={resendCooldown > 0 || loading} style={{ background: 'none', border: 'none', padding: 0, color: resendCooldown > 0 ? 'var(--text-muted)' : 'var(--primary)', cursor: resendCooldown > 0 ? 'not-allowed' : 'pointer', fontSize: '0.85rem', fontWeight: 'bold', outline: 'none', transition: 'color 0.2s' }}>
+                  {resendCooldown > 0 ? `Resend OTP in ${resendCooldown}s` : 'Resend OTP'}
+                </button>
+              </div>
+              <button type="submit" className="btn btn-block anime-form-item" disabled={loading} style={{ marginTop: '10px' }}>
+                {loading ? 'Verifying...' : 'Verify & Create Account'}
+              </button>
+              <button type="button" className="btn-outline btn btn-block anime-form-item" onClick={() => { setSignupOtpSent(false); setSignupOtp(''); setError(null); }} disabled={loading} style={{ marginTop: '10px' }}>
+                Back to Details
               </button>
             </React.Fragment>
           ) : (
@@ -629,7 +679,7 @@ function Login({ onLoginSuccess, showToast }) {
           )}
 
           <button type="submit" className="btn btn-block anime-form-item" disabled={loading} style={{ marginTop: '10px' }}>
-            {loading ? 'Processing...' : (isLogin ? 'Log In' : 'Sign Up')}
+            {loading ? 'Processing...' : (isLogin ? 'Log In' : 'Send OTP')}
           </button>
             </React.Fragment>
           )}
@@ -643,7 +693,7 @@ function Login({ onLoginSuccess, showToast }) {
           ) : (
             <React.Fragment>
               {isLogin ? "Don't have an account? " : "Already have an account? "}
-              <a href="#!" onClick={(e) => { e.preventDefault(); setIsLogin(!isLogin); setError(null); }} style={{ color: 'var(--primary)', fontWeight: 'bold', textDecoration: 'none' }}>
+              <a href="#!" onClick={(e) => { e.preventDefault(); setIsLogin(!isLogin); setSignupOtpSent(false); setSignupOtp(''); setError(null); }} style={{ color: 'var(--primary)', fontWeight: 'bold', textDecoration: 'none' }}>
                 {isLogin ? 'Sign Up' : 'Log In'}
           </a>
             </React.Fragment>
@@ -670,10 +720,13 @@ function TrackingMap({ origin, destination }) {
       if (!window.L) return false;
 
       if (!mapInstance.current) {
+            const startLat = origin && origin.length === 2 ? origin[1] : 0;
+            const startLng = origin && origin.length === 2 ? origin[0] : 0;
+            
         mapInstance.current = window.L.map(mapRef.current, {
           zoomControl: true,
           attributionControl: false
-        }).setView([origin[1], origin[0]], 14);
+            }).setView([startLat, startLng], 14);
 
         window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
           maxZoom: 19,
@@ -686,17 +739,27 @@ function TrackingMap({ origin, destination }) {
           iconAnchor: [15, 15]
         });
 
-        originMarker.current = window.L.marker([origin[1], origin[0]], { icon: createIcon('C', '#0d9488') }).addTo(mapInstance.current);
-        destMarker.current = window.L.marker([destination[1], destination[0]], { icon: createIcon('E', '#f59e0b') }).addTo(mapInstance.current);
+            originMarker.current = window.L.marker([startLat, startLng], { icon: createIcon('C', '#0d9488') }).addTo(mapInstance.current);
+            
+            const destLat = destination && destination.length === 2 ? destination[1] : 0;
+            const destLng = destination && destination.length === 2 ? destination[0] : 0;
+            destMarker.current = window.L.marker([destLat, destLng], { icon: createIcon('E', '#f59e0b') }).addTo(mapInstance.current);
       }
+
+          // Prevent Leaflet "gray tile" rendering glitch when initialized in a dynamic container
+          setTimeout(() => {
+            if (mapInstance.current) mapInstance.current.invalidateSize();
+          }, 250);
 
       if (origin && origin.length === 2) originMarker.current.setLatLng([origin[1], origin[0]]);
       if (destination && destination.length === 2) destMarker.current.setLatLng([destination[1], destination[0]]);
 
       if (origin && destination && Array.isArray(origin) && Array.isArray(destination) && origin.length === 2 && destination.length === 2 && !boundsSet.current) {
-        const bounds = window.L.latLngBounds([[origin[1], origin[0]], [destination[1], destination[0]]]);
-        mapInstance.current.fitBounds(bounds, { padding: [40, 40] });
-        boundsSet.current = true;
+            if (origin[0] !== 0 && origin[1] !== 0 && destination[0] !== 0 && destination[1] !== 0) {
+              const bounds = window.L.latLngBounds([[origin[1], origin[0]], [destination[1], destination[0]]]);
+              mapInstance.current.fitBounds(bounds, { padding: [40, 40] });
+              boundsSet.current = true;
+            }
       }
       return true;
     };
@@ -1003,8 +1066,7 @@ function CustomerHome({ user, showToast, onEditProfile }) {
       setJobCompleted(false);
       setIsTeamFull(false);
     } catch (error) {
-      showToast(error.message, 'error');
-      showToast(error.message.includes('Network') ? error.message : 'Failed to process payment.', 'error');
+      showToast(error.message || 'Failed to process payment.', 'error');
     } finally {
       if (mounted.current) setIsBooking(false);
     }
@@ -1028,8 +1090,7 @@ function CustomerHome({ user, showToast, onEditProfile }) {
       showToast('Job cancelled successfully.', 'success');
       sendPush('Job Cancelled', 'Your service request has been cancelled.');
     } catch (error) {
-      showToast(error.message, 'error');
-      showToast(error.message.includes('Network') ? error.message : 'Failed to cancel job.', 'error');
+      showToast(error.message || 'Failed to cancel job.', 'error');
     }
   };
 
@@ -1056,6 +1117,7 @@ function CustomerHome({ user, showToast, onEditProfile }) {
           setAddress(`Lat: ${position.coords.latitude.toFixed(4)}, Lng: ${position.coords.longitude.toFixed(4)}`);
           setCoordinates([position.coords.longitude, position.coords.latitude]);
           setIsLocating(false);
+          setShowSuggestions(false);
         },
         (error) => {
           let msg = 'Could not detect your location.';
@@ -1080,8 +1142,7 @@ function CustomerHome({ user, showToast, onEditProfile }) {
       showToast('Job marked as completed. Please rate your experience!', 'success');
       sendPush('Job Completed', 'Thank you for confirming. Don\'t forget to rate!');
     } catch (error) {
-      showToast(error.message, 'error');
-      showToast(error.message.includes('Network') ? error.message : 'Failed to submit rating.', 'error');
+      showToast(error.message || 'Failed to complete job.', 'error');
     }
   };
 
@@ -1111,8 +1172,7 @@ function CustomerHome({ user, showToast, onEditProfile }) {
       setShowRating(false);
       setRating(0);
     } catch (error) {
-      showToast(error.message, 'error');
-      showToast(error.message.includes('Network') ? error.message : 'Failed to complete job.', 'error');
+      showToast(error.message || 'Failed to submit rating.', 'error');
     }
   };
 
@@ -1324,7 +1384,14 @@ Support: projects.nikunj.singh@gmail.com
               {teamStatusMessage && <div style={{ fontSize: '0.9rem', color: 'var(--text-main)', marginTop: '8px' }}>{teamStatusMessage}</div>}
               <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginTop: '12px' }}>
                 Tracking Job ID: <span style={{ fontFamily: 'monospace' }}>{activeJobId}</span>
-                <button onClick={() => { navigator.clipboard.writeText(`Tracking WATTZEN Job: ${activeJobId}`); showToast('Tracking ID copied!', 'success'); }} style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', padding: '4px' }} title="Copy Tracking ID">
+                <button onClick={() => { 
+                  if (navigator.clipboard) {
+                    navigator.clipboard.writeText(`Tracking WATTZEN Job: ${activeJobId}`); 
+                    showToast('Tracking ID copied!', 'success'); 
+                  } else {
+                    showToast('Clipboard access denied by browser.', 'error');
+                  }
+                }} style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', padding: '4px' }} title="Copy Tracking ID">
                   <i className="fas fa-copy"></i>
                 </button>
               </div>
@@ -1891,8 +1958,7 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
         setIsTracking(true);
       }
     } catch (error) {
-      showToast(error.message, 'error');
-      showToast(error.message.includes('Network') ? error.message : 'Failed to accept job.', 'error');
+      showToast(error.message || 'Failed to accept job.', 'error');
       // Remove the failed job from the UI list so they can accept a different one
       setAvailableJobs(prev => prev.filter(j => j._id !== jobId));
       setActiveJobId(null);
@@ -1928,8 +1994,7 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
       sendPush('Withdrawal Requested', 'Your fund withdrawal is pending approval.');
       setWalletBal(0); // Optimistically set to 0
     } catch (error) {
-      showToast(error.message, 'error');
-      showToast(error.message.includes('Network') ? error.message : 'Failed to request withdrawal.', 'error');
+      showToast(error.message || 'Failed to request withdrawal.', 'error');
     }
   };
 
@@ -2002,7 +2067,7 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
               </div>
               <h4>Searching for nearby jobs...</h4>
               {availableJobs.length === 0 ? (
-                <p style={{ color: 'var(--text-muted)' }}>We are matching you with customers within a 10km radius.</p>
+                <p style={{ color: 'var(--text-muted)' }}>We are matching you with customers within a 15km radius.</p>
               ) : (
                 <div style={{ marginTop: '24px', display: 'flex', flexDirection: 'column', gap: '16px', textAlign: 'left' }}>
                   {availableJobs.map(job => (
@@ -2348,16 +2413,17 @@ function AdminPanel({ user, onLogout, showToast }) {
       const csvRows = [headers.join(',')];
       
       jobs.forEach(job => {
-        const customerName = job.customer ? `"${job.customer.name}"` : 'N/A';
-        const customerPhone = job.customer ? `"${job.customer.phone}"` : 'N/A';
+        const escapeCSV = (str) => `"${String(str || '').replace(/"/g, '""')}"`;
+        const customerName = job.customer ? escapeCSV(job.customer.name) : '"N/A"';
+        const customerPhone = job.customer ? escapeCSV(job.customer.phone) : '"N/A"';
         const electricians = job.electricians && job.electricians.length > 0 
-          ? `"${job.electricians.map(e => e?.name || 'Unknown').join(' & ')}"` 
-          : 'None';
-        const completedAt = job.updatedAt || job.createdAt ? new Date(job.updatedAt || job.createdAt).toLocaleString() : 'N/A';
+          ? escapeCSV(job.electricians.map(e => e?.name || 'Unknown').join(' & ')) 
+          : '"None"';
+        const completedAt = escapeCSV(job.updatedAt || job.createdAt ? new Date(job.updatedAt || job.createdAt).toLocaleString() : 'N/A');
         
         const row = [
-          job._id, `"${job.serviceType}"`, `"${job.address}"`, job.estimatedPrice,
-          customerName, customerPhone, electricians, `"${completedAt}"`
+          job._id, escapeCSV(job.serviceType), escapeCSV(job.address), job.estimatedPrice,
+          customerName, customerPhone, electricians, completedAt
         ];
         csvRows.push(row.join(','));
       });
@@ -2411,7 +2477,7 @@ function AdminPanel({ user, onLogout, showToast }) {
       // The WebSocket 'adminRefresh' event will automatically pull the fresh lists
       } catch (e) {
         console.error('Payment approval error:', e); 
-        showToast('Failed to verify payment.', 'error'); 
+        showToast(e.message || 'Failed to verify payment.', 'error'); 
     }
   };
 
@@ -2423,7 +2489,7 @@ function AdminPanel({ user, onLogout, showToast }) {
       // The WebSocket 'adminRefresh' event will automatically pull the fresh lists
       } catch (e) { 
         console.error('Withdrawal error:', e);
-        showToast('Failed to approve withdrawal.', 'error'); 
+        showToast(e.message || 'Failed to approve withdrawal.', 'error'); 
     }
   };
 
@@ -2436,7 +2502,7 @@ function AdminPanel({ user, onLogout, showToast }) {
       // The WebSocket 'adminRefresh' event will automatically pull the fresh lists
     } catch (e) {
       console.error('Withdrawal rejection error:', e);
-      showToast('Failed to reject withdrawal.', 'error');
+      showToast(e.message || 'Failed to reject withdrawal.', 'error');
     }
   };
 
@@ -2532,7 +2598,7 @@ function AdminPanel({ user, onLogout, showToast }) {
       setBroadcastMsg('');
       } catch(e) { 
       console.error('Broadcast error:', e);
-      showToast('Failed to send broadcast.', 'error'); 
+      showToast(e.message || 'Failed to send broadcast.', 'error'); 
     }
   };
 
@@ -2659,7 +2725,7 @@ function AdminPanel({ user, onLogout, showToast }) {
                             <i className="fas fa-clock-rotate-left"></i> Logs
                           </button>
                           {row.role === 'electrician' && (
-                            <button className="btn btn-outline" style={{ padding: '6px 12px', fontSize: '0.8rem', color: 'var(--primary)', borderColor: 'var(--primary)' }} onClick={() => handleReviewDocs(row)}>
+                            <button className="btn btn-outline" style={{ padding: '6px 12px', fontSize: '0.8rem', color: 'var(--primary)', borderColor: 'var(--primary)' }} onClick={() => { handleReviewDocs(row); setNewPasswordInput(''); }}>
                               <i className="fas fa-folder-open"></i> Docs
                             </button>
                           )}
@@ -3043,7 +3109,8 @@ function AppContent() {
   };
 
   const handleProfileUpdate = (updatedUser) => {
-    const userWithRole = { ...updatedUser, role: user.role };
+    // Merge with existing user data to prevent partial API responses from wiping local fields (like walletBalance)
+    const userWithRole = { ...user, ...updatedUser, role: user.role };
     setUser(userWithRole);
     localStorage.setItem('user', JSON.stringify(userWithRole));
   };
