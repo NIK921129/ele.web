@@ -2098,6 +2098,7 @@ function AdminPanel({ user, onLogout, showToast }) {
   const [isDownloading, setIsDownloading] = useState(false);
   const [broadcastMsg, setBroadcastMsg] = useState('');
   const [previewImage, setPreviewImage] = useState(null);
+  const [reviewUser, setReviewUser] = useState(null);
 
   const fetchDashboardData = React.useCallback(async () => {
     try {
@@ -2236,6 +2237,15 @@ function AdminPanel({ user, onLogout, showToast }) {
     }
   };
 
+  const handleReviewDocs = async (row) => {
+    try {
+      const docs = await fetchJson(`/admin/users/${row._id}/docs`);
+      setReviewUser({ ...row, ...docs });
+    } catch (error) {
+      showToast('Failed to load documents', 'error');
+    }
+  };
+
   const handleApproveElectrician = async (id) => {
     try {
       await fetchJson(`/admin/users/${id}/approve`, { method: 'PUT' });
@@ -2359,17 +2369,10 @@ function AdminPanel({ user, onLogout, showToast }) {
                         </span>
                         {row.role === 'electrician' && (
                           <React.Fragment>
-                            {!row.isApproved && (
-                              <div style={{ marginTop: '8px', display: 'flex', gap: '8px' }}>
-                                <button className="btn" style={{ padding: '4px 10px', fontSize: '0.75rem', background: 'var(--primary)' }} onClick={() => handleApproveElectrician(row._id)}>Approve</button>
-                                <button className="btn btn-outline" style={{ padding: '4px 10px', fontSize: '0.75rem', borderColor: 'var(--danger)', color: 'var(--danger)' }} onClick={() => handleRejectElectrician(row._id)}>Reject</button>
-                              </div>
-                            )}
-                            <div style={{ marginTop: '8px', display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
-                              {row.idCardUrl && <button type="button" onClick={() => setPreviewImage({ url: row.idCardUrl, title: `${row.name} - Govt ID` })} style={{ background: 'none', border: 'none', padding: 0, fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 'bold', cursor: 'pointer' }}><i className="fas fa-id-card"></i> Govt ID</button>}
-                              {row.panCardUrl && <button type="button" onClick={() => setPreviewImage({ url: row.panCardUrl, title: `${row.name} - PAN Card` })} style={{ background: 'none', border: 'none', padding: 0, fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 'bold', cursor: 'pointer' }}><i className="fas fa-id-card"></i> PAN</button>}
-                              {row.photoUrl && <button type="button" onClick={() => setPreviewImage({ url: row.photoUrl, title: `${row.name} - Photo` })} style={{ background: 'none', border: 'none', padding: 0, fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 'bold', cursor: 'pointer' }}><i className="fas fa-camera"></i> Photo</button>}
-                              {row.bankDetails && <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }} title={row.bankDetails}><i className="fas fa-building-columns"></i> Bank: {row.bankDetails.length > 15 ? row.bankDetails.substring(0,15) + '...' : row.bankDetails}</span>}
+                            <div style={{ marginTop: '8px' }}>
+                              <button className="btn btn-outline" style={{ padding: '6px 12px', fontSize: '0.8rem', color: 'var(--primary)', borderColor: 'var(--primary)' }} onClick={() => handleReviewDocs(row)}>
+                                <i className="fas fa-folder-open"></i> Review Profile & Docs
+                              </button>
                             </div>
                           </React.Fragment>
                         )}

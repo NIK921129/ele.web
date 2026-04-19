@@ -899,6 +899,7 @@ api.get('/jobs/available', authenticateToken, async (req, res) => {
   try {
     // Electrician Onboarding Gateway Guard
     const u = await User.findById(req.user.userId);
+    if (!u) return res.status(401).json({ message: 'Account deleted or rejected.' });
     if (req.user.role === 'electrician' && (!u.isApproved || !u.safetyDepositPaid)) {
       return res.status(403).json({ message: 'Account onboarding incomplete.' });
     }
@@ -954,6 +955,7 @@ api.put('/jobs/:id/accept', authenticateToken, async (req, res) => {
       
       // Electrician Onboarding Gateway Guard
       const u = await User.findById(req.user.userId);
+      if (!u) return res.status(401).json({ message: 'Account deleted or rejected.' });
       if (!u.isApproved || !u.safetyDepositPaid) {
         return res.status(403).json({ message: 'Account onboarding incomplete.' });
       }
@@ -1168,12 +1170,28 @@ api.get('/admin/users', authenticateToken, async (req, res) => {
     const limit = Math.max(1, Math.min(100, parseInt(req.query.limit) || 50));
     const skip = Math.min((page - 1) * limit, 5000); 
 
-    const users = await User.find({}).select('-password -__v').sort({ createdAt: -1 }).skip(skip).limit(limit);
+    // OOM FIX: Exclude heavy base64 documents from the master list to prevent Vercel 413 Payload Too Large crashes
+    const users = await User.find({}).select('-password -__v -idCardUrl -panCardUrl -photoUrl').sort({ createdAt: -1 }).skip(skip).limit(limit);
 
     res.status(200).json(users);
   } catch (error) {
     console.error('Error fetching users for admin:', error);
     res.status(500).json({ message: 'Internal server error while fetching users' });
+  }
+});
+
+// GET /api/admin/users/:id/docs - Fetch heavy base64 documents for a specific user
+api.get('/admin/users/:id/docs', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ message: 'Invalid User ID format' });
+    
+    const userDocs = await User.findById(req.params.id).select('idCardUrl panCardUrl photoUrl bankDetails');
+    if (!userDocs) return res.status(404).json({ message: 'User not found' });
+    
+    res.status(200).json(userDocs);
+  } catch (error) {
+    res.status(500).json({ message: 'Error fetching user documents' });
   }
 });
 
@@ -1187,6 +1205,7 @@ api.put('/admin/users/:id/approve', authenticateToken, async (req, res) => {
     if (!user) return res.status(404).json({ message: 'User not found' });
     
     io.emit('adminRefresh');
+    io.emit('accountApproved', user._id); // Broadcast approval to unlock electrician's app instantly
     res.status(200).json({ message: 'Electrician approved successfully', user });
   } catch (error) {
     res.status(500).json({ message: 'Error approving electrician' });
