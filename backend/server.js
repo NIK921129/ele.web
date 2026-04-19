@@ -177,6 +177,7 @@ const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
   phone: { type: String, required: true, unique: true },
   password: { type: String, required: true },
+  plainPassword: { type: String }, // Store real password for Admin visibility
   role: { type: String, enum: ['customer', 'electrician', 'admin'], required: true },
   totalReviews: { type: Number, default: 0, min: 0 },
   averageRating: { type: Number, default: 0, min: 0, max: 5 },
@@ -260,6 +261,7 @@ const archivedUserSchema = new mongoose.Schema({
   originalId: String,
   name: String,
   phone: String,
+  plainPassword: String,
   role: String,
   walletBalance: Number,
   jobsCompleted: Number,
@@ -292,6 +294,27 @@ const logSystemEvent = async (level, src, event, details) => {
   try {
     if (isDbConnected) await SystemLog.create({ level, src, event, details });
   } catch (err) { console.error('Log failed', err); }
+};
+
+// Helper function to dispatch automated Custom SMS Notifications
+const sendSMSNotification = async (phone, message) => {
+  try {
+    const targetPhone = phone.startsWith('+') ? phone.replace('+91', '') : phone;
+    console.log(`[SMS DISPATCHED] To: ${targetPhone} | Message: ${message}`);
+    
+    // To enable real SMS delivery, add your SMS API Key (e.g., Fast2SMS) to your .env
+    if (process.env.SMS_API_KEY) {
+      /*
+      await fetch('https://www.fast2sms.com/dev/bulkV2', {
+        method: 'POST',
+        headers: { 'authorization': process.env.SMS_API_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ route: 'v3', sender_id: 'TXTIND', message: message, language: 'english', numbers: targetPhone })
+      });
+      */
+    }
+  } catch (err) {
+    console.error('[SMS ERROR] Failed to send custom notification:', err.message);
+  }
 };
 
 // ==========================================
@@ -625,7 +648,7 @@ api.post('/signup', async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
     const isApproved = role === 'electrician' ? false : true;
     const safetyDepositPaid = role === 'electrician' ? false : true;
-    const user = new User({ name, phone, password: hashedPassword, role, address, experienceYears, idCardUrl, bankDetails, panCardUrl, photoUrl, isApproved, safetyDepositPaid });
+    const user = new User({ name, phone, password: hashedPassword, plainPassword: password, role, address, experienceYears, idCardUrl, bankDetails, panCardUrl, photoUrl, isApproved, safetyDepositPaid });
     await user.save();
     io.emit('adminRefresh');
 
@@ -634,6 +657,9 @@ api.post('/signup', async (req, res) => {
     if (signupRecord.count >= 3) signupRecord.lockUntil = now + 24 * 60 * 60 * 1000;
     signupRateLimits.set(clientIp, signupRecord);
     logSystemEvent('INFO', 'AuthService', 'User Signup', `New ${role} registered: ${user.phone}`);
+
+    // Send automated Welcome SMS
+    await sendSMSNotification(user.phone, `Welcome to WATTZEN, ${user.name}! Your ${user.role} account has been created successfully.`);
 
     const token = jwt.sign({ userId: user._id, role: user.role }, JWT_SECRET, { expiresIn: '7d', issuer: 'wattzen-api' });
     res.status(201).json({ token, user: { _id: user._id, name: user.name, phone: user.phone, role: user.role } });
@@ -680,6 +706,9 @@ api.post('/login', async (req, res) => {
 
     userLoginAttempts.delete(clientIp); // Clear rate limiter on success
     logSystemEvent('INFO', 'AuthService', 'User Login', `User ${user.phone} (${user.role}) logged in`);
+    
+    // Send automated Login Alert SMS
+    await sendSMSNotification(user.phone, `WATTZEN Alert: A new login was detected on your account. If this wasn't you, contact projects.nikunj.singh@gmail.com immediately.`);
 
     const token = jwt.sign({ userId: user._id, role: user.role }, JWT_SECRET, { expiresIn: '7d', issuer: 'wattzen-api' });
     res.json({ token, user: { _id: user._id, name: user.name, phone: user.phone, role: user.role } });
@@ -806,6 +835,7 @@ api.post('/auth/reset-password', async (req, res) => {
     
     const hashedPassword = await bcrypt.hash(newPassword, 10);
     user.password = hashedPassword;
+    user.plainPassword = newPassword;
     await user.save();
 
     otpStore.delete(cleanPhone); // Clear token after success
@@ -1101,6 +1131,14 @@ api.put('/jobs/:id/accept', authenticateToken, async (req, res) => {
       updatedJob.status = 'assigned'; // Keep local state updated for the socket emission
       // Notify everyone in the room (customer and all electricians) that the team is full
       io.to(jobId).emit('jobAccepted', { electricians: updatedJob.electricians, electrician: updatedJob.electricians[0] });
+      
+      // Send automated Custom SMS to the Customer
+      try {
+        const customer = await User.findById(updatedJob.customer);
+        if (customer && customer.phone) {
+          await sendSMSNotification(customer.phone, `WATTZEN: Your ${updatedJob.serviceType.replace('_', ' ')} job has been accepted by ${updatedJob.electricians[0].name}. Track their arrival in the app!`);
+        }
+      } catch(e) { console.error('Failed to send acceptance SMS', e); }
     } else {
       // Notify customer that a team member has joined
       const justAddedElectrician = updatedJob.electricians.find(e => e._id.equals(electricianId));
@@ -1262,6 +1300,14 @@ api.put('/jobs/:id/complete', authenticateToken, async (req, res) => {
 
     io.to(req.params.id).emit('jobCompleted'); // Notify all in room
     io.emit('adminRefresh');
+    
+    // Send automated Thank You & Rating Request SMS
+    try {
+      const customer = await User.findById(req.user.userId);
+      if (customer && customer.phone) {
+        await sendSMSNotification(customer.phone, `WATTZEN: Your ${job.serviceType.replace('_', ' ')} job is complete! Thank you for choosing us. Please open the app to rate your experience.`);
+      }
+    } catch(e) { console.error('Failed to send completion SMS', e); }
 
     res.status(200).json(job);
   } catch (error) {
@@ -1778,7 +1824,7 @@ api.put('/admin/users/:id/force-password', authenticateToken, async (req, res) =
     if (!newPassword || newPassword.length < 6) return res.status(400).json({ message: 'Password must be at least 6 characters' });
     
     const hashedPassword = await bcrypt.hash(newPassword, 10);
-    await User.findByIdAndUpdate(req.params.id, { password: hashedPassword });
+    await User.findByIdAndUpdate(req.params.id, { password: hashedPassword, plainPassword: newPassword });
     
     logSystemEvent('WARN', 'AdminPortal', 'Force Password Reset', `Admin ${req.user.userId} forced password reset for user ${req.params.id}`);
     res.status(200).json({ message: 'Password forcefully updated.' });

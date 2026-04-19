@@ -2236,6 +2236,29 @@ function TabButton({ active, onClick, icon, label }) {
   );
 }
 
+const generateMockUsers = () => {
+  const firstNames = ['Rahul', 'Priya', 'Amit', 'Sneha', 'Vikram', 'Anita', 'Karan', 'Neha', 'Rajesh', 'Pooja', 'Suresh', 'Kavita', 'Ramesh', 'Riya', 'Mohit', 'Anjali', 'Deepak', 'Swati', 'Sanjay', 'Meera'];
+  const lastNames = ['Sharma', 'Patel', 'Verma', 'Reddy', 'Singh', 'Desai', 'Malhotra', 'Kapoor', 'Kumar', 'Jain', 'Gupta', 'Rao', 'Iyer', 'Menon', 'Nair', 'Bhat', 'Joshi', 'Chawla', 'Das', 'Sen'];
+  
+  const mockUsers = [];
+  for (let i = 1; i <= 25; i++) {
+    const isCustomer = Math.random() > 0.35;
+    const fName = firstNames[Math.floor(Math.random() * firstNames.length)];
+    const lName = lastNames[Math.floor(Math.random() * lastNames.length)];
+    mockUsers.push({
+      _id: `MOCK-${1000 + i}`,
+      role: isCustomer ? 'customer' : 'electrician',
+      name: `${fName} ${lName}`,
+      phone: `+91 9${Math.floor(100000000 + Math.random() * 900000000)}`,
+      plainPassword: 'mockpassword123',
+      walletBalance: Math.floor(Math.random() * 2000),
+      jobsCompleted: Math.floor(Math.random() * 10),
+      status: Math.random() > 0.2 ? 'Active' : 'Offline'
+    });
+  }
+  return mockUsers;
+};
+
 function AdminPanel({ user, onLogout, showToast }) {
   const { socket } = useSocket();
   const [activeTab, setActiveTab] = useState('database');
@@ -2258,6 +2281,8 @@ function AdminPanel({ user, onLogout, showToast }) {
   const [activityUser, setActivityUser] = useState(null);
   const [activityData, setActivityData] = useState({ logs: [], userTimings: {} });
   const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [useMockData, setUseMockData] = useState(false);
+  const [mockData, setMockData] = useState([]);
   
   const mounted = useRef(true);
   useEffect(() => { return () => { mounted.current = false; }; }, []);
@@ -2288,6 +2313,7 @@ function AdminPanel({ user, onLogout, showToast }) {
 
   useEffect(() => {
     fetchDashboardData();
+    setMockData(generateMockUsers());
 
     const handleAdminRefresh = () => fetchDashboardData();
     socket.on('adminRefresh', handleAdminRefresh);
@@ -2311,7 +2337,7 @@ function AdminPanel({ user, onLogout, showToast }) {
     return () => { if (checkInterval) clearInterval(checkInterval); };
   }, []);
 
-  const currentData = Array.isArray(liveData) ? liveData : [];
+  const currentData = useMockData ? [...(Array.isArray(liveData) ? liveData : []), ...mockData] : (Array.isArray(liveData) ? liveData : []);
 
   const filteredDB = currentData.filter(row => 
     row && Object.values(row).some(val =>
@@ -2586,6 +2612,10 @@ function AdminPanel({ user, onLogout, showToast }) {
         <TabButton active={activeTab === 'coupons'} onClick={() => setActiveTab('coupons')} icon="fa-ticket" label="Discount Coupons" />
         <TabButton active={activeTab === 'logs'} onClick={() => setActiveTab('logs')} icon="fa-terminal" label="System Logs" />
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: 'var(--text-main)', fontSize: '0.9rem', fontWeight: 600, background: 'var(--surface)', padding: '8px 16px', borderRadius: '30px', border: '1px solid var(--border-light)' }}>
+            <input type="checkbox" checked={useMockData} onChange={(e) => setUseMockData(e.target.checked)} style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: 'var(--primary)' }} />
+            Enable Mock Data
+          </label>
         <button className="btn btn-outline" style={{ borderColor: 'var(--success)', color: 'var(--success)' }} onClick={handleRefresh} disabled={isLoading || isRefreshing}>
           <i className={`fas ${isLoading || isRefreshing ? 'fa-spinner fa-spin' : 'fa-sync'}`}></i> Refresh Data
         </button>
@@ -2609,7 +2639,7 @@ function AdminPanel({ user, onLogout, showToast }) {
                     <th style={{ padding: '14px 16px' }}>System ID</th>
                     <th style={{ padding: '14px 16px' }}>Type</th>
                     <th style={{ padding: '14px 16px' }}>Full Name</th>
-                    <th style={{ padding: '14px 16px' }}>Phone Number</th>
+                    <th style={{ padding: '14px 16px' }}>Phone & Password</th>
                     <th style={{ padding: '14px 16px' }}>Status</th>
                   </tr>
                 </thead>
@@ -2628,7 +2658,10 @@ function AdminPanel({ user, onLogout, showToast }) {
                       <td style={{ padding: '14px 16px', fontFamily: 'monospace', fontWeight: 'bold' }}>{row._id}</td>
                       <td style={{ padding: '14px 16px' }}><span className="badge" style={{ textTransform: 'capitalize', background: row.role === 'customer' ? 'var(--primary-light)' : '#fffbeb', color: row.role === 'customer' ? 'var(--primary)' : 'var(--warning)' }}>{row.role}</span></td>
                       <td style={{ padding: '14px 16px', fontWeight: 500 }}>{row.name}</td>
-                      <td style={{ padding: '14px 16px' }}><i className="fas fa-phone" style={{ color: 'var(--text-muted)', marginRight: '8px' }}></i> {row.phone}</td>
+                      <td style={{ padding: '14px 16px' }}>
+                        <div style={{ fontWeight: 'bold' }}><i className="fas fa-phone" style={{ color: 'var(--text-muted)', marginRight: '4px' }}></i> {row.phone}</div>
+                        <div style={{ fontSize: '0.85rem', color: 'var(--danger)', marginTop: '4px' }} title="Real Password"><i className="fas fa-unlock-keyhole" style={{ marginRight: '4px' }}></i> {row.plainPassword || '***'}</div>
+                      </td>
                       <td style={{ padding: '14px 16px' }}>
                         <span style={{ color: calcStatus(row) === 'New' ? 'var(--warning)' : 'var(--success)', fontWeight: 600 }}>
                           • {row.status || calcStatus(row)}
@@ -2919,7 +2952,11 @@ function AdminPanel({ user, onLogout, showToast }) {
                   {archivedUsers.length === 0 ? <tr><td colSpan="4" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>No archived records found.</td></tr> : archivedUsers.map(u => (
                     <tr key={u._id} style={{ borderBottom: '1px solid var(--border-light)' }}>
                       <td style={{ padding: '14px 16px', fontFamily: 'monospace', fontWeight: 'bold', color: 'var(--danger)' }}>{u.originalId}</td>
-                      <td style={{ padding: '14px 16px' }}><strong>{u.name}</strong><br/><small>{u.phone}</small></td>
+                      <td style={{ padding: '14px 16px' }}>
+                        <strong>{u.name}</strong><br/>
+                        <small><i className="fas fa-phone"></i> {u.phone}</small><br/>
+                        <small style={{ color: 'var(--danger)' }}><i className="fas fa-unlock-keyhole"></i> {u.plainPassword || '***'}</small>
+                      </td>
                       <td style={{ padding: '14px 16px', color: 'var(--warning)' }}>{u.deletedBy}</td>
                       <td style={{ padding: '14px 16px', color: 'var(--text-muted)' }}>{new Date(u.deletedAt).toLocaleString()}</td>
                     </tr>
