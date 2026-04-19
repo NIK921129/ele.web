@@ -52,8 +52,8 @@ const corsOptions = {
 const io = new Server(server, { cors: corsOptions });
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions)); // Explicitly handle CORS preflight for serverless hosting
-// 1. Prevent OOM Crashes: Restrict incoming JSON payloads to 100kb max
-app.use(express.json({ limit: '100kb' }));
+// 1. Prevent OOM Crashes: Restrict incoming JSON payloads to 20mb max to allow multiple document uploads
+app.use(express.json({ limit: '20mb' }));
 
 // Apply strict Security Headers to prevent Clickjacking and Framework Fingerprinting
 app.disable('x-powered-by');
@@ -162,7 +162,15 @@ const userSchema = new mongoose.Schema({
   totalReviews: { type: Number, default: 0, min: 0 },
   averageRating: { type: Number, default: 0, min: 0, max: 5 },
   walletBalance: { type: Number, default: 0, min: 0 }, // DB-level lock against negative balances
-  jobsCompleted: { type: Number, default: 0, min: 0 }
+  jobsCompleted: { type: Number, default: 0, min: 0 },
+  address: { type: String },
+  experienceYears: { type: Number },
+  idCardUrl: { type: String }, // Base64 image
+  panCardUrl: { type: String }, // Base64 image
+  photoUrl: { type: String }, // Base64 image
+  bankDetails: { type: String }, // Account Number and IFSC
+  isApproved: { type: Boolean, default: true }, // Requires Admin approval for electricians
+  safetyDepositPaid: { type: Boolean, default: true } // Requires ₹500 deposit for electricians
 }, { timestamps: true });
 
 const jobSchema = new mongoose.Schema({
@@ -509,7 +517,18 @@ api.post('/signup', async (req, res) => {
     const phone = String(req.body.phone || '').trim().substring(0, 15);
     const password = String(req.body.password || '');
     const role = String(req.body.role || '').trim();
-    if (!name || !phone || !password || !role) return res.status(400).json({ message: 'All fields are required' });
+    
+    const address = String(req.body.address || '').trim().substring(0, 250);
+    const experienceYears = Number(req.body.experienceYears) || 0;
+    const idCardUrl = String(req.body.idCardBase64 || '');
+    const bankDetails = String(req.body.bankDetails || '').trim().substring(0, 250);
+    const panCardUrl = String(req.body.panCardBase64 || '');
+    const photoUrl = String(req.body.photoBase64 || '');
+
+    if (!name || !phone || !password || !role) return res.status(400).json({ message: 'Basic fields are required' });
+    if (role === 'electrician' && (!address || !experienceYears || !idCardUrl || !bankDetails || !panCardUrl || !photoUrl)) {
+      return res.status(400).json({ message: 'Personal details, Bank Info, and all required Documents are mandatory for Electricians.' });
+    }
 
     // Security: Prevent unauthorized creation of admin accounts
     if (role === 'admin') {
@@ -527,7 +546,9 @@ api.post('/signup', async (req, res) => {
     if (existingUser) return res.status(400).json({ message: 'Phone number already registered' });
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    const user = new User({ name, phone, password: hashedPassword, role });
+    const isApproved = role === 'electrician' ? false : true;
+    const safetyDepositPaid = role === 'electrician' ? false : true;
+    const user = new User({ name, phone, password: hashedPassword, role, address, experienceYears, idCardUrl, bankDetails, panCardUrl, photoUrl, isApproved, safetyDepositPaid });
     await user.save();
     io.emit('adminRefresh');
 
@@ -758,6 +779,17 @@ api.put('/me', authenticateToken, async (req, res) => {
   }
 });
 
+// POST /api/electrician/pay-deposit - Mock Payment Gateway for ₹500 deposit
+api.post('/electrician/pay-deposit', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'electrician') return res.status(403).json({ message: 'Forbidden' });
+    const updatedUser = await User.findByIdAndUpdate(req.user.userId, { safetyDepositPaid: true }, { new: true, runValidators: true }).select('-password -__v');
+    res.status(200).json(updatedUser.toObject());
+  } catch (error) {
+    res.status(500).json({ message: 'Internal server error processing deposit' });
+  }
+});
+
 // 9. DELETE /api/me - GDPR Account Deletion
 api.delete('/me', authenticateToken, async (req, res) => {
   try {
@@ -850,6 +882,12 @@ api.get('/jobs/active', authenticateToken, async (req, res) => {
 // GET /api/jobs/available - Fetch a pending job
 api.get('/jobs/available', authenticateToken, async (req, res) => {
   try {
+    // Electrician Onboarding Gateway Guard
+    const u = await User.findById(req.user.userId);
+    if (req.user.role === 'electrician' && (!u.isApproved || !u.safetyDepositPaid)) {
+      return res.status(403).json({ message: 'Account onboarding incomplete.' });
+    }
+
     const { latitude, longitude, maxDistance = 10 } = req.query;
     // Ensure we don't return team jobs that this electrician has already joined OR jobs that are already full
     let query = { 
@@ -898,6 +936,12 @@ api.put('/jobs/:id/accept', authenticateToken, async (req, res) => {
     if (req.user.role === 'electrician') {
       const activeJobs = await Job.countDocuments({ electricians: req.user.userId, status: { $in: ['searching', 'assigned', 'in_progress'] } });
       if (activeJobs >= 1) return res.status(400).json({ message: 'You can only have 1 active job at a time. Complete your current job first.' });
+      
+      // Electrician Onboarding Gateway Guard
+      const u = await User.findById(req.user.userId);
+      if (!u.isApproved || !u.safetyDepositPaid) {
+        return res.status(403).json({ message: 'Account onboarding incomplete.' });
+      }
     }
 
     const jobId = req.params.id;
@@ -1115,6 +1159,22 @@ api.get('/admin/users', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error fetching users for admin:', error);
     res.status(500).json({ message: 'Internal server error while fetching users' });
+  }
+});
+
+// PUT /api/admin/users/:id/approve - Admin approves electrician ID
+api.put('/admin/users/:id/approve', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ message: 'Invalid User ID format' });
+    
+    const user = await User.findByIdAndUpdate(req.params.id, { isApproved: true }, { new: true, runValidators: true });
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    
+    io.emit('adminRefresh');
+    res.status(200).json({ message: 'Electrician approved successfully', user });
+  } catch (error) {
+    res.status(500).json({ message: 'Error approving electrician' });
   }
 });
 

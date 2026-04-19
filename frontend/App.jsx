@@ -352,16 +352,36 @@ function Login({ onLoginSuccess, showToast }) {
   const [error, setError] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
+  
+  // Electrician Onboarding Fields
+  const [address, setAddress] = useState('');
+  const [experienceYears, setExperienceYears] = useState('');
+  const [idCardBase64, setIdCardBase64] = useState('');
+  const [bankDetails, setBankDetails] = useState('');
+  const [panCardBase64, setPanCardBase64] = useState('');
+  const [photoBase64, setPhotoBase64] = useState('');
+
+  const handleDocUpload = (e, setter) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) return showToast('File must be less than 5MB', 'error');
+    const reader = new FileReader();
+    reader.onload = (ev) => setter(ev.target.result);
+    reader.readAsDataURL(file);
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!isLogin && role === 'electrician' && (!idCardBase64 || !address || !experienceYears || !bankDetails || !panCardBase64 || !photoBase64)) {
+      return setError('Please fill in all details, bank info, and upload all required documents.');
+    }
     setLoading(true);
     setError(null);
     try {
       const endpoint = isLogin ? '/login' : '/signup';
       const body = isLogin 
         ? { phone, password, role } 
-        : { name, phone, password, role };
+        : { name, phone, password, role, address, experienceYears, idCardBase64, bankDetails, panCardBase64, photoBase64 };
 
       const userData = await fetchJson(endpoint, {
         method: 'POST',
@@ -475,17 +495,23 @@ function Login({ onLoginSuccess, showToast }) {
               <div className="form-group anime-form-item">
                 <label>Phone Number</label>
                 <input type="tel" className="form-control" value={phone} onChange={e => setPhone(e.target.value.replace(/\D/g, ''))} pattern="[0-9]{10}" maxLength="10" required placeholder="1234567890" disabled={otpSent} />
+                <label htmlFor="forgotPhone">Phone Number</label>
+                <input type="tel" id="forgotPhone" name="phone" className="form-control" value={phone} onChange={e => setPhone(e.target.value.replace(/\D/g, ''))} pattern="[0-9]{10}" maxLength="10" required placeholder="1234567890" disabled={otpSent} />
               </div>
               {otpSent && (
                 <React.Fragment>
                   <div className="form-group anime-form-item">
                     <label>4-Digit OTP</label>
                     <input type="text" className="form-control" value={otp} onChange={e => setOtp(e.target.value)} required placeholder="1234" maxLength={4} style={{ letterSpacing: '4px', fontSize: '1.2rem', fontWeight: 'bold' }} />
+                    <label htmlFor="resetOtp">4-Digit OTP</label>
+                    <input type="text" id="resetOtp" name="otp" className="form-control" value={otp} onChange={e => setOtp(e.target.value)} required placeholder="1234" maxLength={4} style={{ letterSpacing: '4px', fontSize: '1.2rem', fontWeight: 'bold' }} />
                   </div>
                   <div className="form-group anime-form-item">
                     <label>New Password</label>
+                    <label htmlFor="resetNewPassword">New Password</label>
                     <div className="input-icon-wrapper">
                       <input type={showPassword ? "text" : "password"} className="form-control" value={newPassword} onChange={e => setNewPassword(e.target.value)} required placeholder="••••••••" />
+                      <input type={showPassword ? "text" : "password"} id="resetNewPassword" name="newPassword" className="form-control" value={newPassword} onChange={e => setNewPassword(e.target.value)} required placeholder="••••••••" />
                     <i className={`fas ${showPassword ? 'fa-eye-slash' : 'fa-eye'} action-icon`} role="button" tabIndex="0" aria-label="Toggle password visibility" onClick={() => setShowPassword(!showPassword)} onKeyDown={(e) => { if(e.key === 'Enter' || e.key === ' ') setShowPassword(!showPassword); }}></i>
                     </div>
                   </div>
@@ -506,16 +532,46 @@ function Login({ onLoginSuccess, showToast }) {
             <div className="form-group anime-form-item">
               <label>Full Name</label>
               <input type="text" className="form-control" value={name} onChange={e => setName(e.target.value)} required placeholder="John Doe" maxLength="50" />
+              <label htmlFor="signupName">Full Name</label>
+              <input type="text" id="signupName" name="name" className="form-control" value={name} onChange={e => setName(e.target.value)} required placeholder="John Doe" maxLength="50" />
             </div>
           )}
           <div className="form-group anime-form-item">
             <label>Phone Number</label>
             <input type="tel" className="form-control" value={phone} onChange={e => setPhone(e.target.value.replace(/\D/g, ''))} pattern="[0-9]{10}" maxLength="10" required placeholder="1234567890" />
+            <label htmlFor="loginPhone">Phone Number</label>
+            <input type="tel" id="loginPhone" name="phone" className="form-control" value={phone} onChange={e => setPhone(e.target.value.replace(/\D/g, ''))} pattern="[0-9]{10}" maxLength="10" required placeholder="1234567890" />
           </div>
+          
+          {!isLogin && role === 'electrician' && (
+            <div style={{ background: 'var(--secondary)', padding: '16px', borderRadius: '12px', border: '1px dashed var(--primary)', marginBottom: '16px' }}>
+              <div className="form-group anime-form-item"><label>Home Address</label><input type="text" className="form-control" value={address} onChange={e => setAddress(e.target.value)} required placeholder="123 Main St, City" maxLength="250" /></div>
+              <div className="form-group anime-form-item"><label>Years of Experience</label><input type="number" className="form-control" value={experienceYears} onChange={e => setExperienceYears(e.target.value)} required min="0" max="50" placeholder="e.g. 5" /></div>
+              <div className="form-group anime-form-item"><label>Bank Details (Acc No & IFSC)</label><input type="text" className="form-control" value={bankDetails} onChange={e => setBankDetails(e.target.value)} required placeholder="Acc: 123456789, IFSC: ABCD0123456" maxLength="250" /></div>
+              <div className="form-group anime-form-item">
+                <label>Upload Govt ID (Aadhar)</label>
+                <input type="file" accept="image/*" onChange={(e) => handleDocUpload(e, setIdCardBase64)} required className="form-control" style={{ padding: '8px', background: 'var(--surface)' }} />
+                {idCardBase64 && <div style={{ marginTop: '8px', color: 'var(--success)', fontSize: '0.8rem' }}><i className="fas fa-check-circle"></i> Govt ID uploaded successfully</div>}
+              </div>
+              <div className="form-group anime-form-item">
+                <label>Upload PAN Card</label>
+                <input type="file" accept="image/*" onChange={(e) => handleDocUpload(e, setPanCardBase64)} required className="form-control" style={{ padding: '8px', background: 'var(--surface)' }} />
+                {panCardBase64 && <div style={{ marginTop: '8px', color: 'var(--success)', fontSize: '0.8rem' }}><i className="fas fa-check-circle"></i> PAN uploaded successfully</div>}
+              </div>
+              <div className="form-group anime-form-item" style={{ marginBottom: 0 }}>
+                <label>Upload Personal Photo</label>
+                <input type="file" accept="image/*" onChange={(e) => handleDocUpload(e, setPhotoBase64)} required className="form-control" style={{ padding: '8px', background: 'var(--surface)' }} />
+                {photoBase64 && <div style={{ marginTop: '8px', color: 'var(--success)', fontSize: '0.8rem' }}><i className="fas fa-check-circle"></i> Photo uploaded successfully</div>}
+              </div>
+            </div>
+          )}
+
           <div className="form-group anime-form-item">
             <label>Password</label>
+            <label htmlFor="loginPassword">Password</label>
             <div className="input-icon-wrapper">
               <input type={showPassword ? "text" : "password"} className="form-control" value={password} onChange={e => setPassword(e.target.value)} required placeholder="••••••••" />
+              <input type={showPassword ? "text" : "password"} id="loginPassword" name="password" className="form-control" value={password} onChange={e => setPassword(e.target.value)} required placeholder="••••••••" />
             <i className={`fas ${showPassword ? 'fa-eye-slash' : 'fa-eye'} action-icon`} role="button" tabIndex="0" aria-label="Toggle password visibility" onClick={() => setShowPassword(!showPassword)} onKeyDown={(e) => { if(e.key === 'Enter' || e.key === ' ') setShowPassword(!showPassword); }}></i>
             </div>
           </div>
@@ -1258,6 +1314,7 @@ function CustomerHome({ user, showToast, onEditProfile }) {
 
 // --- Electrician Dashboard Component ---
 function ElectricianHome({ user, showToast, onEditProfile }) {
+function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
   const { socket } = useSocket();
   const [isOnline, setIsOnline] = useState(false);
   const [isTracking, setIsTracking] = useState(false);
@@ -1286,6 +1343,17 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
   const isTeamWaiting = isTeamJob && jobStatus === 'searching' && currentTeamSize < teamSize;
   const isJobActive = jobStatus === 'assigned' || jobStatus === 'in_progress';
   const hasArrived = isJobActive && !isTracking; // Simplified logic for arrival
+
+  const handlePayDeposit = async () => {
+    try {
+      const res = await fetchJson('/electrician/pay-deposit', { method: 'POST' });
+      onUpdateUser(res);
+      showToast('Safety deposit paid successfully!', 'success');
+      sendPush('Deposit Confirmed', 'Your safety deposit has been received.');
+    } catch(e) {
+      showToast(e.message, 'error');
+    }
+  };
 
   // Restore Active Job and Chat History on Page Refresh
   useEffect(() => {
@@ -1425,6 +1493,7 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
     let pollInterval;
     let isMounted = true;
     if (isOnline && !currentJob) {
+    if (isOnline && !currentJob && user?.isApproved && user?.safetyDepositPaid) {
       const checkJobs = async () => {
         try {
           const coords = realCoordsRef.current;
@@ -1649,6 +1718,26 @@ function ElectricianHome({ user, showToast, onEditProfile }) {
       showToast(error.message.includes('Network') ? error.message : 'Failed to request withdrawal.', 'error');
     }
   };
+
+  if (!user?.safetyDepositPaid) {
+    return (
+      <div className="card" style={{ textAlign: 'center', padding: '60px 20px', maxWidth: '500px', margin: '40px auto' }}>
+        <i className="fas fa-shield-halved fa-4x" style={{ color: 'var(--warning)', marginBottom: '24px' }}></i>
+        <h2 style={{ marginBottom: '12px' }}>Safety Deposit Required</h2>
+        <p style={{ color: 'var(--text-muted)', marginBottom: '24px' }}>To maintain trust and quality on our platform, all electricians must pay a fully refundable ₹500 safety deposit before accepting jobs.</p>
+        <button className="btn btn-block" onClick={handlePayDeposit}><i className="fas fa-qrcode" style={{ marginRight: '8px' }}></i> Pay ₹500 via UPI</button>
+      </div>
+    );
+  }
+  if (!user?.isApproved) {
+    return (
+       <div className="card" style={{ textAlign: 'center', padding: '60px 20px', maxWidth: '500px', margin: '40px auto' }}>
+        <i className="fas fa-clock-rotate-left fa-4x" style={{ color: 'var(--primary)', marginBottom: '24px' }}></i>
+        <h2 style={{ marginBottom: '12px' }}>Verification Pending</h2>
+        <p style={{ color: 'var(--text-muted)', marginBottom: '24px' }}>Your documents and personal details have been submitted securely. Please wait while a Master Admin reviews and approves your account.</p>
+      </div>
+    )
+  }
 
   return (
     <div className="dashboard-grid">
@@ -2110,6 +2199,16 @@ function AdminPanel({ user, onLogout, showToast }) {
     }
   };
 
+  const handleApproveElectrician = async (id) => {
+    try {
+      await fetchJson(`/admin/users/${id}/approve`, { method: 'PUT' });
+      showToast('Electrician approved and verified', 'success');
+      fetchDashboardData();
+    } catch(e) {
+      showToast('Failed to approve electrician', 'error');
+    }
+  };
+
   const handleBroadcast = async () => {
     if(!broadcastMsg.trim()) return;
     try {
@@ -2144,6 +2243,7 @@ function AdminPanel({ user, onLogout, showToast }) {
 
       <div style={{ display: 'flex', gap: '10px', marginBottom: '24px' }}>
         <input type="text" id="adminBroadcast" name="broadcastMsg" value={broadcastMsg} onChange={e => setBroadcastMsg(e.target.value)} placeholder="Type a system-wide broadcast message..." className="form-control" style={{ margin: 0, flex: 1 }} maxLength="1000" />
+        <input type="text" value={broadcastMsg} onChange={e => setBroadcastMsg(e.target.value)} placeholder="Type a system-wide broadcast message..." className="form-control" style={{ margin: 0, flex: 1 }} maxLength="1000" />
         <button className="btn" style={{ background: 'var(--warning)' }} onClick={handleBroadcast}><i className="fas fa-bullhorn"></i> Send Broadcast</button>
       </div>
 
@@ -2161,6 +2261,8 @@ function AdminPanel({ user, onLogout, showToast }) {
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
           <label htmlFor="demoMode" style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: 'var(--text-main)', fontSize: '0.9rem', fontWeight: 600, background: 'var(--surface)', padding: '8px 16px', borderRadius: '30px', border: '1px solid var(--border-light)' }}>
             <input type="checkbox" id="demoMode" name="demoMode" checked={useMockData} onChange={(e) => setUseMockData(e.target.checked)} style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: 'var(--primary)' }} />
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: 'var(--text-main)', fontSize: '0.9rem', fontWeight: 600, background: 'var(--surface)', padding: '8px 16px', borderRadius: '30px', border: '1px solid var(--border-light)' }}>
+            <input type="checkbox" checked={useMockData} onChange={(e) => setUseMockData(e.target.checked)} style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: 'var(--primary)' }} />
             Demo Mode
           </label>
         <button className="btn btn-outline" style={{ borderColor: 'var(--success)', color: 'var(--success)' }} onClick={fetchDashboardData} disabled={isLoading}>
@@ -2178,6 +2280,7 @@ function AdminPanel({ user, onLogout, showToast }) {
             <div style={{ padding: '16px', borderBottom: '1px solid var(--border-light)', display: 'flex', flexWrap: 'wrap', gap: '12px', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ margin: 0 }}><i className="fas fa-table" style={{ color: 'var(--primary)' }}></i> Master Records</h3>
             <input type="text" id="adminSearch" name="searchTerm" aria-label="Search records" placeholder="Search IDs, Names, Locations..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{ padding: '8px 16px', borderRadius: '20px', border: '1px solid var(--border-light)', width: '100%', maxWidth: '300px', outline: 'none' }} />
+              <input type="text" aria-label="Search records" placeholder="Search IDs, Names, Locations..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{ padding: '8px 16px', borderRadius: '20px', border: '1px solid var(--border-light)', width: '100%', maxWidth: '300px', outline: 'none' }} />
             </div>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem', textAlign: 'left' }}>
@@ -2209,7 +2312,20 @@ function AdminPanel({ user, onLogout, showToast }) {
                       <td style={{ padding: '14px 16px' }}>
                           <span style={{ color: calcStatus(row) === 'New' ? 'var(--warning)' : 'var(--success)', fontWeight: 600 }}>
                             • {row.status || calcStatus(row)}
+                        <span style={{ color: calcStatus(row) === 'New' ? 'var(--warning)' : 'var(--success)', fontWeight: 600 }}>
+                          • {row.status || calcStatus(row)}
                         </span>
+                        {row.role === 'electrician' && !row.isApproved && (
+                          <button className="btn" style={{ padding: '4px 10px', fontSize: '0.75rem', marginLeft: '12px', background: 'var(--primary)' }} onClick={() => handleApproveElectrician(row._id)}>Approve Account</button>
+                        )}
+                        {row.role === 'electrician' && (
+                          <div style={{ marginTop: '8px', display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+                            {row.idCardUrl && <a href={row.idCardUrl} target="_blank" rel="noreferrer" style={{ fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 'bold' }}><i className="fas fa-id-card"></i> Govt ID</a>}
+                            {row.panCardUrl && <a href={row.panCardUrl} target="_blank" rel="noreferrer" style={{ fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 'bold' }}><i className="fas fa-id-card"></i> PAN</a>}
+                            {row.photoUrl && <a href={row.photoUrl} target="_blank" rel="noreferrer" style={{ fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 'bold' }}><i className="fas fa-camera"></i> Photo</a>}
+                            {row.bankDetails && <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }} title={row.bankDetails}><i className="fas fa-building-columns"></i> Bank: {row.bankDetails.length > 15 ? row.bankDetails.substring(0,15) + '...' : row.bankDetails}</span>}
+                          </div>
+                        )}
                       </td>
                     </tr>
                     );
@@ -2518,6 +2634,7 @@ function AppContent() {
           <React.Fragment>
             <Navbar user={user} onLogout={handleLogout} toggleTheme={toggleTheme} isDarkMode={isDarkMode} onEditProfile={() => setIsProfileModalOpen(true)} />
             <div style={{ padding: '20px 0' }}><ElectricianHome user={user} showToast={showToast} onEditProfile={() => setIsProfileModalOpen(true)} /></div>
+            <div style={{ padding: '20px 0' }}><ElectricianHome user={user} showToast={showToast} onEditProfile={() => setIsProfileModalOpen(true)} onUpdateUser={handleProfileUpdate} /></div>
           </React.Fragment>
         ) : <Navigate to="/login" replace />} />
 
