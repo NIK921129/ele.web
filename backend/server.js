@@ -95,6 +95,9 @@ app.use('/api', (req, res, next) => {
   if (criticalSystemError) {
     return res.status(503).json({ message: criticalSystemError });
   }
+  if (mongoose.connection.readyState !== 1) {
+    await connectDB(1); // Serverless Cold-Start Fix: Synchronously wait for DB connection to prevent immediate 503 drops
+  }
   if (!isDbConnected) {
     return res.status(503).json({ message: 'Server is starting and connecting to the database. Please wait a moment.' });
   }
@@ -117,6 +120,7 @@ mongoose.connection.on('reconnected', () => {
   criticalSystemError = null;
 });
 
+let dbConnectionPromise = null;
 const connectDB = async (retries = 5) => {
   if (criticalSystemError && criticalSystemError.includes('misconfigured')) return;
   // Serverless DB caching: Prevent connection pool exhaustion by reusing active connections
@@ -124,18 +128,24 @@ const connectDB = async (retries = 5) => {
     isDbConnected = true;
     return;
   }
+  if (dbConnectionPromise) return dbConnectionPromise;
   try {
     await mongoose.connect(MONGO_URI, {
+    dbConnectionPromise = mongoose.connect(MONGO_URI, {
       serverSelectionTimeoutMS: 5000, // Timeout after 5s instead of 30s
       socketTimeoutMS: 45000, // Close sockets after 45 seconds of inactivity
     });
+    await dbConnectionPromise;
     isDbConnected = true;
     criticalSystemError = null;
     console.log('Connected to MongoDB');
   } catch (err) {
     console.error(`Could not connect to MongoDB. Retries left: ${retries} -`, err.message);
+    dbConnectionPromise = null;
     if (retries > 0) {
       setTimeout(() => connectDB(retries - 1), 5000); // Wait 5 seconds and retry
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      return connectDB(retries - 1);
     } else {
       criticalSystemError = 'Database connection failed. Check your MongoDB Atlas Network Access.';
     }
@@ -391,6 +401,8 @@ setInterval(() => {
 
 // Background Job Sweeper: Auto-cancel "ghost jobs" searching for > 2 hours to refund customers
 setInterval(async () => {
+// Background Job Sweeper Logic
+const runGhostJobSweeper = async () => {
   if (!isDbConnected) return;
   try {
     const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
@@ -405,9 +417,12 @@ setInterval(async () => {
     }
   } catch (err) { console.error('Ghost job cleanup failed:', err); }
 }, 30 * 60 * 1000);
+};
 
 // 8. Stuck Job Payout Lockup Sweeper (Auto-complete after 24h)
 setInterval(async () => {
+// Stuck Job Payout Sweeper Logic (Auto-complete after 24h)
+const runStuckJobSweeper = async () => {
   if (!isDbConnected) return;
   try {
     const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -428,6 +443,13 @@ setInterval(async () => {
     }
   } catch (err) { console.error('Stuck job auto-complete failed:', err); }
 }, 60 * 60 * 1000); // Check every hour
+};
+
+// Background sweepers for Long-Running Environments (Render/PM2)
+if (!process.env.VERCEL) {
+  setInterval(runGhostJobSweeper, 30 * 60 * 1000);
+  setInterval(runStuckJobSweeper, 60 * 60 * 1000);
+}
 
 // Graceful shutdown for MongoDB connection pool
 const shutdown = async () => {
@@ -1393,6 +1415,7 @@ api.get('/jobs/history', authenticateToken, async (req, res) => {
     const skip = Math.min((page - 1) * limit, 5000); // 11. Pagination application
 
     const jobs = await Job.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).populate('electricians', 'name phone').populate('customer', 'name phone');
+    const jobs = await Job.find(query).select('-messages -jobOTP').sort({ createdAt: -1 }).skip(skip).limit(limit).populate('electricians', 'name phone').populate('customer', 'name phone');
     res.status(200).json(jobs);
   } catch (error) {
     res.status(500).json({ message: 'Internal server error' });
@@ -1402,6 +1425,17 @@ api.get('/jobs/history', authenticateToken, async (req, res) => {
 // GET /api/health - Zero-downtime deployment orchestrator check
 api.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', dbConnected: isDbConnected, uptime: process.uptime() });
+});
+
+// GET /api/cron/sweep - Trigger sweepers securely via Vercel Cron for Serverless
+api.get('/cron/sweep', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    return res.status(401).json({ message: 'Unauthorized cron access' });
+  }
+  await runGhostJobSweeper();
+  await runStuckJobSweeper();
+  res.status(200).json({ message: 'Sweepers executed successfully' });
 });
 
 app.use('/api', api);

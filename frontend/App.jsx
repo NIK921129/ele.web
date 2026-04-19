@@ -493,24 +493,18 @@ function Login({ onLoginSuccess, showToast }) {
           {isForgotPassword ? (
             <React.Fragment>
               <div className="form-group anime-form-item">
-                <label>Phone Number</label>
-                <input type="tel" className="form-control" value={phone} onChange={e => setPhone(e.target.value.replace(/\D/g, ''))} pattern="[0-9]{10}" maxLength="10" required placeholder="1234567890" disabled={otpSent} />
                 <label htmlFor="forgotPhone">Phone Number</label>
                 <input type="tel" id="forgotPhone" name="phone" className="form-control" value={phone} onChange={e => setPhone(e.target.value.replace(/\D/g, ''))} pattern="[0-9]{10}" maxLength="10" required placeholder="1234567890" disabled={otpSent} />
               </div>
               {otpSent && (
                 <React.Fragment>
                   <div className="form-group anime-form-item">
-                    <label>4-Digit OTP</label>
-                    <input type="text" className="form-control" value={otp} onChange={e => setOtp(e.target.value)} required placeholder="1234" maxLength={4} style={{ letterSpacing: '4px', fontSize: '1.2rem', fontWeight: 'bold' }} />
                     <label htmlFor="resetOtp">4-Digit OTP</label>
                     <input type="text" id="resetOtp" name="otp" className="form-control" value={otp} onChange={e => setOtp(e.target.value)} required placeholder="1234" maxLength={4} style={{ letterSpacing: '4px', fontSize: '1.2rem', fontWeight: 'bold' }} />
                   </div>
                   <div className="form-group anime-form-item">
-                    <label>New Password</label>
                     <label htmlFor="resetNewPassword">New Password</label>
                     <div className="input-icon-wrapper">
-                      <input type={showPassword ? "text" : "password"} className="form-control" value={newPassword} onChange={e => setNewPassword(e.target.value)} required placeholder="••••••••" />
                       <input type={showPassword ? "text" : "password"} id="resetNewPassword" name="newPassword" className="form-control" value={newPassword} onChange={e => setNewPassword(e.target.value)} required placeholder="••••••••" />
                     <i className={`fas ${showPassword ? 'fa-eye-slash' : 'fa-eye'} action-icon`} role="button" tabIndex="0" aria-label="Toggle password visibility" onClick={() => setShowPassword(!showPassword)} onKeyDown={(e) => { if(e.key === 'Enter' || e.key === ' ') setShowPassword(!showPassword); }}></i>
                     </div>
@@ -530,15 +524,11 @@ function Login({ onLoginSuccess, showToast }) {
             <React.Fragment>
             {!isLogin && (
             <div className="form-group anime-form-item">
-              <label>Full Name</label>
-              <input type="text" className="form-control" value={name} onChange={e => setName(e.target.value)} required placeholder="John Doe" maxLength="50" />
               <label htmlFor="signupName">Full Name</label>
               <input type="text" id="signupName" name="name" className="form-control" value={name} onChange={e => setName(e.target.value)} required placeholder="John Doe" maxLength="50" />
             </div>
           )}
           <div className="form-group anime-form-item">
-            <label>Phone Number</label>
-            <input type="tel" className="form-control" value={phone} onChange={e => setPhone(e.target.value.replace(/\D/g, ''))} pattern="[0-9]{10}" maxLength="10" required placeholder="1234567890" />
             <label htmlFor="loginPhone">Phone Number</label>
             <input type="tel" id="loginPhone" name="phone" className="form-control" value={phone} onChange={e => setPhone(e.target.value.replace(/\D/g, ''))} pattern="[0-9]{10}" maxLength="10" required placeholder="1234567890" />
           </div>
@@ -567,10 +557,8 @@ function Login({ onLoginSuccess, showToast }) {
           )}
 
           <div className="form-group anime-form-item">
-            <label>Password</label>
             <label htmlFor="loginPassword">Password</label>
             <div className="input-icon-wrapper">
-              <input type={showPassword ? "text" : "password"} className="form-control" value={password} onChange={e => setPassword(e.target.value)} required placeholder="••••••••" />
               <input type={showPassword ? "text" : "password"} id="loginPassword" name="password" className="form-control" value={password} onChange={e => setPassword(e.target.value)} required placeholder="••••••••" />
             <i className={`fas ${showPassword ? 'fa-eye-slash' : 'fa-eye'} action-icon`} role="button" tabIndex="0" aria-label="Toggle password visibility" onClick={() => setShowPassword(!showPassword)} onKeyDown={(e) => { if(e.key === 'Enter' || e.key === ' ') setShowPassword(!showPassword); }}></i>
             </div>
@@ -1313,7 +1301,6 @@ function CustomerHome({ user, showToast, onEditProfile }) {
 }
 
 // --- Electrician Dashboard Component ---
-function ElectricianHome({ user, showToast, onEditProfile }) {
 function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
   const { socket } = useSocket();
   const [isOnline, setIsOnline] = useState(false);
@@ -1492,7 +1479,6 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
   useEffect(() => {
     let pollInterval;
     let isMounted = true;
-    if (isOnline && !currentJob) {
     if (isOnline && !currentJob && user?.isApproved && user?.safetyDepositPaid) {
       const checkJobs = async () => {
         try {
@@ -2242,7 +2228,6 @@ function AdminPanel({ user, onLogout, showToast }) {
       </div>
 
       <div style={{ display: 'flex', gap: '10px', marginBottom: '24px' }}>
-        <input type="text" id="adminBroadcast" name="broadcastMsg" value={broadcastMsg} onChange={e => setBroadcastMsg(e.target.value)} placeholder="Type a system-wide broadcast message..." className="form-control" style={{ margin: 0, flex: 1 }} maxLength="1000" />
         <input type="text" value={broadcastMsg} onChange={e => setBroadcastMsg(e.target.value)} placeholder="Type a system-wide broadcast message..." className="form-control" style={{ margin: 0, flex: 1 }} maxLength="1000" />
         <button className="btn" style={{ background: 'var(--warning)' }} onClick={handleBroadcast}><i className="fas fa-bullhorn"></i> Send Broadcast</button>
       </div>
@@ -2259,8 +2244,6 @@ function AdminPanel({ user, onLogout, showToast }) {
         <TabButton active={activeTab === 'finance'} onClick={() => setActiveTab('finance')} icon="fa-indian-rupee-sign" label="Finance & Approvals" />
         <TabButton active={activeTab === 'logs'} onClick={() => setActiveTab('logs')} icon="fa-terminal" label="System Logs" />
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-          <label htmlFor="demoMode" style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: 'var(--text-main)', fontSize: '0.9rem', fontWeight: 600, background: 'var(--surface)', padding: '8px 16px', borderRadius: '30px', border: '1px solid var(--border-light)' }}>
-            <input type="checkbox" id="demoMode" name="demoMode" checked={useMockData} onChange={(e) => setUseMockData(e.target.checked)} style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: 'var(--primary)' }} />
           <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: 'var(--text-main)', fontSize: '0.9rem', fontWeight: 600, background: 'var(--surface)', padding: '8px 16px', borderRadius: '30px', border: '1px solid var(--border-light)' }}>
             <input type="checkbox" checked={useMockData} onChange={(e) => setUseMockData(e.target.checked)} style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: 'var(--primary)' }} />
             Demo Mode
@@ -2279,7 +2262,6 @@ function AdminPanel({ user, onLogout, showToast }) {
           <div>
             <div style={{ padding: '16px', borderBottom: '1px solid var(--border-light)', display: 'flex', flexWrap: 'wrap', gap: '12px', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ margin: 0 }}><i className="fas fa-table" style={{ color: 'var(--primary)' }}></i> Master Records</h3>
-            <input type="text" id="adminSearch" name="searchTerm" aria-label="Search records" placeholder="Search IDs, Names, Locations..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{ padding: '8px 16px', borderRadius: '20px', border: '1px solid var(--border-light)', width: '100%', maxWidth: '300px', outline: 'none' }} />
               <input type="text" aria-label="Search records" placeholder="Search IDs, Names, Locations..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{ padding: '8px 16px', borderRadius: '20px', border: '1px solid var(--border-light)', width: '100%', maxWidth: '300px', outline: 'none' }} />
             </div>
             <div style={{ overflowX: 'auto' }}>
@@ -2310,8 +2292,6 @@ function AdminPanel({ user, onLogout, showToast }) {
                       <td style={{ padding: '14px 16px', fontWeight: 500 }}>{row.name}</td>
                       <td style={{ padding: '14px 16px' }}><i className="fas fa-phone" style={{ color: 'var(--text-muted)', marginRight: '8px' }}></i> {row.phone}</td>
                       <td style={{ padding: '14px 16px' }}>
-                          <span style={{ color: calcStatus(row) === 'New' ? 'var(--warning)' : 'var(--success)', fontWeight: 600 }}>
-                            • {row.status || calcStatus(row)}
                         <span style={{ color: calcStatus(row) === 'New' ? 'var(--warning)' : 'var(--success)', fontWeight: 600 }}>
                           • {row.status || calcStatus(row)}
                         </span>
@@ -2633,7 +2613,6 @@ function AppContent() {
         <Route path="/electrician" element={user?.role === 'electrician' ? (
           <React.Fragment>
             <Navbar user={user} onLogout={handleLogout} toggleTheme={toggleTheme} isDarkMode={isDarkMode} onEditProfile={() => setIsProfileModalOpen(true)} />
-            <div style={{ padding: '20px 0' }}><ElectricianHome user={user} showToast={showToast} onEditProfile={() => setIsProfileModalOpen(true)} /></div>
             <div style={{ padding: '20px 0' }}><ElectricianHome user={user} showToast={showToast} onEditProfile={() => setIsProfileModalOpen(true)} onUpdateUser={handleProfileUpdate} /></div>
           </React.Fragment>
         ) : <Navigate to="/login" replace />} />
