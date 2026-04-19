@@ -485,7 +485,7 @@
     .address-input {
       background: transparent;
       border: none;
-      font-size: 0.95rem;
+      font-size: 16px;
       width: 70%;
       flex: 1;
       min-width: 0;
@@ -561,7 +561,7 @@
     /* Form Elements */
     .form-group { margin-bottom: 16px; text-align: left; }
     .form-group label { display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.9rem; color: var(--text-muted); }
-    .form-control { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--border-light); background: var(--secondary); color: var(--text-main); font-family: inherit; font-size: 1rem; outline: none; transition: all 0.2s; }
+    .form-control { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--border-light); background: var(--secondary); color: var(--text-main); font-family: inherit; font-size: 16px; outline: none; transition: all 0.2s; }
     .form-control:focus { border-color: var(--primary); background: var(--surface); }
     
     /* Invoice Table */
@@ -719,7 +719,8 @@
     }
 
     /* Mobile Bottom Nav (Global Base) */
-    .mobile-bottom-nav { display: none; position: fixed; bottom: 0; left: 0; right: 0; background: var(--surface); border-top: 1px solid var(--border-light); padding: 8px 0; justify-content: space-around; align-items: center; z-index: 1000; box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.1); }
+    .mobile-bottom-nav { display: none; position: fixed; bottom: 0; left: 0; right: 0; background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-top: 1px solid var(--border-light); padding: 8px 0 calc(8px + env(safe-area-inset-bottom, 0px)); justify-content: space-around; align-items: center; z-index: 1000; box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.1); }
+    body.dark-mode .mobile-bottom-nav { background: rgba(30, 41, 59, 0.85); }
     .nav-item { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 16px; cursor: pointer; color: var(--text-muted); transition: all 0.2s; border-radius: 12px; }
     .nav-item.active { color: var(--primary); background: var(--primary-light); }
     .nav-item i { font-size: 1.2rem; }
@@ -742,9 +743,14 @@
       .landing-btn { padding: 16px 32px; font-size: 1.1rem; width: 100%; }
       .chat-widget { right: 10px; bottom: 10px; width: calc(100% - 20px); }
       .logo-text { font-size: 1.5rem; }
-      .card { padding: 16px; }
+      .card { padding: 16px 12px; }
       .profile-name { display: none; }
       .promo-banner { flex-direction: column; text-align: center; justify-content: center; }
+      .service-grid { grid-template-columns: repeat(3, 1fr); gap: 10px; }
+      .service-item { padding: 12px 6px; }
+      .service-item i { font-size: 1.25rem; padding: 8px; margin-bottom: 6px; }
+      .service-item span { font-size: 0.8rem; }
+      .dashboard-grid { gap: 16px; }
       
       /* App-like Mobile Overrides */
       .desktop-only, .desktop-tabs { display: none !important; }

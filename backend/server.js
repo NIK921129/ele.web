@@ -91,7 +91,7 @@ if (process.env.NODE_ENV === 'production' && (!MONGO_URI || !JWT_SECRET)) {
 }
 
 // Prevent the server from crashing, instead returning a clean JSON error to the frontend so CORS doesn't break
-app.use('/api', (req, res, next) => {
+app.use('/api', async (req, res, next) => {
   if (criticalSystemError) {
     return res.status(503).json({ message: criticalSystemError });
   }

@@ -683,7 +683,7 @@ function TrackingMap({ origin, destination }) {
     };
   }, []);
 
-  return <div ref={mapRef} style={{ width: '100%', height: '250px', borderRadius: '12px', marginTop: '16px', border: '1px solid var(--border-light)', zIndex: 1 }} />;
+  return <div ref={mapRef} style={{ width: '100%', height: '200px', borderRadius: '12px', marginTop: '16px', border: '1px solid var(--border-light)', zIndex: 1 }} />;
 }
 
 // --- Customer Dashboard Component ---
@@ -1061,7 +1061,7 @@ function CustomerHome({ user, showToast, onEditProfile }) {
             <div style={{ position: 'relative', width: '100%' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
                 <i className="fas fa-location-dot" style={{ color: 'var(--primary)', fontSize: '1.2rem' }}></i>
-                <input type="text" value={address} maxLength={250} onChange={(e) => { setAddress(e.target.value); setCoordinates(null); setShowSuggestions(true); }} placeholder="Enter your full address..." style={{ background: 'transparent', border: 'none', outline: 'none', fontWeight: '800', color: 'var(--text-main)', fontSize: '1.05rem', width: '100%' }} />
+                <input type="text" value={address} maxLength={250} onChange={(e) => { setAddress(e.target.value); setCoordinates(null); setShowSuggestions(true); }} placeholder="Enter your full address..." style={{ background: 'transparent', border: 'none', outline: 'none', fontWeight: '800', color: 'var(--text-main)', fontSize: '16px', width: '100%' }} />
               </div>
               {suggestions.length > 0 && (
                 <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--surface)', border: '1px solid var(--border-light)', borderRadius: '8px', zIndex: 10, boxShadow: 'var(--shadow-md)', maxHeight: '200px', overflowY: 'auto', marginTop: '8px' }}>
@@ -1773,11 +1773,11 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
             </button>
           </div>
             <div className="inline-stats" style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', marginTop: '16px' }}>
-              <div style={{ flex: '1 1 200px', padding: '16px', background: 'var(--secondary)', borderRadius: '16px' }}>
+              <div style={{ flex: '1 1 calc(50% - 8px)', minWidth: '120px', padding: '16px', background: 'var(--secondary)', borderRadius: '16px' }}>
               <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600, textTransform: 'uppercase' }}>WALLET BALANCE</span>
               <h2 style={{ color: 'var(--success)', fontSize: '2.2rem', margin: '4px 0 0 0' }}>₹{walletBal.toFixed(0)}</h2>
             </div>
-              <div style={{ flex: '1 1 200px', padding: '16px', background: 'var(--secondary)', borderRadius: '16px' }}>
+              <div style={{ flex: '1 1 calc(50% - 8px)', minWidth: '120px', padding: '16px', background: 'var(--secondary)', borderRadius: '16px' }}>
               <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600, textTransform: 'uppercase' }}>JOBS COMPLETED</span>
               <h2 style={{ color: 'var(--text-main)', fontSize: '2.2rem', margin: '4px 0 0 0' }}>{jobsCompleted}</h2>
             </div>
@@ -2270,7 +2270,7 @@ function AdminPanel({ user, onLogout, showToast }) {
         <button className="btn" style={{ background: 'var(--warning)' }} onClick={handleBroadcast}><i className="fas fa-bullhorn"></i> Send Broadcast</button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '16px', marginBottom: '24px' }}>
         <MetricCard icon="fa-users" title="Total Users" value={currentData.length.toLocaleString()} trend={useMockData ? "Mock Data Generated" : "+12% this week"} color="var(--primary)" />
         <MetricCard icon="fa-helmet-safety" title="Active Electricians" value="842" trend="124 currently online" color="var(--warning)" />
         <MetricCard icon="fa-indian-rupee-sign" title="Platform Revenue" value="₹12.4L" trend="3% fee taken" color="var(--success)" />
