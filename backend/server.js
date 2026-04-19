@@ -1423,7 +1423,6 @@ api.get('/jobs/history', authenticateToken, async (req, res) => {
     const limit = 20;
     const skip = Math.min((page - 1) * limit, 5000); // 11. Pagination application
 
-    const jobs = await Job.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).populate('electricians', 'name phone').populate('customer', 'name phone');
     const jobs = await Job.find(query).select('-messages -jobOTP').sort({ createdAt: -1 }).skip(skip).limit(limit).populate('electricians', 'name phone').populate('customer', 'name phone');
     res.status(200).json(jobs);
   } catch (error) {
