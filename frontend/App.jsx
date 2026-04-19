@@ -353,6 +353,9 @@ function Login({ onLoginSuccess, showToast }) {
   const [showPassword, setShowPassword] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
   
+  const mounted = useRef(true);
+  useEffect(() => { return () => { mounted.current = false; }; }, []);
+  
   // Electrician Onboarding Fields
   const [address, setAddress] = useState('');
   const [experienceYears, setExperienceYears] = useState('');
@@ -422,9 +425,9 @@ function Login({ onLoginSuccess, showToast }) {
       }
     } catch (err) {
       console.error('[Auth Error]', err);
-      setError(err.message.includes('Network') ? err.message : 'Authentication failed. Please check your details and try again.');
+      if (mounted.current) setError(err.message.includes('Network') ? err.message : 'Authentication failed. Please check your details and try again.');
     } finally {
-      setLoading(false);
+      if (mounted.current) setLoading(false);
     }
   };
 
@@ -434,14 +437,16 @@ function Login({ onLoginSuccess, showToast }) {
     setError(null);
     try {
       const res = await fetchJson('/auth/forgot-password', { method: 'POST', body: { phone } });
-      setOtpSent(true);
-      setResendCooldown(60); // Initialize a 60-second cooldown timer
-      // SECURITY: Generic success message to prevent user enumeration
-      showToast(res.message || 'If an account matches this number, an OTP has been sent.', 'success');
+      if (mounted.current) {
+        setOtpSent(true);
+        setResendCooldown(60); // Initialize a 60-second cooldown timer
+        // SECURITY: Generic success message to prevent user enumeration
+        showToast(res.message || 'If an account matches this number, an OTP has been sent.', 'success');
+      }
     } catch (err) {
-      setError('Failed to request OTP. Please try again later.'); // Sanitize error exposure
+      if (mounted.current) setError('Failed to request OTP. Please try again later.'); // Sanitize error exposure
     } finally {
-      setLoading(false);
+      if (mounted.current) setLoading(false);
     }
   };
 
@@ -451,21 +456,22 @@ function Login({ onLoginSuccess, showToast }) {
     setError(null);
     try {
       const res = await fetchJson('/auth/reset-password', { method: 'POST', body: { phone, otp, newPassword } });
-      showToast(res.message || 'Password reset successfully!', 'success');
-      
-      // Reset back to standard login screen
-      setIsForgotPassword(false);
-      setOtpSent(false);
-      setOtp('');
-      setNewPassword('');
-      setResendCooldown(0); // Clear the timer on success
-      setPassword('');
-      setIsLogin(true);
+      if (mounted.current) {
+        showToast(res.message || 'Password reset successfully!', 'success');
+        // Reset back to standard login screen
+        setIsForgotPassword(false);
+        setOtpSent(false);
+        setOtp('');
+        setNewPassword('');
+        setResendCooldown(0); // Clear the timer on success
+        setPassword('');
+        setIsLogin(true);
+      }
     } catch (err) {
       console.error('[Password Reset Error]', err);
-      setError('Failed to reset password. Please check your OTP and try again.');
+      if (mounted.current) setError('Failed to reset password. Please check your OTP and try again.');
     } finally {
-      setLoading(false);
+      if (mounted.current) setLoading(false);
     }
   };
 
@@ -746,12 +752,17 @@ function CustomerHome({ user, showToast, onEditProfile }) {
   const [isLocating, setIsLocating] = useState(false);
   const [isLoadingActiveJob, setIsLoadingActiveJob] = useState(true);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+  
+  const mounted = useRef(true);
+  useEffect(() => { return () => { mounted.current = false; }; }, []);
 
   const categories = [
     { id: 'repairs', name: 'Quick Repairs', icon: 'fa-screwdriver-wrench' },
     { id: 'appliances', name: 'Appliance Setup', icon: 'fa-plug' },
     { id: 'projects', name: 'Big Projects', icon: 'fa-hard-hat' }
   ];
+
+  const userId = user?._id || user?.id;
 
   // Restore Active Job and Chat History on Page Refresh
   useEffect(() => {
@@ -780,7 +791,7 @@ function CustomerHome({ user, showToast, onEditProfile }) {
     };
     fetchActiveJob();
     return () => { isMounted = false; };
-  }, [user]);
+  }, [userId]);
 
   useEffect(() => {
     return () => {
@@ -793,18 +804,20 @@ function CustomerHome({ user, showToast, onEditProfile }) {
 
   // OpenStreetMap Nominatim Autocomplete
   useEffect(() => {
+    let active = true;
     if (address.length > 2 && showSuggestions) {
       const timeout = setTimeout(async () => {
         try {
           const data = await fetchJson(`/location/search?q=${encodeURIComponent(address)}`);
-          setSuggestions(Array.isArray(data) ? data : []);
+          if (active) setSuggestions(Array.isArray(data) ? data : []);
         } catch (e) {
           console.error('Nominatim search failed', e);
         }
       }, 500); // Debounce
-      return () => clearTimeout(timeout);
+      return () => { active = false; clearTimeout(timeout); };
     } else {
       setSuggestions([]);
+      return () => { active = false; };
     }
   }, [address, showSuggestions]);
 
@@ -822,7 +835,7 @@ function CustomerHome({ user, showToast, onEditProfile }) {
     if (!activeJobId) return;
 
     // FIX: Ensure the user rejoins the room if their internet drops and the socket reconnects
-    const joinRoom = () => socket.emit('joinJobRoom', activeJobId);
+    const joinRoom = () => { if (socket.connected) socket.emit('joinJobRoom', activeJobId); };
     joinRoom(); // Join immediately
     socket.on('connect', joinRoom);
 
@@ -945,7 +958,7 @@ function CustomerHome({ user, showToast, onEditProfile }) {
       showToast(error.message, 'error');
       showToast(error.message.includes('Network') ? error.message : 'Failed to process payment.', 'error');
     } finally {
-      setIsBooking(false);
+      if (mounted.current) setIsBooking(false);
     }
   };
 
@@ -989,6 +1002,7 @@ function CustomerHome({ user, showToast, onEditProfile }) {
       setIsLocating(true);
       navigator.geolocation.getCurrentPosition(
         (position) => {
+          if (!mounted.current) return;
           setAddress(`Lat: ${position.coords.latitude.toFixed(4)}, Lng: ${position.coords.longitude.toFixed(4)}`);
           setCoordinates([position.coords.longitude, position.coords.latitude]);
           setIsLocating(false);
@@ -999,7 +1013,7 @@ function CustomerHome({ user, showToast, onEditProfile }) {
           else if (error.code === 2) msg = 'Location unavailable. Try again later.';
           else if (error.code === 3) msg = 'Location request timed out.';
           showToast(msg, 'error');
-          setIsLocating(false);
+          if (mounted.current) setIsLocating(false);
         },
         { timeout: 10000 }
       );
@@ -1348,6 +1362,14 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
   const [myLiveCoords, setMyLiveCoords] = useState(null);
   const [acceptingJobId, setAcceptingJobId] = useState(null);
   const realCoordsRef = useRef([77.5946, 12.9716]); // Fallback to Bangalore, dynamically updated
+  
+  const mounted = useRef(true);
+  useEffect(() => { return () => { mounted.current = false; }; }, []);
+  const userId = user?._id || user?.id;
+  const isApproved = user?.isApproved;
+  const safetyDepositPaid = user?.safetyDepositPaid;
+  const userRef = useRef(user);
+  useEffect(() => { userRef.current = user; }, [user]);
 
   const jobStatus = currentJob?.status;
   const teamSize = currentJob?.teamSize || 1;
@@ -1388,7 +1410,7 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
     };
     fetchActiveJob();
     return () => { isMounted = false; };
-  }, [user]);
+  }, [userId]);
 
   useEffect(() => {
     if (isOnline) {
@@ -1403,7 +1425,8 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
       const onType = (data) => setTypingUser(data.senderName);
       const onStopType = () => setTypingUser(null);
       const onAccept = (data) => {
-        if (data.electricians.some(e => String(e._id) === String(user._id) || String(e.id) === String(user._id))) {
+        const currentUser = userRef.current;
+        if (data.electricians.some(e => String(e._id) === String(currentUser?._id) || String(e.id) === String(currentUser?._id))) {
             setCurrentJob(prev => ({...prev, status: 'assigned', electricians: data.electricians}));
             setIsTracking(true); // All members start tracking when team is full
             showToast('Team is full! Job is now active.', 'success');
@@ -1461,7 +1484,7 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
     } else {
       setIsTracking(false);
     }
-  }, [isOnline, showToast, user, socket]);
+  }, [isOnline, showToast, socket]);
 
   useEffect(() => {
     return () => {
@@ -1475,7 +1498,7 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
   useEffect(() => {
     if (isOnline && activeJobId) {
       // FIX: Ensure the electrician rejoins the room if their internet drops and the socket reconnects
-      const joinRoom = () => socket.emit('joinJobRoom', activeJobId);
+      const joinRoom = () => { if (socket.connected) socket.emit('joinJobRoom', activeJobId); };
       joinRoom(); // Join immediately
       socket.on('connect', joinRoom);
       
@@ -1505,7 +1528,7 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
   useEffect(() => {
     let pollInterval;
     let isMounted = true;
-    if (isOnline && !currentJob && user?.isApproved && user?.safetyDepositPaid) {
+    if (isOnline && !currentJob && isApproved && safetyDepositPaid) {
       const checkJobs = async () => {
         try {
           const coords = realCoordsRef.current;
@@ -1540,7 +1563,7 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
         socket.off('newJobAvailable', handleNewJob);
       };
     } 
-  }, [isOnline, currentJob, socket]);
+  }, [isOnline, currentJob, isApproved, safetyDepositPaid, socket]);
 
   useEffect(() => {
     if (chatContainerRef.current) {
@@ -1695,7 +1718,7 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
       setAvailableJobs(prev => prev.filter(j => j._id !== jobId));
       setActiveJobId(null);
     } finally {
-      setAcceptingJobId(null);
+      if (mounted.current) setAcceptingJobId(null);
     }
   };
 
@@ -2584,8 +2607,9 @@ function AppContent() {
   // Global socket listener for Admin Broadcasts and connection management
   useEffect(() => {
     if (user) {
+      // Always ensure the token is up to date when the user state changes
+      socket.auth = { token: localStorage.getItem('token') };
       if (!socket.connected) {
-        socket.auth = { token: localStorage.getItem('token') };
         socket.connect();
         
         // 5. Inject fresh token on reconnect attempts if the user logs out/in while offline
