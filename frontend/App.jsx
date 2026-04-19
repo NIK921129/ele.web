@@ -1555,6 +1555,18 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
     }
   };
 
+  // Listen for Live Admin Approval
+  useEffect(() => {
+    const handleAccountApproved = (approvedId) => {
+      if (String(approvedId) === String(user?._id || user?.id)) {
+        showToast('Your account has been approved by the Admin! You can now go online.', 'success');
+        fetchJson('/me').then(res => onUpdateUser(res)).catch(() => {});
+      }
+    };
+    socket.on('accountApproved', handleAccountApproved);
+    return () => socket.off('accountApproved', handleAccountApproved);
+  }, [socket, user, showToast, onUpdateUser]);
+
   // Restore Active Job and Chat History on Page Refresh
   useEffect(() => {
     let isMounted = true;
@@ -2187,15 +2199,6 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
 }
 
 // --- Admin Dashboard Components ---
-const mockLogs = [
-  { time: '10:42:01 AM', level: 'INFO', src: 'AuthService', event: 'User Login', details: 'ELC-2041 authenticated successfully.' },
-{ time: '10:45:12 AM', level: 'WARN', src: 'GeoTracker', event: 'High Latency', details: 'Location tracking API response > 500ms' },
-{ time: '10:48:33 AM', level: 'INFO', src: 'JobService', event: 'Job Created', details: 'USR-1004 requested Smart Home setup.' },
-{ time: '10:50:05 AM', level: 'INFO', src: 'JobMatching', event: 'Electrician Assigned', details: 'ELC-2042 accepted job from USR-1004.' },
-{ time: '10:55:20 AM', level: 'ERROR', src: 'PaymentGateway', event: 'Transaction Failed', details: 'Payment timeout for USR-1002.' },
-{ time: '11:02:15 AM', level: 'INFO', src: 'AuthService', event: 'User Logout', details: 'ELC-2043 disconnected.' }
-];
-
 function MetricCard({ icon, title, value, trend, color }) {
   return (
     <div className="admin-metric-card" style={{ background: 'var(--surface)', padding: '20px', borderRadius: '16px', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border-light)' }}>
@@ -2233,33 +2236,11 @@ function TabButton({ active, onClick, icon, label }) {
   );
 }
 
-const generateMockUsers = () => {
-  const firstNames = ['Rahul', 'Priya', 'Amit', 'Sneha', 'Vikram', 'Anita', 'Karan', 'Neha', 'Rajesh', 'Pooja', 'Suresh', 'Kavita', 'Ramesh', 'Riya', 'Mohit', 'Anjali', 'Deepak', 'Swati', 'Sanjay', 'Meera'];
-  const lastNames = ['Sharma', 'Patel', 'Verma', 'Reddy', 'Singh', 'Desai', 'Malhotra', 'Kapoor', 'Kumar', 'Jain', 'Gupta', 'Rao', 'Iyer', 'Menon', 'Nair', 'Bhat', 'Joshi', 'Chawla', 'Das', 'Sen'];
-  
-  const mockUsers = [];
-  for (let i = 1; i <= 125; i++) {
-    const isCustomer = Math.random() > 0.35;
-    const fName = firstNames[Math.floor(Math.random() * firstNames.length)];
-    const lName = lastNames[Math.floor(Math.random() * lastNames.length)];
-    mockUsers.push({
-      _id: `MOCK-${1000 + i}`,
-      role: isCustomer ? 'customer' : 'electrician',
-      name: `${fName} ${lName}`,
-      phone: `+91 9${Math.floor(100000000 + Math.random() * 900000000)}`,
-      status: Math.random() > 0.2 ? 'Active' : 'Offline'
-    });
-  }
-  return mockUsers;
-};
-
 function AdminPanel({ user, onLogout, showToast }) {
   const { socket } = useSocket();
   const [activeTab, setActiveTab] = useState('database');
   const [searchTerm, setSearchTerm] = useState('');
   const [liveData, setLiveData] = useState([]);
-  const [mockData, setMockData] = useState([]);
-  const [useMockData, setUseMockData] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [financeData, setFinanceData] = useState({ pendingJobs: [], pendingWithdrawals: [] });
   const [isDownloading, setIsDownloading] = useState(false);
@@ -2272,6 +2253,7 @@ function AdminPanel({ user, onLogout, showToast }) {
   const [couponsData, setCouponsData] = useState([]);
   const [newCouponAmount, setNewCouponAmount] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [systemLogs, setSystemLogs] = useState([]);
   
   const mounted = useRef(true);
   useEffect(() => { return () => { mounted.current = false; }; }, []);
@@ -2287,6 +2269,8 @@ function AdminPanel({ user, onLogout, showToast }) {
       setBannedIps(Array.isArray(banned) ? banned : []);
       const coups = await fetchJson('/admin/coupons');
       setCouponsData(Array.isArray(coups) ? coups : []);
+      const logs = await fetchJson('/admin/logs');
+      setSystemLogs(Array.isArray(logs) ? logs : []);
     } catch (error) {
       showToast(`Failed to fetch dashboard data: ${error.message}`, 'error');
       console.error('Dashboard error:', error);
@@ -2298,7 +2282,6 @@ function AdminPanel({ user, onLogout, showToast }) {
 
   useEffect(() => {
     fetchDashboardData();
-    setMockData(generateMockUsers());
 
     const handleAdminRefresh = () => fetchDashboardData();
     socket.on('adminRefresh', handleAdminRefresh);
@@ -2322,7 +2305,7 @@ function AdminPanel({ user, onLogout, showToast }) {
     return () => { if (checkInterval) clearInterval(checkInterval); };
   }, []);
 
-  const currentData = useMockData ? mockData : (Array.isArray(liveData) ? liveData : []);
+  const currentData = Array.isArray(liveData) ? liveData : [];
 
   const filteredDB = currentData.filter(row => 
     row && Object.values(row).some(val =>
@@ -2549,9 +2532,7 @@ function AdminPanel({ user, onLogout, showToast }) {
           </div>
           <div>
             <h2 style={{ margin: 0, color: 'var(--danger)' }}>Master Admin Portal</h2>
-            <span style={{ fontSize: '0.85rem', color: useMockData ? 'var(--warning)' : 'var(--text-muted)', fontWeight: useMockData ? 'bold' : 'normal' }}>
-              {useMockData ? '⚠️ Connected to Local Mock Database' : 'Connected to Production Database'}
-            </span>
+          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Connected to Production Database</span>
           </div>
         </div>
         <button className="btn btn-outline" style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }} onClick={onLogout}>
@@ -2565,7 +2546,7 @@ function AdminPanel({ user, onLogout, showToast }) {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '16px', marginBottom: '24px' }}>
-        <MetricCard icon="fa-users" title="Total Users" value={currentData.length.toLocaleString()} trend={useMockData ? "Mock Data Generated" : "+12% this week"} color="var(--primary)" />
+        <MetricCard icon="fa-users" title="Total Users" value={currentData.length.toLocaleString()} trend="+12% this week" color="var(--primary)" />
         <MetricCard icon="fa-helmet-safety" title="Active Electricians" value="842" trend="124 currently online" color="var(--warning)" />
         <MetricCard icon="fa-indian-rupee-sign" title="Platform Revenue" value="₹12.4L" trend="3% fee taken" color="var(--success)" />
         <MetricCard icon="fa-server" title="System Uptime" value="99.99%" trend="All systems nominal" color="var(--text-main)" />
@@ -2578,10 +2559,6 @@ function AdminPanel({ user, onLogout, showToast }) {
         <TabButton active={activeTab === 'coupons'} onClick={() => setActiveTab('coupons')} icon="fa-ticket" label="Discount Coupons" />
         <TabButton active={activeTab === 'logs'} onClick={() => setActiveTab('logs')} icon="fa-terminal" label="System Logs" />
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: 'var(--text-main)', fontSize: '0.9rem', fontWeight: 600, background: 'var(--surface)', padding: '8px 16px', borderRadius: '30px', border: '1px solid var(--border-light)' }}>
-            <input type="checkbox" checked={useMockData} onChange={(e) => setUseMockData(e.target.checked)} style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: 'var(--primary)' }} />
-            Demo Mode
-          </label>
         <button className="btn btn-outline" style={{ borderColor: 'var(--success)', color: 'var(--success)' }} onClick={handleRefresh} disabled={isLoading || isRefreshing}>
           <i className={`fas ${isLoading || isRefreshing ? 'fa-spinner fa-spin' : 'fa-sync'}`}></i> Refresh Data
         </button>
@@ -2610,7 +2587,7 @@ function AdminPanel({ user, onLogout, showToast }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {isLoading && !useMockData ? (
+                {isLoading ? (
                     <tr>
                       <td colSpan="5" style={{ textAlign: 'center', padding: '40px' }}>
                         <i className="fas fa-spinner fa-spin fa-2x" style={{ color: 'var(--primary)' }}></i>
@@ -2656,8 +2633,48 @@ function AdminPanel({ user, onLogout, showToast }) {
           </div>
         )}
         
+        {reviewUser && (
+          <div className="modal-overlay visible" style={{ zIndex: 10000 }} onClick={() => setReviewUser(null)}>
+            <div className="modal-content" style={{ maxWidth: '600px', width: '90%', maxHeight: '90vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <h3 style={{ margin: 0 }}>Review: {reviewUser.name}</h3>
+                <button onClick={() => setReviewUser(null)} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: 'var(--text-muted)' }}>&times;</button>
+              </div>
+              <div style={{ marginBottom: '16px', fontSize: '0.95rem' }}>
+                <p style={{ margin: '4px 0' }}><strong>Phone:</strong> {reviewUser.phone}</p>
+                <p style={{ margin: '4px 0' }}><strong>Status:</strong> {reviewUser.isApproved ? <span style={{color: 'var(--success)'}}>Approved</span> : <span style={{color: 'var(--warning)'}}>Pending Verification</span>}</p>
+                <p style={{ margin: '4px 0' }}><strong>Bank Info:</strong> {reviewUser.bankDetails || 'Not Provided'}</p>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px', marginBottom: '24px' }}>
+                {['idCardUrl', 'panCardUrl', 'photoUrl'].map((key, i) => {
+                  const labels = ['Govt ID', 'PAN Card', 'Photo'];
+                  const icons = ['fa-id-card', 'fa-id-card', 'fa-camera'];
+                  return reviewUser[key] ? (
+                    <div key={key} style={{ cursor: 'pointer', border: '1px solid var(--border-light)', borderRadius: '8px', padding: '8px', textAlign: 'center' }} onClick={() => setPreviewImage({ url: reviewUser[key], title: labels[i] })}>
+                      <img src={reviewUser[key]} alt={labels[i]} style={{ width: '100%', height: '100px', objectFit: 'cover', borderRadius: '4px', marginBottom: '8px' }} />
+                      <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: 'var(--primary)' }}><i className={`fas ${icons[i]}`}></i> {labels[i]}</span>
+                    </div>
+                  ) : (
+                    <div key={key} style={{ padding: '20px', background: 'var(--secondary)', textAlign: 'center', fontSize: '0.85rem', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>No {labels[i]}</div>
+                  );
+                })}
+              </div>
+              {!reviewUser.isApproved && (
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <button className="btn" style={{ flex: 1, background: 'var(--success)' }} onClick={() => { handleApproveElectrician(reviewUser._id); setReviewUser(null); }}>
+                    <i className="fas fa-check-circle"></i> Approve Account
+                  </button>
+                  <button className="btn btn-outline" style={{ flex: 1, borderColor: 'var(--danger)', color: 'var(--danger)' }} onClick={() => { handleRejectElectrician(reviewUser._id); setReviewUser(null); }}>
+                    <i className="fas fa-times-circle"></i> Reject
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {previewImage && (
-          <div className="modal-overlay visible" style={{ zIndex: 10000 }} onClick={() => setPreviewImage(null)}>
+          <div className="modal-overlay visible" style={{ zIndex: 10001 }} onClick={() => setPreviewImage(null)}>
             <div className="modal-content" style={{ maxWidth: '90vw', width: 'auto', maxHeight: '90vh', padding: '20px', textAlign: 'center', background: 'var(--surface)', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <h3 style={{ margin: 0 }}>{previewImage.title}</h3>
@@ -2788,10 +2805,10 @@ function AdminPanel({ user, onLogout, showToast }) {
         )}
         {activeTab === 'logs' && (
           <div style={{ background: '#0f172a', color: '#e2e8f0', minHeight: '500px', padding: '16px', overflowX: 'auto' }}>
-            {mockLogs.map((log, idx) => (
-              <div key={idx} style={{ marginBottom: '10px', display: 'flex', gap: '16px', paddingBottom: '10px', borderBottom: '1px dashed #1e293b', minWidth: '600px' }}>
-                <span style={{ color: '#64748b' }}>[{log.time}]</span>
-                <span style={{ color: log.level === 'INFO' ? '#38bdf8' : '#fbbf24', fontWeight: 'bold', width: '60px' }}>{log.level}</span>
+            {systemLogs.length === 0 ? <p style={{ color: '#64748b' }}>No system logs available.</p> : systemLogs.map((log) => (
+              <div key={log._id} style={{ marginBottom: '10px', display: 'flex', gap: '16px', paddingBottom: '10px', borderBottom: '1px dashed #1e293b', minWidth: '600px' }}>
+                <span style={{ color: '#64748b' }}>[{new Date(log.createdAt).toLocaleTimeString()}]</span>
+                <span style={{ color: log.level === 'INFO' ? '#38bdf8' : (log.level === 'WARN' ? '#fbbf24' : '#ef4444'), fontWeight: 'bold', width: '60px' }}>{log.level}</span>
                 <span style={{ color: '#c084fc', width: '150px' }}>{log.src}</span>
                 <span style={{ color: '#f8fafc', flex: 1 }}>{log.event}: <span style={{ color: '#94a3b8' }}>{log.details}</span></span>
               </div>

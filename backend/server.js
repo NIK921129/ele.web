@@ -82,11 +82,10 @@ let isDbConnected = false;
 const bannedIpsCache = new Set();
 
 const PORT = process.env.PORT || 5000;
-// Fallback to live credentials to ensure zero downtime even if Render environment variables are missing
-const JWT_SECRET = process.env.JWT_SECRET || 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
-const MONGO_URI = process.env.MONGO_URI || 'mongodb+srv://barber:iamninja@cluster0.y4kvgub.mongodb.net/wattzen?appName=Cluster0';
+const JWT_SECRET = process.env.JWT_SECRET;
+const MONGO_URI = process.env.MONGO_URI;
 
-if (process.env.NODE_ENV === 'production' && (!MONGO_URI || !JWT_SECRET)) {
+if (!MONGO_URI || !JWT_SECRET) {
   criticalSystemError = 'Backend misconfigured: Missing MONGO_URI or JWT_SECRET on Render.';
   console.error(`\n[FATAL ERROR] ${criticalSystemError}\n`);
 }
@@ -256,11 +255,25 @@ const couponSchema = new mongoose.Schema({
   usedAt: { type: Date }
 }, { timestamps: true });
 
+const systemLogSchema = new mongoose.Schema({
+  level: { type: String, default: 'INFO' },
+  src: String,
+  event: String,
+  details: String
+}, { timestamps: true });
+
 const User = mongoose.model('User', userSchema);
 const Job = mongoose.model('Job', jobSchema);
 const Withdrawal = mongoose.model('Withdrawal', withdrawalSchema);
 const BannedIP = mongoose.model('BannedIP', bannedIpSchema);
 const Coupon = mongoose.model('Coupon', couponSchema);
+const SystemLog = mongoose.model('SystemLog', systemLogSchema);
+
+const logSystemEvent = async (level, src, event, details) => {
+  try {
+    if (isDbConnected) await SystemLog.create({ level, src, event, details });
+  } catch (err) { console.error('Log failed', err); }
+};
 
 // ==========================================
 // 2. SOCKET.IO SETUP
@@ -495,8 +508,7 @@ api.post('/admin/secret-login', async (req, res) => {
       return res.status(429).json({ message: `Too many failed attempts. Please try again in ${waitTime} minutes.` });
     }
 
-    // FIX: Trim the environment variable to prevent silent space/newline characters in .env files from breaking the master password
-    const ADMIN_PIN = (process.env.ADMIN_SECRET_PIN || '79827').trim();
+    const ADMIN_PIN = (process.env.ADMIN_SECRET_PIN || '').trim();
     if (!ADMIN_PIN) {
       console.error(`[SECURITY ALERT] Admin login attempt at ${new Date().toISOString()} but ADMIN_SECRET_PIN is not configured.`);
       return res.status(500).json({ message: 'Internal server error: Admin access misconfigured' });
@@ -509,6 +521,7 @@ api.post('/admin/secret-login', async (req, res) => {
     if (providedPin.length === actualPin.length && crypto.timingSafeEqual(providedPin, actualPin)) {
       adminLoginAttempts.delete(clientIp); // Clear attempts on success
       console.log(`[AUDIT] Successful Admin Login from IP: ${clientIp} at ${new Date().toISOString()}`);
+      logSystemEvent('INFO', 'AuthService', 'Admin Login', `Master Admin authenticated from ${clientIp}`);
       let admin = await User.findOne({ role: 'admin' });
       if (!admin) {
         // Use a non-numeric string to guarantee no collision with regular user phone numbers
@@ -600,6 +613,7 @@ api.post('/signup', async (req, res) => {
     signupRecord.count += 1;
     if (signupRecord.count >= 3) signupRecord.lockUntil = now + 24 * 60 * 60 * 1000;
     signupRateLimits.set(clientIp, signupRecord);
+    logSystemEvent('INFO', 'AuthService', 'User Signup', `New ${role} registered: ${user.phone}`);
 
     const token = jwt.sign({ userId: user._id, role: user.role }, JWT_SECRET, { expiresIn: '7d', issuer: 'wattzen-api' });
     res.status(201).json({ token, user: { _id: user._id, name: user.name, phone: user.phone, role: user.role } });
@@ -645,6 +659,7 @@ api.post('/login', async (req, res) => {
     }
 
     userLoginAttempts.delete(clientIp); // Clear rate limiter on success
+    logSystemEvent('INFO', 'AuthService', 'User Login', `User ${user.phone} (${user.role}) logged in`);
 
     const token = jwt.sign({ userId: user._id, role: user.role }, JWT_SECRET, { expiresIn: '7d', issuer: 'wattzen-api' });
     res.json({ token, user: { _id: user._id, name: user.name, phone: user.phone, role: user.role } });
@@ -714,7 +729,7 @@ api.post('/auth/forgot-password', async (req, res) => {
         headers: {
           'Content-Type': 'application/json',
           'x-rapidapi-host': 'sms-verify3.p.rapidapi.com',
-          'x-rapidapi-key': process.env.RAPIDAPI_KEY || '555ce5482cmshbd501fa2db0bb62p1b08fejsnc93f81bcae7a'
+          'x-rapidapi-key': process.env.RAPIDAPI_KEY || ''
         },
         // Removing 'estimate: true' so it actually dispatches the text message
         body: JSON.stringify({ target: targetPhone })
@@ -913,6 +928,7 @@ api.post('/jobs', authenticateToken, async (req, res) => {
     try {
       await newJob.save();
       io.emit('adminRefresh');
+      logSystemEvent('INFO', 'JobService', 'Job Created', `Job ${newJob._id} created by ${req.user.userId}`);
       
       res.status(201).json(newJob);
     } catch (saveError) {
@@ -1065,6 +1081,7 @@ api.put('/jobs/:id/accept', authenticateToken, async (req, res) => {
       io.to(jobId).emit('teamMemberJoined', { electrician: justAddedElectrician, teamSize: updatedJob.teamSize, currentSize: updatedJob.electricians.length });
     }
     io.emit('adminRefresh');
+    logSystemEvent('INFO', 'JobService', 'Job Accepted', `Electrician ${electricianId} accepted job ${jobId}`);
 
     // 1. Electrician OTP Theft Fix
     const safeJob = updatedJob.toObject();
@@ -1351,6 +1368,17 @@ api.put('/admin/jobs/:id/cancel', authenticateToken, async (req, res) => {
     res.status(200).json({ message: 'Job forcefully cancelled' });
   } catch (error) {
     res.status(500).json({ message: 'Error cancelling job' });
+  }
+});
+
+// GET /api/admin/logs - Fetch system logs
+api.get('/admin/logs', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    const logs = await SystemLog.find().sort({ createdAt: -1 }).limit(100);
+    res.status(200).json(logs);
+  } catch (error) {
+    res.status(500).json({ message: 'Error fetching logs' });
   }
 });
 
