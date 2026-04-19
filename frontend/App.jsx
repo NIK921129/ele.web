@@ -1731,26 +1731,6 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
     }
   };
 
-  if (!user?.safetyDepositPaid) {
-    return (
-      <div className="card" style={{ textAlign: 'center', padding: '60px 20px', maxWidth: '500px', margin: '40px auto' }}>
-        <i className="fas fa-shield-halved fa-4x" style={{ color: 'var(--warning)', marginBottom: '24px' }}></i>
-        <h2 style={{ marginBottom: '12px' }}>Safety Deposit Required</h2>
-        <p style={{ color: 'var(--text-muted)', marginBottom: '24px' }}>To maintain trust and quality on our platform, all electricians must pay a fully refundable ₹500 safety deposit before accepting jobs.</p>
-        <button className="btn btn-block" onClick={handlePayDeposit}><i className="fas fa-qrcode" style={{ marginRight: '8px' }}></i> Pay ₹500 via UPI</button>
-      </div>
-    );
-  }
-  if (!user?.isApproved) {
-    return (
-       <div className="card" style={{ textAlign: 'center', padding: '60px 20px', maxWidth: '500px', margin: '40px auto' }}>
-        <i className="fas fa-clock-rotate-left fa-4x" style={{ color: 'var(--primary)', marginBottom: '24px' }}></i>
-        <h2 style={{ marginBottom: '12px' }}>Verification Pending</h2>
-        <p style={{ color: 'var(--text-muted)', marginBottom: '24px' }}>Your documents and personal details have been submitted securely. Please wait while a Master Admin reviews and approves your account.</p>
-      </div>
-    )
-  }
-
   return (
     <div className="dashboard-grid">
       <div>
@@ -1760,6 +1740,8 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
             <button 
               className={`btn ${isOnline ? '' : 'btn-outline'}`} 
               onClick={() => { 
+                if (!user?.safetyDepositPaid) return showToast('Please pay the safety deposit first.', 'warning');
+                if (!user?.isApproved) return showToast('Admin verification pending. You cannot go online yet.', 'warning');
                 if (isOnline && activeJobId) return showToast('Cannot go offline while on an active job.', 'warning'); 
                 setIsOnline(!isOnline); 
                 // Request Push Notification access on user interaction to prevent browser blocking
@@ -1767,11 +1749,30 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
                   Notification.requestPermission();
                 }
               }} 
-              disabled={isOnline && !!activeJobId}
+              disabled={(isOnline && !!activeJobId) || !user?.isApproved || !user?.safetyDepositPaid}
+              style={(!user?.isApproved || !user?.safetyDepositPaid) ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
             >
               {isOnline ? <React.Fragment><span className="pulse-dot" style={{ marginRight: '8px' }}></span>Online</React.Fragment> : 'Go Online'}
             </button>
           </div>
+          
+          {(!user?.safetyDepositPaid || !user?.isApproved) && (
+            <div style={{ marginTop: '0', marginBottom: '16px', padding: '16px', background: 'rgba(245, 158, 11, 0.1)', border: '1px solid var(--warning)', borderRadius: '12px', display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+              <i className="fas fa-triangle-exclamation" style={{ fontSize: '1.5rem', color: 'var(--warning)', marginTop: '4px' }}></i>
+              <div>
+                <strong style={{ display: 'block', fontSize: '1.05rem', color: 'var(--warning)', marginBottom: '4px' }}>Action Required to Go Online</strong>
+                {!user?.safetyDepositPaid ? (
+                  <React.Fragment>
+                    <p style={{ margin: '0 0 12px 0', fontSize: '0.9rem', color: 'var(--text-main)' }}>To maintain trust and quality on our platform, please pay a fully refundable ₹500 safety deposit before accepting jobs.</p>
+                    <button className="btn" style={{ padding: '6px 16px', fontSize: '0.85rem' }} onClick={handlePayDeposit}><i className="fas fa-qrcode" style={{ marginRight: '8px' }}></i> Pay ₹500 via UPI</button>
+                  </React.Fragment>
+                ) : (
+                  <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-main)' }}>Your documents and details are currently under review. You will be able to go online and accept jobs once a Master Admin verifies your profile.</p>
+                )}
+              </div>
+            </div>
+          )}
+
             <div className="inline-stats" style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', marginTop: '16px' }}>
               <div style={{ flex: '1 1 calc(50% - 8px)', minWidth: '120px', padding: '16px', background: 'var(--secondary)', borderRadius: '16px' }}>
               <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600, textTransform: 'uppercase' }}>WALLET BALANCE</span>
