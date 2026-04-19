@@ -22,6 +22,12 @@ const app = express();
 app.set('trust proxy', process.env.TRUST_PROXY || 1); // Dynamic trust proxy for different load balancers
 const server = http.createServer(app);
 
+// Helper to accurately extract and normalize IPv4/IPv6 client IP addresses
+const getClientIp = (req) => {
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown_ip';
+  return ip.startsWith('::ffff:') ? ip.substring(7) : ip;
+};
+
 const corsOptions = {
   origin: function(origin, callback) {
     // Explicitly whitelist Vercel production and local development origins
