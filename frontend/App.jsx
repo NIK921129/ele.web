@@ -364,9 +364,35 @@ function Login({ onLoginSuccess, showToast }) {
   const handleDocUpload = (e, setter) => {
     const file = e.target.files[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) return showToast('File must be less than 5MB', 'error');
+    if (file.size > 10 * 1024 * 1024) return showToast('File must be less than 10MB', 'error');
+    
     const reader = new FileReader();
-    reader.onload = (ev) => setter(ev.target.result);
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_DIMENSION = 1200; // Cap width or height at 1200px
+        let { width, height } = img;
+
+        if (width > height && width > MAX_DIMENSION) {
+          height *= MAX_DIMENSION / width;
+          width = MAX_DIMENSION;
+        } else if (height > MAX_DIMENSION) {
+          width *= MAX_DIMENSION / height;
+          height = MAX_DIMENSION;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // Compress and convert to JPEG format with 70% quality
+        const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
+        setter(compressedBase64);
+      };
+      img.src = ev.target.result;
+    };
     reader.readAsDataURL(file);
   };
 
@@ -2047,6 +2073,7 @@ function AdminPanel({ user, onLogout, showToast }) {
   const [financeData, setFinanceData] = useState({ pendingJobs: [], pendingWithdrawals: [] });
   const [isDownloading, setIsDownloading] = useState(false);
   const [broadcastMsg, setBroadcastMsg] = useState('');
+  const [previewImage, setPreviewImage] = useState(null);
 
   const fetchDashboardData = React.useCallback(async () => {
     try {
@@ -2195,6 +2222,17 @@ function AdminPanel({ user, onLogout, showToast }) {
     }
   };
 
+  const handleRejectElectrician = async (id) => {
+    if (!window.confirm('Are you sure you want to reject this application? The account will be deleted.')) return;
+    try {
+      await fetchJson(`/admin/users/${id}/reject`, { method: 'DELETE' });
+      showToast('Application rejected and account deleted.', 'success');
+      fetchDashboardData();
+    } catch(e) {
+      showToast('Failed to reject application', 'error');
+    }
+  };
+
   const handleBroadcast = async () => {
     if(!broadcastMsg.trim()) return;
     try {
@@ -2295,16 +2333,21 @@ function AdminPanel({ user, onLogout, showToast }) {
                         <span style={{ color: calcStatus(row) === 'New' ? 'var(--warning)' : 'var(--success)', fontWeight: 600 }}>
                           • {row.status || calcStatus(row)}
                         </span>
-                        {row.role === 'electrician' && !row.isApproved && (
-                          <button className="btn" style={{ padding: '4px 10px', fontSize: '0.75rem', marginLeft: '12px', background: 'var(--primary)' }} onClick={() => handleApproveElectrician(row._id)}>Approve Account</button>
-                        )}
                         {row.role === 'electrician' && (
-                          <div style={{ marginTop: '8px', display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
-                            {row.idCardUrl && <a href={row.idCardUrl} target="_blank" rel="noreferrer" style={{ fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 'bold' }}><i className="fas fa-id-card"></i> Govt ID</a>}
-                            {row.panCardUrl && <a href={row.panCardUrl} target="_blank" rel="noreferrer" style={{ fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 'bold' }}><i className="fas fa-id-card"></i> PAN</a>}
-                            {row.photoUrl && <a href={row.photoUrl} target="_blank" rel="noreferrer" style={{ fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 'bold' }}><i className="fas fa-camera"></i> Photo</a>}
-                            {row.bankDetails && <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }} title={row.bankDetails}><i className="fas fa-building-columns"></i> Bank: {row.bankDetails.length > 15 ? row.bankDetails.substring(0,15) + '...' : row.bankDetails}</span>}
-                          </div>
+                          <React.Fragment>
+                            {!row.isApproved && (
+                              <div style={{ marginTop: '8px', display: 'flex', gap: '8px' }}>
+                                <button className="btn" style={{ padding: '4px 10px', fontSize: '0.75rem', background: 'var(--primary)' }} onClick={() => handleApproveElectrician(row._id)}>Approve</button>
+                                <button className="btn btn-outline" style={{ padding: '4px 10px', fontSize: '0.75rem', borderColor: 'var(--danger)', color: 'var(--danger)' }} onClick={() => handleRejectElectrician(row._id)}>Reject</button>
+                              </div>
+                            )}
+                            <div style={{ marginTop: '8px', display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+                              {row.idCardUrl && <button type="button" onClick={() => setPreviewImage({ url: row.idCardUrl, title: `${row.name} - Govt ID` })} style={{ background: 'none', border: 'none', padding: 0, fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 'bold', cursor: 'pointer' }}><i className="fas fa-id-card"></i> Govt ID</button>}
+                              {row.panCardUrl && <button type="button" onClick={() => setPreviewImage({ url: row.panCardUrl, title: `${row.name} - PAN Card` })} style={{ background: 'none', border: 'none', padding: 0, fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 'bold', cursor: 'pointer' }}><i className="fas fa-id-card"></i> PAN</button>}
+                              {row.photoUrl && <button type="button" onClick={() => setPreviewImage({ url: row.photoUrl, title: `${row.name} - Photo` })} style={{ background: 'none', border: 'none', padding: 0, fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 'bold', cursor: 'pointer' }}><i className="fas fa-camera"></i> Photo</button>}
+                              {row.bankDetails && <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }} title={row.bankDetails}><i className="fas fa-building-columns"></i> Bank: {row.bankDetails.length > 15 ? row.bankDetails.substring(0,15) + '...' : row.bankDetails}</span>}
+                            </div>
+                          </React.Fragment>
                         )}
                       </td>
                     </tr>
@@ -2312,6 +2355,23 @@ function AdminPanel({ user, onLogout, showToast }) {
                   })}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+        
+        {previewImage && (
+          <div className="modal-overlay visible" style={{ zIndex: 10000 }} onClick={() => setPreviewImage(null)}>
+            <div className="modal-content" style={{ maxWidth: '90vw', width: 'auto', maxHeight: '90vh', padding: '20px', textAlign: 'center', background: 'var(--surface)', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <h3 style={{ margin: 0 }}>{previewImage.title}</h3>
+                <button onClick={() => setPreviewImage(null)} style={{ background: 'none', border: 'none', fontSize: '1.5rem', color: 'var(--text-main)', cursor: 'pointer' }}>&times;</button>
+              </div>
+              <div style={{ flex: 1, overflow: 'auto', display: 'flex', justifyContent: 'center', alignItems: 'center', background: 'var(--secondary)', borderRadius: '8px', padding: '10px' }}>
+                <img src={previewImage.url} alt={previewImage.title} style={{ maxWidth: '100%', maxHeight: '65vh', objectFit: 'contain' }} />
+              </div>
+              <div style={{ marginTop: '16px' }}>
+                <a href={previewImage.url} download={`document-${Date.now()}.jpg`} className="btn"><i className="fas fa-download"></i> Download Image</a>
+              </div>
             </div>
           </div>
         )}

@@ -1200,6 +1200,22 @@ api.put('/admin/users/:id/approve', authenticateToken, async (req, res) => {
   }
 });
 
+// DELETE /api/admin/users/:id/reject - Admin rejects and deletes unapproved electrician
+api.delete('/admin/users/:id/reject', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ message: 'Invalid User ID format' });
+    
+    const user = await User.findOneAndDelete({ _id: req.params.id, isApproved: false });
+    if (!user) return res.status(404).json({ message: 'User not found or already approved' });
+    
+    io.emit('adminRefresh');
+    res.status(200).json({ message: 'Electrician application rejected and removed' });
+  } catch (error) {
+    res.status(500).json({ message: 'Error rejecting electrician' });
+  }
+});
+
 // GET /api/admin/reports/completed-jobs - Admin report generation
 api.get('/admin/reports/completed-jobs', authenticateToken, async (req, res) => {
   try {
