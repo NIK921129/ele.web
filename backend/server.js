@@ -130,7 +130,6 @@ const connectDB = async (retries = 5) => {
   }
   if (dbConnectionPromise) return dbConnectionPromise;
   try {
-    await mongoose.connect(MONGO_URI, {
     dbConnectionPromise = mongoose.connect(MONGO_URI, {
       serverSelectionTimeoutMS: 5000, // Timeout after 5s instead of 30s
       socketTimeoutMS: 45000, // Close sockets after 45 seconds of inactivity
