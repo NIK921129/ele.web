@@ -209,6 +209,7 @@ const jobSchema = new mongoose.Schema({
     }
   },
   estimatedPrice: { type: Number, default: 299, min: 0, max: 1000000 },
+  originalPrice: { type: Number, min: 0 },
   currentTeamSize: { type: Number, default: 0, min: 0 }, 
   teamSize: { type: Number, default: 1, min: 1 },
   jobOTP: { type: String },
@@ -255,6 +256,23 @@ const couponSchema = new mongoose.Schema({
   usedAt: { type: Date }
 }, { timestamps: true });
 
+const archivedUserSchema = new mongoose.Schema({
+  originalId: String,
+  name: String,
+  phone: String,
+  role: String,
+  walletBalance: Number,
+  jobsCompleted: Number,
+  address: String,
+  experienceYears: Number,
+  idCardUrl: String,
+  panCardUrl: String,
+  photoUrl: String,
+  bankDetails: String,
+  deletedAt: { type: Date, default: Date.now },
+  deletedBy: String
+});
+
 const systemLogSchema = new mongoose.Schema({
   level: { type: String, default: 'INFO' },
   src: String,
@@ -268,6 +286,7 @@ const Withdrawal = mongoose.model('Withdrawal', withdrawalSchema);
 const BannedIP = mongoose.model('BannedIP', bannedIpSchema);
 const Coupon = mongoose.model('Coupon', couponSchema);
 const SystemLog = mongoose.model('SystemLog', systemLogSchema);
+const ArchivedUser = mongoose.model('ArchivedUser', archivedUserSchema);
 
 const logSystemEvent = async (level, src, event, details) => {
   try {
@@ -469,7 +488,8 @@ const runStuckJobSweeper = async () => {
       
       if (job.electricians && job.electricians.length > 0) {
         const uniqueElectricians = [...new Set(job.electricians.map(e => e.toString()))];
-        const earningsPerElectrician = Math.floor(((job.estimatedPrice * 0.8) / Math.max(1, uniqueElectricians.length)) * 100) / 100;
+        const basePayout = job.originalPrice || job.estimatedPrice;
+        const earningsPerElectrician = Math.floor(((basePayout * 0.8) / Math.max(1, uniqueElectricians.length)) * 100) / 100;
         await User.updateMany(
           { _id: { $in: uniqueElectricians } },
           { $inc: { walletBalance: earningsPerElectrician, jobsCompleted: 1 } }
@@ -678,7 +698,7 @@ api.get('/location/search', async (req, res) => {
     const safeQuery = String(q).substring(0, 100); // Prevent massive payloads to external proxy
 
     const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(safeQuery)}&countrycodes=in&limit=5`, {
-      headers: { 'User-Agent': 'WattzenApp/1.0 (contact@wattzen.com)' }
+      headers: { 'User-Agent': 'WattzenApp/1.0 (projects.nikunj.singh@gmail.com)' }
     });
     if (!response.ok) throw new Error(`Nominatim API Error: ${response.status}`); // 8. Prevent HTML parse crash
     const data = await response.json();
@@ -859,6 +879,11 @@ api.delete('/me', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'Cannot delete account with active jobs. Please complete or cancel them first.' });
     }
 
+    const userToArchive = await User.findById(req.user.userId);
+    if (userToArchive) {
+      await ArchivedUser.create({ ...userToArchive.toObject(), originalId: userToArchive._id, deletedBy: 'Self Deletion' });
+    }
+
     const deletedUser = await User.findByIdAndDelete(req.user.userId);
     if (!deletedUser) return res.status(404).json({ message: 'User not found' });
     res.status(200).json({ message: 'Account permanently deleted' });
@@ -920,6 +945,7 @@ api.post('/jobs', authenticateToken, async (req, res) => {
       teamSize: safeTeamSize,
       location: { type: 'Point', coordinates },
       estimatedPrice: finalPrice,
+      originalPrice: safePrice,
       paymentStatus: 'verifying',
       jobOTP: crypto.randomInt(1000, 10000).toString(), // Security: Cryptographically secure OTP
       status: 'verifying_payment'
@@ -1010,7 +1036,7 @@ api.get('/jobs/available', authenticateToken, async (req, res) => {
     // 11. Security: Negative Pagination Infinity DoS Fix
     const skip = Math.max(0, Math.min((page - 1) * limit, 5000)); 
 
-    let jobQuery = Job.find(query).select('serviceType address estimatedPrice status location customer teamSize currentTeamSize').skip(skip).limit(limit);
+    let jobQuery = Job.find(query).select('serviceType address estimatedPrice originalPrice status location customer teamSize currentTeamSize').skip(skip).limit(limit);
     if (!latitude || !longitude) {
       jobQuery = jobQuery.sort({ createdAt: -1 });
     }
@@ -1226,7 +1252,8 @@ api.put('/jobs/:id/complete', authenticateToken, async (req, res) => {
     if (job.electricians && job.electricians.length > 0) {
       // 10. Financial Bug: Floor precision to prevent over-payouts. Deduplicate array to prevent fragmented/lost payouts.
       const uniqueElectricians = [...new Set(job.electricians.map(e => e.toString()))];
-      const earningsPerElectrician = Math.floor(((job.estimatedPrice * 0.8) / Math.max(1, uniqueElectricians.length)) * 100) / 100;
+      const basePayout = job.originalPrice || job.estimatedPrice;
+      const earningsPerElectrician = Math.floor(((basePayout * 0.8) / Math.max(1, uniqueElectricians.length)) * 100) / 100;
       await User.updateMany(
         { _id: { $in: uniqueElectricians } },
         { $inc: { walletBalance: earningsPerElectrician, jobsCompleted: 1 } }
@@ -1302,6 +1329,11 @@ api.delete('/admin/users/:id/reject', authenticateToken, async (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ message: 'Invalid User ID format' });
     
+    const userToArchive = await User.findById(req.params.id);
+    if (userToArchive) {
+      await ArchivedUser.create({ ...userToArchive.toObject(), originalId: userToArchive._id, deletedBy: `Admin Rejected (${req.user.userId})` });
+    }
+
     const user = await User.findOneAndDelete({ _id: req.params.id, isApproved: false });
     if (!user) return res.status(404).json({ message: 'User not found or already approved' });
     
@@ -1321,6 +1353,11 @@ api.delete('/admin/users/:id', authenticateToken, async (req, res) => {
     // Prevent admin from deleting themselves
     if (req.user.userId === req.params.id) return res.status(400).json({ message: 'Cannot delete your own admin account' });
     
+    const userToArchive = await User.findById(req.params.id);
+    if (userToArchive) {
+      await ArchivedUser.create({ ...userToArchive.toObject(), originalId: userToArchive._id, deletedBy: `Admin Force Delete (${req.user.userId})` });
+    }
+
     const user = await User.findByIdAndDelete(req.params.id);
     if (!user) return res.status(404).json({ message: 'User not found' });
     
@@ -1409,7 +1446,33 @@ api.get('/admin/finance', authenticateToken, async (req, res) => {
     // 12. Performance & Privacy: Do not load messages arrays or OTPs into admin dashboard memory
     const pendingJobs = await Job.find({ status: 'verifying_payment' }).select('-messages -jobOTP').populate('customer', 'name phone').sort({ createdAt: -1 }).limit(100);
     const pendingWithdrawals = await Withdrawal.find({ status: 'pending' }).populate('electrician', 'name phone').sort({ createdAt: -1 }).limit(100);
-    res.status(200).json({ pendingJobs, pendingWithdrawals });
+    
+    // Financial Stats Aggregations
+    const revAgg = await Job.aggregate([
+      { $match: { status: 'completed' } },
+      { $group: { _id: null, totalRevenue: { $sum: { $ifNull: ["$originalPrice", "$estimatedPrice"] } } } }
+    ]);
+    const totalRevenue = revAgg.length > 0 ? revAgg[0].totalRevenue : 0;
+    const totalProfit = totalRevenue * 0.20; // 20% Platform Margin
+    
+    const payoutAgg = await Withdrawal.aggregate([
+      { $match: { status: 'approved' } },
+      { $group: { _id: null, totalPaid: { $sum: "$amount" } } }
+    ]);
+    const totalPayouts = payoutAgg.length > 0 ? payoutAgg[0].totalPaid : 0;
+
+    // Historical Logs
+    const recentCompletedJobs = await Job.find({ status: 'completed' })
+      .select('serviceType estimatedPrice originalPrice createdAt')
+      .populate('customer', 'name')
+      .populate('electricians', 'name')
+      .sort({ createdAt: -1 }).limit(100);
+      
+    const withdrawalLogs = await Withdrawal.find({ status: { $ne: 'pending' } })
+      .populate('electrician', 'name phone')
+      .sort({ updatedAt: -1 }).limit(100);
+
+    res.status(200).json({ pendingJobs, pendingWithdrawals, stats: { totalRevenue, totalProfit, totalPayouts, grossMargin: '20%' }, recentCompletedJobs, withdrawalLogs });
   } catch (error) {
     res.status(500).json({ message: 'Server error fetching finance records' });
   }
@@ -1686,6 +1749,52 @@ api.get('/admin/coupons', authenticateToken, async (req, res) => {
     res.status(200).json(coupons);
   } catch (error) {
     res.status(500).json({ message: 'Error fetching coupons' });
+  }
+});
+
+// GET /api/admin/users/:id/activity - Fetch specific user logs and timings
+api.get('/admin/users/:id/activity', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    
+    // Find logs that mention this user's ID or phone number
+    const logs = await SystemLog.find({ 
+      $or: [ { details: { $regex: user.phone, $options: 'i' } }, { details: { $regex: user._id.toString(), $options: 'i' } } ] 
+    }).sort({ createdAt: -1 }).limit(50);
+
+    res.status(200).json({ userTimings: { createdAt: user.createdAt, updatedAt: user.updatedAt }, logs });
+  } catch (error) {
+    res.status(500).json({ message: 'Error fetching user activity' });
+  }
+});
+
+// PUT /api/admin/users/:id/force-password - Admin resets a user's password manually
+api.put('/admin/users/:id/force-password', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    const { newPassword } = req.body;
+    if (!newPassword || newPassword.length < 6) return res.status(400).json({ message: 'Password must be at least 6 characters' });
+    
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await User.findByIdAndUpdate(req.params.id, { password: hashedPassword });
+    
+    logSystemEvent('WARN', 'AdminPortal', 'Force Password Reset', `Admin ${req.user.userId} forced password reset for user ${req.params.id}`);
+    res.status(200).json({ message: 'Password forcefully updated.' });
+  } catch (error) {
+    res.status(500).json({ message: 'Error updating password' });
+  }
+});
+
+// GET /api/admin/archives/users - Fetch archived/deleted users
+api.get('/admin/archives/users', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    const archives = await ArchivedUser.find().select('-idCardUrl -panCardUrl -photoUrl').sort({ deletedAt: -1 });
+    res.status(200).json(archives);
+  } catch (error) {
+    res.status(500).json({ message: 'Error fetching archives' });
   }
 });
 

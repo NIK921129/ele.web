@@ -1138,7 +1138,7 @@ ${job.electricians && job.electricians.length > 0 ? job.electricians.map(e => `-
 TOTAL AMOUNT PAID: ₹${job.estimatedPrice}
 =========================================
 Thank you for choosing Wattzen!
-Support: support@wattzen.com
+Support: projects.nikunj.singh@gmail.com
     `;
     const blob = new Blob([invoiceText.trim()], { type: 'text/plain' });
     const url = window.URL.createObjectURL(blob);
@@ -1358,7 +1358,7 @@ Support: support@wattzen.com
                     <i className="fas fa-check-circle"></i> Mark Job as Done
                   </button>
                 )}
-                <a href={`mailto:support@wattzen.com?subject=Emergency%20Support%20-%20Job%20${activeJobId}`} className="btn btn-outline" style={{ padding: '14px', flex: '0 0 auto', borderColor: 'var(--danger)', color: 'var(--danger)', borderRadius: 'var(--radius-btn)' }} title="Contact Support">
+              <a href={`mailto:projects.nikunj.singh@gmail.com?subject=Emergency%20Support%20-%20Job%20${activeJobId}`} className="btn btn-outline" style={{ padding: '14px', flex: '0 0 auto', borderColor: 'var(--danger)', color: 'var(--danger)', borderRadius: 'var(--radius-btn)' }} title="Contact Support">
                   <i className="fas fa-headset"></i>
                 </a>
               </div>
@@ -1794,7 +1794,7 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
       
       const earningsData = last7Days.map(date => {
         return jobHistory.filter(job => new Date(job.createdAt).toLocaleDateString() === date && job.status === 'completed')
-          .reduce((sum, job) => sum + Math.round((job.estimatedPrice * 0.8) / Math.max(1, job.electricians?.length || 1)), 0);
+          .reduce((sum, job) => sum + Math.round(((job.originalPrice || job.estimatedPrice) * 0.8) / Math.max(1, job.electricians?.length || 1)), 0);
       });
 
       chartInstance.current = new window.Chart(ctx, {
@@ -2009,7 +2009,7 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
                     <div key={job._id} style={{ padding: '20px', background: 'var(--surface)', borderRadius: '16px', border: '2px solid var(--success)', boxShadow: 'var(--shadow-lg)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                         <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.2)', color: 'var(--success)' }}>NEW MATCH FOUND</span>
-                        <span style={{ fontWeight: 'bold', color: 'var(--primary)', fontSize: '1.2rem' }}>₹{job.estimatedPrice}</span>
+                        <span style={{ fontWeight: 'bold', color: 'var(--primary)', fontSize: '1.2rem' }}>₹{job.originalPrice || job.estimatedPrice}</span>
                       </div>
                       <p style={{ margin: 0, fontSize: '0.95rem', color: 'var(--text-main)', textTransform: 'capitalize' }}><strong>Service:</strong> {job.serviceType.replace('_', ' ')}</p>
                       <p style={{ margin: '4px 0 12px 0', fontSize: '0.9rem', color: 'var(--text-main)' }}>
@@ -2134,7 +2134,7 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
                       <span className="badge" style={{ background: job.status === 'completed' ? 'var(--success)' : (job.status === 'cancelled' ? 'var(--danger)' : 'var(--warning)'), color: 'white' }}>{job.status}</span>
                     </div>
                     <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}><i className="far fa-calendar-alt"></i> {new Date(job.createdAt).toLocaleDateString()}</div>
-                    <div style={{ fontSize: '0.95rem', marginTop: '8px', fontWeight: 'bold', color: 'var(--primary)' }}>Earnings: <span style={{ color: 'var(--success)' }}>₹{Math.round((job.estimatedPrice * 0.8) / Math.max(1, job.electricians?.length || 1))}</span></div>
+                    <div style={{ fontSize: '0.95rem', marginTop: '8px', fontWeight: 'bold', color: 'var(--primary)' }}>Earnings: <span style={{ color: 'var(--success)' }}>₹{Math.round(((job.originalPrice || job.estimatedPrice) * 0.8) / Math.max(1, job.electricians?.length || 1))}</span></div>
                   </div>
                 ))}
               </div>
@@ -2242,7 +2242,7 @@ function AdminPanel({ user, onLogout, showToast }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [liveData, setLiveData] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [financeData, setFinanceData] = useState({ pendingJobs: [], pendingWithdrawals: [] });
+  const [financeData, setFinanceData] = useState({ pendingJobs: [], pendingWithdrawals: [], stats: {}, recentCompletedJobs: [], withdrawalLogs: [] });
   const [isDownloading, setIsDownloading] = useState(false);
   const [broadcastMsg, setBroadcastMsg] = useState('');
   const [previewImage, setPreviewImage] = useState(null);
@@ -2254,6 +2254,10 @@ function AdminPanel({ user, onLogout, showToast }) {
   const [newCouponAmount, setNewCouponAmount] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [systemLogs, setSystemLogs] = useState([]);
+  const [archivedUsers, setArchivedUsers] = useState([]);
+  const [activityUser, setActivityUser] = useState(null);
+  const [activityData, setActivityData] = useState({ logs: [], userTimings: {} });
+  const [newPasswordInput, setNewPasswordInput] = useState('');
   
   const mounted = useRef(true);
   useEffect(() => { return () => { mounted.current = false; }; }, []);
@@ -2264,13 +2268,15 @@ function AdminPanel({ user, onLogout, showToast }) {
       const users = await fetchJson('/admin/users');
       setLiveData(Array.isArray(users) ? users : []);
       const fin = await fetchJson('/admin/finance');
-      setFinanceData(fin && Array.isArray(fin.pendingJobs) ? fin : { pendingJobs: [], pendingWithdrawals: [] });
+      setFinanceData(fin && Array.isArray(fin.pendingJobs) ? fin : { pendingJobs: [], pendingWithdrawals: [], stats: {}, recentCompletedJobs: [], withdrawalLogs: [] });
       const banned = await fetchJson('/admin/security/banned-ips');
       setBannedIps(Array.isArray(banned) ? banned : []);
       const coups = await fetchJson('/admin/coupons');
       setCouponsData(Array.isArray(coups) ? coups : []);
       const logs = await fetchJson('/admin/logs');
       setSystemLogs(Array.isArray(logs) ? logs : []);
+      const archives = await fetchJson('/admin/archives/users');
+      setArchivedUsers(Array.isArray(archives) ? archives : []);
     } catch (error) {
       showToast(`Failed to fetch dashboard data: ${error.message}`, 'error');
       console.error('Dashboard error:', error);
@@ -2361,6 +2367,26 @@ function AdminPanel({ user, onLogout, showToast }) {
     } finally {
       if (mounted.current) setIsDownloading(false);
     }
+  };
+
+  const handleViewActivity = async (user) => {
+    try {
+      const data = await fetchJson(`/admin/users/${user._id}/activity`);
+      setActivityData(data);
+      setActivityUser(user);
+    } catch (e) {
+      showToast('Failed to load user activity logs.', 'error');
+    }
+  };
+
+  const handleForcePassword = async (id) => {
+    if (!newPasswordInput || newPasswordInput.length < 6) return showToast('Password must be at least 6 characters.', 'error');
+    if (!window.confirm('WARNING: Force reset this user\'s password? They will be logged out if they are currently online.')) return;
+    try {
+      await fetchJson(`/admin/users/${id}/force-password`, { method: 'PUT', body: { newPassword: newPasswordInput } });
+      showToast('Password forcefully overwritten.', 'success');
+      setNewPasswordInput('');
+    } catch (e) { showToast(e.message || 'Failed to reset password.', 'error'); }
   };
 
   const handleApprovePayment = async (id) => {
@@ -2556,6 +2582,7 @@ function AdminPanel({ user, onLogout, showToast }) {
         <TabButton active={activeTab === 'database'} onClick={() => setActiveTab('database')} icon="fa-database" label="Global Database" />
         <TabButton active={activeTab === 'finance'} onClick={() => setActiveTab('finance')} icon="fa-indian-rupee-sign" label="Finance & Approvals" />
         <TabButton active={activeTab === 'security'} onClick={() => setActiveTab('security')} icon="fa-shield-halved" label="Security & Bans" />
+        <TabButton active={activeTab === 'archives'} onClick={() => setActiveTab('archives')} icon="fa-box-archive" label="Deleted Archives" />
         <TabButton active={activeTab === 'coupons'} onClick={() => setActiveTab('coupons')} icon="fa-ticket" label="Discount Coupons" />
         <TabButton active={activeTab === 'logs'} onClick={() => setActiveTab('logs')} icon="fa-terminal" label="System Logs" />
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
@@ -2607,6 +2634,9 @@ function AdminPanel({ user, onLogout, showToast }) {
                           • {row.status || calcStatus(row)}
                         </span>
                         <div style={{ marginTop: '8px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                          <button className="btn btn-outline" style={{ padding: '6px 12px', fontSize: '0.8rem', color: 'var(--text-main)', borderColor: 'var(--border-light)' }} onClick={() => handleViewActivity(row)} title="View User Logs & Timings">
+                            <i className="fas fa-clock-rotate-left"></i> Logs
+                          </button>
                           {row.role === 'electrician' && (
                             <button className="btn btn-outline" style={{ padding: '6px 12px', fontSize: '0.8rem', color: 'var(--primary)', borderColor: 'var(--primary)' }} onClick={() => handleReviewDocs(row)}>
                               <i className="fas fa-folder-open"></i> Docs
@@ -2669,6 +2699,14 @@ function AdminPanel({ user, onLogout, showToast }) {
                   </button>
                 </div>
               )}
+              
+              <div style={{ marginTop: '24px', padding: '16px', background: 'var(--secondary)', borderRadius: '8px', border: '1px dashed var(--danger)' }}>
+                <h4 style={{ color: 'var(--danger)', margin: '0 0 12px 0' }}><i className="fas fa-key"></i> Force Password Reset</h4>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <input type="text" className="form-control" placeholder="Type new secure password" value={newPasswordInput} onChange={e => setNewPasswordInput(e.target.value)} style={{ margin: 0, flex: 1 }} />
+                  <button className="btn" style={{ background: 'var(--danger)', whiteSpace: 'nowrap' }} onClick={() => handleForcePassword(reviewUser._id)}>Force Reset</button>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -2689,15 +2727,54 @@ function AdminPanel({ user, onLogout, showToast }) {
             </div>
           </div>
         )}
+        
+        {activityUser && (
+          <div className="modal-overlay visible" style={{ zIndex: 10000 }} onClick={() => setActivityUser(null)}>
+            <div className="modal-content" style={{ maxWidth: '700px', width: '90%', maxHeight: '90vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <h3 style={{ margin: 0 }}><i className="fas fa-user-clock" style={{ color: 'var(--primary)' }}></i> Activity: {activityUser.name}</h3>
+                <button onClick={() => setActivityUser(null)} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: 'var(--text-muted)' }}>&times;</button>
+              </div>
+              
+              <div style={{ display: 'flex', gap: '16px', marginBottom: '20px', background: 'var(--secondary)', padding: '16px', borderRadius: '12px' }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 'bold' }}>Account Created</div>
+                  <div style={{ fontSize: '1.1rem', color: 'var(--text-main)' }}>{new Date(activityData.userTimings?.createdAt).toLocaleString()}</div>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 'bold' }}>Last Updated</div>
+                  <div style={{ fontSize: '1.1rem', color: 'var(--text-main)' }}>{new Date(activityData.userTimings?.updatedAt).toLocaleString()}</div>
+                </div>
+              </div>
+              
+              <h4 style={{ marginBottom: '12px', color: 'var(--text-main)' }}>System Logs Involving User</h4>
+              <div style={{ background: '#0f172a', padding: '12px', borderRadius: '12px', overflowX: 'auto', maxHeight: '400px' }}>
+                {activityData.logs.length === 0 ? <p style={{ color: '#64748b', margin: 0 }}>No logs found for this user.</p> : activityData.logs.map(log => (
+                  <div key={log._id} style={{ marginBottom: '10px', paddingBottom: '10px', borderBottom: '1px dashed #1e293b', fontSize: '0.85rem' }}>
+                    <span style={{ color: '#64748b' }}>[{new Date(log.createdAt).toLocaleString()}]</span> <span style={{ color: log.level === 'INFO' ? '#38bdf8' : (log.level === 'WARN' ? '#fbbf24' : '#ef4444'), fontWeight: 'bold' }}>{log.level}</span> <span style={{ color: '#c084fc' }}>{log.src}</span> <span style={{ color: '#f8fafc' }}>{log.event}: <span style={{ color: '#94a3b8' }}>{log.details}</span></span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
         {activeTab === 'finance' && (
           <div style={{ padding: '20px' }}>
+            <h3 style={{ color: 'var(--text-main)', marginBottom: '16px' }}><i className="fas fa-chart-pie"></i> Financial Statistics</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '32px' }}>
+              <MetricCard icon="fa-sack-dollar" title="Gross Revenue" value={`₹${financeData.stats?.totalRevenue?.toLocaleString() || 0}`} trend="Total value of completed jobs" color="var(--primary)" />
+              <MetricCard icon="fa-chart-line" title="Platform Profit" value={`₹${financeData.stats?.totalProfit?.toLocaleString() || 0}`} trend="20% Commission" color="var(--success)" />
+              <MetricCard icon="fa-money-bill-transfer" title="Total Payouts" value={`₹${financeData.stats?.totalPayouts?.toLocaleString() || 0}`} trend="Approved withdrawals" color="var(--warning)" />
+              <MetricCard icon="fa-percent" title="Gross Margin" value={financeData.stats?.grossMargin || '20%'} trend="Fixed platform fee" color="var(--gold)" />
+            </div>
+
             <h3 style={{ color: 'var(--text-main)', marginBottom: '16px' }}><i className="fas fa-receipt"></i> Pending User Payments</h3>
             <div style={{ display: 'grid', gap: '12px', marginBottom: '32px' }}>
           {(financeData.pendingJobs || []).length === 0 && <p style={{ color: 'var(--text-muted)' }}>No payments pending verification.</p>}
           {(financeData.pendingJobs || []).map(job => (
                 <div key={job._id} style={{ background: 'var(--secondary)', padding: '16px', borderRadius: '12px', display: 'flex', flexWrap: 'wrap', gap: '12px', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
-                    <strong>{job.serviceType}</strong> - ₹{job.estimatedPrice} <br/>
+                    <strong>{job.serviceType}</strong> - ₹{job.estimatedPrice} {job.originalPrice && job.originalPrice !== job.estimatedPrice ? <span style={{ fontSize: '0.8rem', color: 'var(--warning)' }}>(Coupon Used)</span> : ''} <br/>
                     <small>Customer: {job.customer?.name} ({job.customer?.phone})</small>
                   </div>
                   <div style={{ display: 'flex', gap: '8px' }}>
@@ -2724,6 +2801,65 @@ function AdminPanel({ user, onLogout, showToast }) {
                   </div>
                 </div>
               ))}
+            </div>
+
+            <h3 style={{ color: 'var(--text-main)', marginBottom: '16px', marginTop: '32px' }}><i className="fas fa-file-invoice-dollar"></i> Completed Job Revenue Logs</h3>
+            <div style={{ overflowX: 'auto', background: 'var(--surface)', borderRadius: '12px', border: '1px solid var(--border-light)' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem', textAlign: 'left' }}>
+                <thead style={{ background: 'var(--secondary)', color: 'var(--text-muted)' }}>
+                  <tr>
+                    <th style={{ padding: '14px 16px' }}>Date</th>
+                    <th style={{ padding: '14px 16px' }}>Service</th>
+                    <th style={{ padding: '14px 16px' }}>Customer</th>
+                    <th style={{ padding: '14px 16px' }}>Electrician(s)</th>
+                    <th style={{ padding: '14px 16px' }}>Gross Revenue</th>
+                    <th style={{ padding: '14px 16px' }}>Profit (20%)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(financeData.recentCompletedJobs || []).length === 0 ? <tr><td colSpan="6" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>No completed jobs yet.</td></tr> : (financeData.recentCompletedJobs || []).map(job => {
+                    const rev = job.originalPrice || job.estimatedPrice;
+                    const profit = rev * 0.2;
+                    return (
+                    <tr key={job._id} style={{ borderBottom: '1px solid var(--border-light)' }}>
+                      <td style={{ padding: '14px 16px' }}>{new Date(job.createdAt).toLocaleString()}</td>
+                      <td style={{ padding: '14px 16px', textTransform: 'capitalize' }}>{job.serviceType.replace('_', ' ')}</td>
+                      <td style={{ padding: '14px 16px' }}>{job.customer?.name || 'N/A'}</td>
+                      <td style={{ padding: '14px 16px' }}>{job.electricians?.map(e => e.name).join(', ') || 'N/A'}</td>
+                      <td style={{ padding: '14px 16px', fontWeight: 'bold', color: 'var(--primary)' }}>₹{rev}</td>
+                      <td style={{ padding: '14px 16px', fontWeight: 'bold', color: 'var(--success)' }}>₹{profit.toFixed(2)}</td>
+                    </tr>
+                  )})}
+                </tbody>
+              </table>
+            </div>
+
+            <h3 style={{ color: 'var(--text-main)', marginBottom: '16px', marginTop: '32px' }}><i className="fas fa-building-columns"></i> Historical Payout Logs</h3>
+            <div style={{ overflowX: 'auto', background: 'var(--surface)', borderRadius: '12px', border: '1px solid var(--border-light)' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem', textAlign: 'left' }}>
+                <thead style={{ background: 'var(--secondary)', color: 'var(--text-muted)' }}>
+                  <tr>
+                    <th style={{ padding: '14px 16px' }}>Date Processed</th>
+                    <th style={{ padding: '14px 16px' }}>Electrician</th>
+                    <th style={{ padding: '14px 16px' }}>Phone</th>
+                    <th style={{ padding: '14px 16px' }}>Amount</th>
+                    <th style={{ padding: '14px 16px' }}>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(financeData.withdrawalLogs || []).length === 0 ? <tr><td colSpan="5" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>No payout history.</td></tr> : (financeData.withdrawalLogs || []).map(log => (
+                    <tr key={log._id} style={{ borderBottom: '1px solid var(--border-light)' }}>
+                      <td style={{ padding: '14px 16px' }}>{new Date(log.updatedAt).toLocaleString()}</td>
+                      <td style={{ padding: '14px 16px', fontWeight: 'bold' }}>{log.electrician?.name || 'N/A'}</td>
+                      <td style={{ padding: '14px 16px' }}>{log.electrician?.phone || 'N/A'}</td>
+                      <td style={{ padding: '14px 16px', fontWeight: 'bold' }}>₹{log.amount}</td>
+                      <td style={{ padding: '14px 16px' }}>
+                        <span className="badge" style={{ background: log.status === 'approved' ? 'var(--success)' : 'var(--danger)', color: 'white' }}>{log.status.toUpperCase()}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
@@ -2759,6 +2895,33 @@ function AdminPanel({ user, onLogout, showToast }) {
                       <td style={{ padding: '14px 16px' }}>
                         <button className="btn btn-outline" style={{ padding: '6px 12px', fontSize: '0.8rem', color: 'var(--success)', borderColor: 'var(--success)' }} onClick={() => handleUnbanIp(record.ip)}><i className="fas fa-unlock"></i> Unban</button>
                       </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+        {activeTab === 'archives' && (
+          <div style={{ padding: '20px' }}>
+            <h3 style={{ color: 'var(--text-main)', marginBottom: '16px' }}><i className="fas fa-box-archive"></i> Deleted Users & Data</h3>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem', textAlign: 'left' }}>
+                <thead style={{ background: 'var(--secondary)', color: 'var(--text-muted)' }}>
+                  <tr>
+                    <th style={{ padding: '14px 16px' }}>Original ID</th>
+                    <th style={{ padding: '14px 16px' }}>Name & Phone</th>
+                    <th style={{ padding: '14px 16px' }}>Deleted By</th>
+                    <th style={{ padding: '14px 16px' }}>Deleted At</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {archivedUsers.length === 0 ? <tr><td colSpan="4" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>No archived records found.</td></tr> : archivedUsers.map(u => (
+                    <tr key={u._id} style={{ borderBottom: '1px solid var(--border-light)' }}>
+                      <td style={{ padding: '14px 16px', fontFamily: 'monospace', fontWeight: 'bold', color: 'var(--danger)' }}>{u.originalId}</td>
+                      <td style={{ padding: '14px 16px' }}><strong>{u.name}</strong><br/><small>{u.phone}</small></td>
+                      <td style={{ padding: '14px 16px', color: 'var(--warning)' }}>{u.deletedBy}</td>
+                      <td style={{ padding: '14px 16px', color: 'var(--text-muted)' }}>{new Date(u.deletedAt).toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>
