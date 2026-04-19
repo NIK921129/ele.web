@@ -127,6 +127,32 @@ async function sendPush(title, body, data = null, actions = []) {
 // 2. COMPONENTS
 // ==========================================
 
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, errorInfo) {
+    console.error('ErrorBoundary caught an error:', error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: '40px', textAlign: 'center', marginTop: '10vh' }}>
+          <i className="fas fa-exclamation-triangle fa-4x" style={{ color: 'var(--danger)', marginBottom: '20px' }}></i>
+          <h2 style={{ color: 'var(--text-main)' }}>Oops! Something went wrong.</h2>
+          <p style={{ color: 'var(--text-muted)', marginBottom: '20px' }}>We're working on fixing this right away.</p>
+          <button className="btn" onClick={() => window.location.reload()}>Reload Page</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // --- Landing Component ---
 function Landing({ onEnter, onSecret }) {
   const [mouse, setMouse] = useState({ x: 0, y: 0 });
@@ -752,6 +778,11 @@ function CustomerHome({ user, showToast, onEditProfile }) {
   const [isLocating, setIsLocating] = useState(false);
   const [isLoadingActiveJob, setIsLoadingActiveJob] = useState(true);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+  const [historyFilter, setHistoryFilter] = useState('all');
+  const [showPriceBreakdown, setShowPriceBreakdown] = useState(false);
+  const [couponInput, setCouponInput] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState(null);
+  const [isApplyingCoupon, setIsApplyingCoupon] = useState(false);
   
   const mounted = useRef(true);
   useEffect(() => { return () => { mounted.current = false; }; }, []);
@@ -835,8 +866,10 @@ function CustomerHome({ user, showToast, onEditProfile }) {
     if (!activeJobId) return;
 
     // FIX: Ensure the user rejoins the room if their internet drops and the socket reconnects
-    const joinRoom = () => { if (socket.connected) socket.emit('joinJobRoom', activeJobId); };
-    joinRoom(); // Join immediately
+    const joinRoom = () => socket.emit('joinJobRoom', activeJobId);
+    if (socket.connected) {
+      joinRoom(); // Join immediately if already connected
+    }
     socket.on('connect', joinRoom);
 
     // Request push notification permission from the user
@@ -940,12 +973,27 @@ function CustomerHome({ user, showToast, onEditProfile }) {
     setBookingPrice(price);
   };
 
+  const handleApplyCoupon = async () => {
+    if (!couponInput) return;
+    setIsApplyingCoupon(true);
+    try {
+      const res = await fetchJson('/coupons/validate', { method: 'POST', body: { code: couponInput } });
+      setAppliedCoupon({ code: couponInput.toUpperCase(), discount: res.discountAmount });
+      showToast('Coupon applied successfully!', 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+      setAppliedCoupon(null);
+    } finally {
+      setIsApplyingCoupon(false);
+    }
+  };
+
   const handleConfirmPayment = async () => {
     setIsBooking(true);
     try {
       const job = await fetchJson('/jobs', {
         method: 'POST',
-        body: { serviceType: selectedService, address, coordinates, estimatedPrice: bookingPrice, teamSize }
+        body: { serviceType: selectedService, address, coordinates, estimatedPrice: bookingPrice, teamSize, couponCode: appliedCoupon?.code }
       });
       setActiveJobId(job._id);
       setBookingPrice(null);
@@ -966,6 +1014,8 @@ function CustomerHome({ user, showToast, onEditProfile }) {
     try {
       await fetchJson(`/jobs/${activeJobId}/cancel`, { method: 'PUT' });
       setActiveJobId(null);
+      setAppliedCoupon(null);
+      setCouponInput('');
       setAssignedElectricians([]);
       setTeamStatusMessage('');
       setLiveLocation(null);
@@ -1065,6 +1115,54 @@ function CustomerHome({ user, showToast, onEditProfile }) {
       showToast(error.message.includes('Network') ? error.message : 'Failed to complete job.', 'error');
     }
   };
+
+  const handleDownloadInvoice = (job) => {
+    const invoiceText = `
+WATTZEN ELECTRICAL SERVICES
+=========================================
+INVOICE RECEIPT
+=========================================
+Job ID: ${job._id}
+Date: ${new Date(job.createdAt).toLocaleString()}
+Service: ${job.serviceType.replace('_', ' ').toUpperCase()}
+Status: ${job.status.toUpperCase()}
+-----------------------------------------
+Customer Details:
+Name: ${user?.name || 'Customer'}
+Phone: ${user?.phone || 'N/A'}
+Address: ${job.address}
+-----------------------------------------
+Service Professional(s):
+${job.electricians && job.electricians.length > 0 ? job.electricians.map(e => `- ${e.name} (${e.phone || 'N/A'})`).join('\n') : 'N/A'}
+-----------------------------------------
+TOTAL AMOUNT PAID: ₹${job.estimatedPrice}
+=========================================
+Thank you for choosing Wattzen!
+Support: support@wattzen.com
+    `;
+    const blob = new Blob([invoiceText.trim()], { type: 'text/plain' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Wattzen_Invoice_${job._id}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  };
+
+  const handleRebook = (job) => {
+    setSelectedService(job.serviceType);
+    setAddress(job.address);
+    if (job.location && job.location.coordinates) {
+      setCoordinates(job.location.coordinates);
+    }
+    setCurrentTab('active');
+    showToast('Details copied to a new booking!', 'success');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const finalPrice = appliedCoupon ? Math.max(0, bookingPrice - appliedCoupon.discount) : bookingPrice;
 
   return (
     <div className="dashboard-grid">
@@ -1180,21 +1278,56 @@ function CustomerHome({ user, showToast, onEditProfile }) {
             <div style={{ marginTop: '16px', padding: '24px', background: 'var(--surface)', borderRadius: '16px', border: '2px solid var(--primary)', textAlign: 'center', boxShadow: 'var(--shadow-md)' }}>
               <h3 style={{ color: 'var(--text-main)', margin: '0 0 8px 0' }}>Upfront Payment Required</h3>
               <p style={{ color: 'var(--text-muted)', marginBottom: '16px' }}>To secure your booking, please pay the estimated service fee.</p>
-              <h2 style={{ fontSize: '2.5rem', color: 'var(--success)', margin: '0 0 20px 0' }}>₹{bookingPrice}</h2>
-              <a href={`upi://pay?pa=9211293576@ptaxis&pn=WATTZEN&am=${Number(bookingPrice)}&cu=INR`} className="btn btn-block" style={{ background: '#10b981', display: 'block', textDecoration: 'none', marginBottom: '12px' }}>
+              <h2 style={{ fontSize: '2.5rem', color: 'var(--success)', margin: '0 0 4px 0' }}>
+                ₹{finalPrice} {appliedCoupon && <span style={{ fontSize: '1rem', textDecoration: 'line-through', color: 'var(--text-muted)' }}>₹{bookingPrice}</span>}
+              </h2>
+              
+              <div style={{ margin: '16px auto 20px', maxWidth: '300px' }}>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input type="text" className="form-control" value={couponInput} onChange={e => setCouponInput(e.target.value.toUpperCase())} placeholder="Have a Coupon Code?" disabled={!!appliedCoupon} style={{ textTransform: 'uppercase', flex: 1, margin: 0, padding: '10px' }} maxLength="9" />
+                  {!appliedCoupon ? (
+                    <button className="btn" style={{ padding: '10px 16px' }} onClick={handleApplyCoupon} disabled={isApplyingCoupon || !couponInput}>
+                      {isApplyingCoupon ? '...' : 'Apply'}
+                    </button>
+                  ) : (
+                    <button className="btn" style={{ padding: '10px 16px', background: 'var(--danger)' }} onClick={() => { setAppliedCoupon(null); setCouponInput(''); }}>Remove</button>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '20px' }}>
+                <button style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 'bold' }} onClick={() => setShowPriceBreakdown(!showPriceBreakdown)}>
+                  {showPriceBreakdown ? 'Hide Price Breakdown' : 'View Price Breakdown'} <i className={`fas fa-chevron-${showPriceBreakdown ? 'up' : 'down'}`}></i>
+                </button>
+                {showPriceBreakdown && (
+                  <div style={{ background: 'var(--secondary)', padding: '12px', borderRadius: '8px', marginTop: '8px', fontSize: '0.85rem', textAlign: 'left', border: '1px dashed var(--border-light)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}><span>Base Rate (Estimated):</span> <span>₹{Math.round(bookingPrice / teamSize)}</span></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}><span>Team Size Multiplier:</span> <span>x{teamSize}</span></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}><span>Platform Fee:</span> <span style={{ color: 'var(--success)' }}>₹0 (Waived)</span></div>
+                    {appliedCoupon && <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}><span>Coupon Discount:</span> <span style={{ color: 'var(--success)' }}>-₹{appliedCoupon.discount}</span></div>}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', borderTop: '1px solid var(--border-light)', paddingTop: '4px', marginTop: '4px' }}><span>Total Payable:</span> <span>₹{finalPrice}</span></div>
+                  </div>
+                )}
+              </div>
+              <a href={`upi://pay?pa=9211293576@ptaxis&pn=WATTZEN&am=${Number(finalPrice)}&cu=INR`} className="btn btn-block" style={{ background: '#10b981', display: 'block', textDecoration: 'none', marginBottom: '12px' }}>
                 <i className="fas fa-qrcode"></i> Pay via UPI App
               </a>
               <button className="btn-outline btn btn-block" onClick={handleConfirmPayment} disabled={isBooking}>
                 {isBooking ? 'Verifying...' : 'I have completed the payment'}
               </button>
-          <button className="btn" style={{ background: 'transparent', color: 'var(--danger)', marginTop: '12px', boxShadow: 'none', border: '1px solid var(--danger)', padding: '10px' }} onClick={() => setBookingPrice(null)}>Cancel Booking</button>
+          <button className="btn" style={{ background: 'transparent', color: 'var(--danger)', marginTop: '12px', boxShadow: 'none', border: '1px solid var(--danger)', padding: '10px' }} onClick={() => { setBookingPrice(null); setAppliedCoupon(null); setCouponInput(''); }}>Cancel Booking</button>
             </div>
           ) : !isTeamFull ? (
             <div style={{ marginTop: '16px', padding: '24px', background: 'var(--secondary)', borderRadius: '12px', textAlign: 'center', border: '1px dashed var(--primary)' }}>
               <i className="fas fa-spinner fa-spin" style={{ color: 'var(--primary)', marginBottom: '8px', fontSize: '1.5rem' }}></i>
               <div style={{ fontWeight: 'bold' }}>Searching for nearby electricians...</div>
               {teamStatusMessage && <div style={{ fontSize: '0.9rem', color: 'var(--text-main)', marginTop: '8px' }}>{teamStatusMessage}</div>}
-              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Tracking Job ID: <span style={{ fontFamily: 'monospace' }}>{activeJobId}</span></div>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginTop: '12px' }}>
+                Tracking Job ID: <span style={{ fontFamily: 'monospace' }}>{activeJobId}</span>
+                <button onClick={() => { navigator.clipboard.writeText(`Tracking WATTZEN Job: ${activeJobId}`); showToast('Tracking ID copied!', 'success'); }} style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', padding: '4px' }} title="Copy Tracking ID">
+                  <i className="fas fa-copy"></i>
+                </button>
+              </div>
               <button className="btn btn-outline" style={{ marginTop: '12px', borderColor: 'var(--danger)', color: 'var(--danger)', padding: '6px 12px', fontSize: '0.85rem' }} onClick={handleCancelJob}>
                 Cancel Search
               </button>
@@ -1205,17 +1338,30 @@ function CustomerHome({ user, showToast, onEditProfile }) {
               <div style={{ fontWeight: 'bold', color: 'var(--success)', textAlign: 'center' }}>Your Team is Assembled!</div>
               <div style={{ fontSize: '0.85rem', color: 'var(--text-main)', marginTop: '8px' }}>
                 {assignedElectricians.map(e => (
-                    <div key={e._id} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--surface)', padding: '8px', borderRadius: '8px', marginBottom: '4px', justifyContent: 'space-between' }}>
-                      <div><i className="fas fa-user-hard-hat" style={{color: 'var(--primary)'}}></i> <strong>{e.name}</strong></div>
-                      <a href={`tel:${e.phone}`} className="btn btn-outline" style={{ padding: '6px 12px', fontSize: '0.8rem' }}><i className="fas fa-phone"></i> Call</a>
+                    <div key={e._id} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--surface)', padding: '12px', borderRadius: '8px', marginBottom: '8px', justifyContent: 'space-between', border: '1px solid var(--border-light)' }}>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <i className="fas fa-user-hard-hat" style={{color: 'var(--primary)', fontSize: '1.2rem'}}></i> 
+                          <strong style={{ fontSize: '1.05rem' }}>{e.name}</strong>
+                        </div>
+                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                          <i className="fas fa-star" style={{ color: 'var(--gold)' }}></i> {e.averageRating ? Number(e.averageRating).toFixed(1) : 'New'} ({e.totalReviews || 0} jobs)
+                        </div>
+                      </div>
+                      <a href={`tel:${e.phone}`} className="btn btn-outline" style={{ padding: '8px 16px', fontSize: '0.85rem', borderRadius: '20px' }}><i className="fas fa-phone"></i> Call</a>
                     </div>
                 ))}
               </div>
-              {!jobCompleted && (
-                <button className="btn btn-block" style={{ marginTop: '16px' }} onClick={handleCompleteJob}>
-                  <i className="fas fa-check-circle"></i> Mark Job as Done
-                </button>
-              )}
+              <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
+                {!jobCompleted && (
+                  <button className="btn" style={{ flex: 1 }} onClick={handleCompleteJob}>
+                    <i className="fas fa-check-circle"></i> Mark Job as Done
+                  </button>
+                )}
+                <a href={`mailto:support@wattzen.com?subject=Emergency%20Support%20-%20Job%20${activeJobId}`} className="btn btn-outline" style={{ padding: '14px', flex: '0 0 auto', borderColor: 'var(--danger)', color: 'var(--danger)', borderRadius: 'var(--radius-btn)' }} title="Contact Support">
+                  <i className="fas fa-headset"></i>
+                </a>
+              </div>
             </div>
           )}
 
@@ -1283,14 +1429,23 @@ function CustomerHome({ user, showToast, onEditProfile }) {
         </div>
       ) : (
         <div className="card" style={{ animation: 'fadeInUp 0.4s forwards' }}>
-          <h3 style={{ marginBottom: '16px' }}><i className="fas fa-history" style={{ color: 'var(--primary)' }}></i> Your Job History</h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+            <h3 style={{ margin: 0 }}><i className="fas fa-history" style={{ color: 'var(--primary)' }}></i> Your Job History</h3>
+            <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '4px' }}>
+              {['all', 'completed', 'cancelled'].map(filter => (
+                <button key={filter} className={`btn ${historyFilter === filter ? '' : 'btn-outline'}`} style={{ padding: '4px 12px', fontSize: '0.8rem', borderRadius: '20px', textTransform: 'capitalize' }} onClick={() => setHistoryFilter(filter)}>
+                  {filter}
+                </button>
+              ))}
+            </div>
+          </div>
           {isLoadingHistory ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {[1, 2, 3].map(i => <div key={i} className="skeleton" style={{ height: '100px', width: '100%', borderRadius: '12px' }}></div>)}
             </div>
-          ) : jobHistory.length === 0 ? <p style={{ color: 'var(--text-muted)' }}>No past jobs found.</p> : (
+          ) : jobHistory.filter(job => historyFilter === 'all' ? true : job.status === historyFilter).length === 0 ? <p style={{ color: 'var(--text-muted)' }}>No {historyFilter !== 'all' ? historyFilter : 'past'} jobs found.</p> : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {jobHistory.map(job => (
+              {jobHistory.filter(job => historyFilter === 'all' ? true : job.status === historyFilter).map(job => (
                 <div key={job._id} style={{ background: 'var(--secondary)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-light)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
                     <strong style={{ fontSize: '1.1rem', textTransform: 'capitalize' }}>{job.serviceType.replace('_', ' ')}</strong>
@@ -1298,6 +1453,16 @@ function CustomerHome({ user, showToast, onEditProfile }) {
                   </div>
                   <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}><i className="far fa-calendar-alt"></i> {new Date(job.createdAt).toLocaleDateString()}</div>
                   <div style={{ fontSize: '0.95rem', marginTop: '8px', fontWeight: 'bold', color: 'var(--primary)' }}>₹{job.estimatedPrice}</div>
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}>
+                      {job.status === 'completed' && (
+                        <button className="btn btn-outline" style={{ padding: '6px 12px', fontSize: '0.8rem', color: 'var(--primary)', borderColor: 'var(--primary)' }} onClick={() => handleDownloadInvoice(job)}>
+                          <i className="fas fa-file-invoice"></i> Invoice
+                        </button>
+                      )}
+                      <button className="btn" style={{ padding: '6px 12px', fontSize: '0.8rem', background: 'var(--surface)', color: 'var(--text-main)', border: '1px solid var(--border-light)', boxShadow: 'none' }} onClick={() => handleRebook(job)}>
+                        <i className="fas fa-redo"></i> Book Again
+                      </button>
+                    </div>
                 </div>
               ))}
             </div>
@@ -1498,8 +1663,10 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
   useEffect(() => {
     if (isOnline && activeJobId) {
       // FIX: Ensure the electrician rejoins the room if their internet drops and the socket reconnects
-      const joinRoom = () => { if (socket.connected) socket.emit('joinJobRoom', activeJobId); };
-      joinRoom(); // Join immediately
+      const joinRoom = () => socket.emit('joinJobRoom', activeJobId);
+      if (socket.connected) {
+        joinRoom(); // Join immediately if already connected
+      }
       socket.on('connect', joinRoom);
       
       return () => {
@@ -2099,6 +2266,15 @@ function AdminPanel({ user, onLogout, showToast }) {
   const [broadcastMsg, setBroadcastMsg] = useState('');
   const [previewImage, setPreviewImage] = useState(null);
   const [reviewUser, setReviewUser] = useState(null);
+  const [bannedIps, setBannedIps] = useState([]);
+  const [ipToBan, setIpToBan] = useState('');
+  const [banReason, setBanReason] = useState('');
+  const [couponsData, setCouponsData] = useState([]);
+  const [newCouponAmount, setNewCouponAmount] = useState('');
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  
+  const mounted = useRef(true);
+  useEffect(() => { return () => { mounted.current = false; }; }, []);
 
   const fetchDashboardData = React.useCallback(async () => {
     try {
@@ -2107,12 +2283,16 @@ function AdminPanel({ user, onLogout, showToast }) {
       setLiveData(Array.isArray(users) ? users : []);
       const fin = await fetchJson('/admin/finance');
       setFinanceData(fin && Array.isArray(fin.pendingJobs) ? fin : { pendingJobs: [], pendingWithdrawals: [] });
+      const banned = await fetchJson('/admin/security/banned-ips');
+      setBannedIps(Array.isArray(banned) ? banned : []);
+      const coups = await fetchJson('/admin/coupons');
+      setCouponsData(Array.isArray(coups) ? coups : []);
     } catch (error) {
       showToast(`Failed to fetch dashboard data: ${error.message}`, 'error');
       console.error('Dashboard error:', error);
       showToast('Failed to fetch dashboard data.', 'error');
     } finally {
-      setIsLoading(false);
+      if (mounted.current) setIsLoading(false);
     }
   }, [showToast]);
 
@@ -2196,7 +2376,7 @@ function AdminPanel({ user, onLogout, showToast }) {
       console.error('Report error:', error);
       showToast('Failed to generate report.', 'error');
     } finally {
-      setIsDownloading(false);
+      if (mounted.current) setIsDownloading(false);
     }
   };
 
@@ -2246,6 +2426,39 @@ function AdminPanel({ user, onLogout, showToast }) {
     }
   };
 
+  const handleDeleteUser = async (id) => {
+    if (!window.confirm('WARNING: Force delete this user? This cannot be undone.')) return;
+    try {
+      await fetchJson(`/admin/users/${id}`, { method: 'DELETE' });
+      showToast('User deleted successfully.', 'success');
+      fetchDashboardData();
+    } catch(e) {
+      showToast(e.message || 'Failed to delete user', 'error');
+    }
+  };
+
+  const handleEditWallet = async (user) => {
+    const currentBal = user.walletBalance || 0;
+    const amount = window.prompt(`Update wallet balance for ${user.name} (Current: ₹${currentBal})`, currentBal);
+    if (amount === null || amount === "") return;
+    
+    const parsedAmount = Number(amount);
+    if (isNaN(parsedAmount) || parsedAmount < 0) {
+      return showToast('Invalid amount. Must be a positive number.', 'error');
+    }
+
+    try {
+      await fetchJson(`/admin/users/${user._id}/wallet`, { 
+        method: 'PUT', 
+        body: { walletBalance: parsedAmount } 
+      });
+      showToast(`Wallet balance updated to ₹${parsedAmount}`, 'success');
+      fetchDashboardData();
+    } catch(e) {
+      showToast(e.message || 'Failed to update wallet', 'error');
+    }
+  };
+
   const handleApproveElectrician = async (id) => {
     try {
       await fetchJson(`/admin/users/${id}/approve`, { method: 'PUT' });
@@ -2267,6 +2480,26 @@ function AdminPanel({ user, onLogout, showToast }) {
     }
   };
 
+  const handleBanIp = async (e) => {
+    e.preventDefault();
+    if (!ipToBan.trim()) return showToast('Please enter an IP address.', 'error');
+    if (!window.confirm(`WARNING: Are you sure you want to permanently ban the IP ${ipToBan}?`)) return;
+    try {
+      await fetchJson('/admin/security/ban-ip', { method: 'POST', body: { ip: ipToBan.trim(), reason: banReason.trim() } });
+      showToast('IP Address banned successfully.', 'success');
+      setIpToBan(''); setBanReason(''); fetchDashboardData();
+    } catch(e) { showToast(e.message || 'Failed to ban IP.', 'error'); }
+  };
+
+  const handleUnbanIp = async (ip) => {
+    if (!window.confirm(`Unban the IP ${ip}?`)) return;
+    try {
+      await fetchJson(`/admin/security/banned-ips/${encodeURIComponent(ip)}`, { method: 'DELETE' });
+      showToast('IP Address unbanned.', 'success');
+      fetchDashboardData();
+    } catch(e) { showToast(e.message || 'Failed to unban IP.', 'error'); }
+  };
+
   const handleBroadcast = async () => {
     if(!broadcastMsg.trim()) return;
     try {
@@ -2278,6 +2511,33 @@ function AdminPanel({ user, onLogout, showToast }) {
       console.error('Broadcast error:', e);
       showToast('Failed to send broadcast.', 'error'); 
     }
+  };
+
+  const handleForceCancelJob = async (id) => {
+    if (!window.confirm('WARNING: Force cancel this job? This will notify users and refund any upfront payments.')) return;
+    try {
+      await fetchJson(`/admin/jobs/${id}/cancel`, { method: 'PUT' });
+      showToast('Job cancelled forcefully.', 'success');
+    } catch (e) {
+      showToast(e.message || 'Failed to cancel job.', 'error');
+    }
+  };
+
+  const handleGenerateCoupon = async (e) => {
+    e.preventDefault();
+    if (!newCouponAmount || Number(newCouponAmount) <= 0) return showToast('Please enter a valid discount amount.', 'error');
+    try {
+      await fetchJson('/admin/coupons', { method: 'POST', body: { discountAmount: Number(newCouponAmount) } });
+      showToast('Coupon generated successfully!', 'success');
+      setNewCouponAmount('');
+      fetchDashboardData();
+    } catch(e) { showToast(e.message || 'Failed to generate coupon.', 'error'); }
+  };
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await fetchDashboardData();
+    setTimeout(() => { if (mounted.current) setIsRefreshing(false); }, 1000);
   };
 
   return (
@@ -2314,14 +2574,16 @@ function AdminPanel({ user, onLogout, showToast }) {
       <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
         <TabButton active={activeTab === 'database'} onClick={() => setActiveTab('database')} icon="fa-database" label="Global Database" />
         <TabButton active={activeTab === 'finance'} onClick={() => setActiveTab('finance')} icon="fa-indian-rupee-sign" label="Finance & Approvals" />
+        <TabButton active={activeTab === 'security'} onClick={() => setActiveTab('security')} icon="fa-shield-halved" label="Security & Bans" />
+        <TabButton active={activeTab === 'coupons'} onClick={() => setActiveTab('coupons')} icon="fa-ticket" label="Discount Coupons" />
         <TabButton active={activeTab === 'logs'} onClick={() => setActiveTab('logs')} icon="fa-terminal" label="System Logs" />
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: 'var(--text-main)', fontSize: '0.9rem', fontWeight: 600, background: 'var(--surface)', padding: '8px 16px', borderRadius: '30px', border: '1px solid var(--border-light)' }}>
             <input type="checkbox" checked={useMockData} onChange={(e) => setUseMockData(e.target.checked)} style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: 'var(--primary)' }} />
             Demo Mode
           </label>
-        <button className="btn btn-outline" style={{ borderColor: 'var(--success)', color: 'var(--success)' }} onClick={fetchDashboardData} disabled={isLoading}>
-          <i className={`fas ${isLoading ? 'fa-spinner fa-spin' : 'fa-sync'}`}></i> Refresh Data
+        <button className="btn btn-outline" style={{ borderColor: 'var(--success)', color: 'var(--success)' }} onClick={handleRefresh} disabled={isLoading || isRefreshing}>
+          <i className={`fas ${isLoading || isRefreshing ? 'fa-spinner fa-spin' : 'fa-sync'}`}></i> Refresh Data
         </button>
           <button className="btn btn-outline" style={{ borderColor: 'var(--primary)', color: 'var(--primary)' }} onClick={handleDownloadReport} disabled={isDownloading}>
             <i className={`fas ${isDownloading ? 'fa-spinner fa-spin' : 'fa-file-csv'}`}></i> {isDownloading ? 'Generating...' : 'Export Completed Jobs'}
@@ -2367,15 +2629,23 @@ function AdminPanel({ user, onLogout, showToast }) {
                         <span style={{ color: calcStatus(row) === 'New' ? 'var(--warning)' : 'var(--success)', fontWeight: 600 }}>
                           • {row.status || calcStatus(row)}
                         </span>
-                        {row.role === 'electrician' && (
-                          <React.Fragment>
-                            <div style={{ marginTop: '8px' }}>
-                              <button className="btn btn-outline" style={{ padding: '6px 12px', fontSize: '0.8rem', color: 'var(--primary)', borderColor: 'var(--primary)' }} onClick={() => handleReviewDocs(row)}>
-                                <i className="fas fa-folder-open"></i> Review Profile & Docs
+                        <div style={{ marginTop: '8px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                          {row.role === 'electrician' && (
+                            <button className="btn btn-outline" style={{ padding: '6px 12px', fontSize: '0.8rem', color: 'var(--primary)', borderColor: 'var(--primary)' }} onClick={() => handleReviewDocs(row)}>
+                              <i className="fas fa-folder-open"></i> Docs
+                            </button>
+                          )}
+                          {row.role !== 'admin' && (
+                            <React.Fragment>
+                              <button className="btn btn-outline" style={{ padding: '6px 12px', fontSize: '0.8rem', color: 'var(--success)', borderColor: 'var(--success)' }} onClick={() => handleEditWallet(row)} title="Edit Wallet Balance">
+                                <i className="fas fa-wallet"></i> ₹{row.walletBalance || 0}
                               </button>
-                            </div>
-                          </React.Fragment>
-                        )}
+                              <button className="btn btn-outline" style={{ padding: '6px 12px', fontSize: '0.8rem', color: 'var(--danger)', borderColor: 'var(--danger)' }} onClick={() => handleDeleteUser(row._id)} title="Force Delete User">
+                                <i className="fas fa-trash"></i>
+                              </button>
+                            </React.Fragment>
+                          )}
+                        </div>
                       </td>
                     </tr>
                     );
@@ -2413,7 +2683,10 @@ function AdminPanel({ user, onLogout, showToast }) {
                     <strong>{job.serviceType}</strong> - ₹{job.estimatedPrice} <br/>
                     <small>Customer: {job.customer?.name} ({job.customer?.phone})</small>
                   </div>
-                  <button className="btn" style={{ background: 'var(--success)' }} onClick={() => handleApprovePayment(job._id)}>Approve Payment</button>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button className="btn" style={{ background: 'var(--success)' }} onClick={() => handleApprovePayment(job._id)}>Approve Payment</button>
+                    <button className="btn btn-outline" style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }} onClick={() => handleForceCancelJob(job._id)}>Force Cancel</button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -2434,6 +2707,82 @@ function AdminPanel({ user, onLogout, showToast }) {
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+        {activeTab === 'security' && (
+          <div style={{ padding: '20px' }}>
+            <h3 style={{ color: 'var(--text-main)', marginBottom: '16px' }}><i className="fas fa-shield-halved"></i> IP Ban Management</h3>
+            <div style={{ background: 'var(--secondary)', padding: '20px', borderRadius: '12px', border: '1px dashed var(--danger)', marginBottom: '24px' }}>
+              <h4 style={{ color: 'var(--danger)', margin: '0 0 12px 0' }}>Block a New IP Address</h4>
+              <form onSubmit={handleBanIp} style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                <input type="text" className="form-control" value={ipToBan} onChange={e => setIpToBan(e.target.value)} placeholder="Enter IP Address (e.g. 192.168.1.1)" style={{ flex: '1 1 200px', margin: 0 }} required />
+                <input type="text" className="form-control" value={banReason} onChange={e => setBanReason(e.target.value)} placeholder="Reason (Optional)" style={{ flex: '2 1 300px', margin: 0 }} />
+                <button type="submit" className="btn" style={{ background: 'var(--danger)' }}><i className="fas fa-ban"></i> Ban IP</button>
+              </form>
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem', textAlign: 'left' }}>
+                <thead style={{ background: 'var(--secondary)', color: 'var(--text-muted)' }}>
+                  <tr>
+                    <th style={{ padding: '14px 16px' }}>IP Address</th>
+                    <th style={{ padding: '14px 16px' }}>Reason</th>
+                    <th style={{ padding: '14px 16px' }}>Date Banned</th>
+                    <th style={{ padding: '14px 16px' }}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bannedIps.length === 0 ? (
+                    <tr><td colSpan="4" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>No IP addresses are currently banned.</td></tr>
+                  ) : bannedIps.map(record => (
+                    <tr key={record._id} style={{ borderBottom: '1px solid var(--border-light)' }}>
+                      <td style={{ padding: '14px 16px', fontFamily: 'monospace', fontWeight: 'bold', color: 'var(--danger)' }}>{record.ip}</td>
+                      <td style={{ padding: '14px 16px', color: 'var(--text-main)' }}>{record.reason || 'N/A'}</td>
+                      <td style={{ padding: '14px 16px', color: 'var(--text-muted)' }}>{new Date(record.createdAt).toLocaleString()}</td>
+                      <td style={{ padding: '14px 16px' }}>
+                        <button className="btn btn-outline" style={{ padding: '6px 12px', fontSize: '0.8rem', color: 'var(--success)', borderColor: 'var(--success)' }} onClick={() => handleUnbanIp(record.ip)}><i className="fas fa-unlock"></i> Unban</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+        {activeTab === 'coupons' && (
+          <div style={{ padding: '20px' }}>
+            <h3 style={{ color: 'var(--text-main)', marginBottom: '16px' }}><i className="fas fa-ticket"></i> Generate & Track Coupons</h3>
+            <div style={{ background: 'var(--secondary)', padding: '20px', borderRadius: '12px', border: '1px dashed var(--primary)', marginBottom: '24px' }}>
+              <h4 style={{ color: 'var(--primary)', margin: '0 0 12px 0' }}>Create a New Coupon</h4>
+              <form onSubmit={handleGenerateCoupon} style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <div className="input-icon-wrapper" style={{ flex: '1 1 200px' }}>
+                  <i className="fas fa-indian-rupee-sign" style={{ position: 'absolute', left: '12px', color: 'var(--text-muted)' }}></i>
+                  <input type="number" className="form-control" value={newCouponAmount} onChange={e => setNewCouponAmount(e.target.value)} placeholder="Discount Amount (e.g. 100)" style={{ margin: 0, paddingLeft: '32px' }} required min="1" />
+                </div>
+                <button type="submit" className="btn" style={{ background: 'var(--primary)' }}><i className="fas fa-plus"></i> Generate Code</button>
+              </form>
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem', textAlign: 'left' }}>
+                <thead style={{ background: 'var(--secondary)', color: 'var(--text-muted)' }}>
+                  <tr>
+                    <th style={{ padding: '14px 16px' }}>Code</th>
+                    <th style={{ padding: '14px 16px' }}>Discount</th>
+                    <th style={{ padding: '14px 16px' }}>Status</th>
+                    <th style={{ padding: '14px 16px' }}>Generated At</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {couponsData.length === 0 ? <tr><td colSpan="4" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>No coupons generated yet.</td></tr> : couponsData.map(c => (
+                    <tr key={c._id} style={{ borderBottom: '1px solid var(--border-light)' }}>
+                      <td style={{ padding: '14px 16px', fontFamily: 'monospace', fontWeight: 'bold', fontSize: '1.1rem', color: c.isUsed ? 'var(--text-muted)' : 'var(--primary)' }}>{c.code}</td>
+                      <td style={{ padding: '14px 16px', fontWeight: 'bold' }}>₹{c.discountAmount}</td>
+                      <td style={{ padding: '14px 16px' }}>{c.isUsed ? <span style={{ color: 'var(--danger)' }} title={c.usedBy ? `Used by: ${c.usedBy.name} (${c.usedBy.phone})` : ''}>Used <i className="fas fa-info-circle"></i></span> : <span style={{ color: 'var(--success)' }}>Active</span>}</td>
+                      <td style={{ padding: '14px 16px', color: 'var(--text-muted)' }}>{new Date(c.createdAt).toLocaleDateString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
@@ -2494,12 +2843,16 @@ function AppContent() {
     localStorage.setItem('user', JSON.stringify(userWithRole));
   };
 
-  const handleLogout = () => {
+  const handleLogout = React.useCallback(() => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     setUser(null);
+    if (socket.connected) socket.disconnect(); // Prevent zombie socket connections on account switch
     navigate('/login');
-  };
+  }, [navigate, socket]);
+
+  const handleLogoutRef = useRef(handleLogout);
+  useEffect(() => { handleLogoutRef.current = handleLogout; }, [handleLogout]);
 
   const toggleTheme = () => {
     setIsDarkMode(prev => {
@@ -2553,7 +2906,7 @@ function AppContent() {
       if (!localStorage.getItem('token')) return; // 6. Prevent double auth-expired toasts/loops
       showToast('Session expired. Please log in again.', 'warning');
       sendPush('Session Expired', 'Your secure session has expired. Please log in again.');
-      handleLogout();
+        handleLogoutRef.current();
     };
     window.addEventListener('auth-expired', handleAuthExpired);
     return () => window.removeEventListener('auth-expired', handleAuthExpired);
@@ -2594,7 +2947,7 @@ function AppContent() {
         // FIX: Prevent forced logouts on Render cold starts or transient network drops. 
         // Only log out if the backend explicitly rejected the token (Session expired).
         if (isMounted && (error.message.includes('expired') || error.message.includes('Invalid user data'))) {
-          handleLogout();
+          handleLogoutRef.current();
         }
       } finally {
         if (isMounted) {
@@ -2616,9 +2969,8 @@ function AppContent() {
         socket.connect();
         
         // 5. Inject fresh token on reconnect attempts if the user logs out/in while offline
-        socket.io.on('reconnect_attempt', () => {
-          socket.auth = { token: localStorage.getItem('token') };
-        });
+        const handleReconnectAttempt = () => { socket.auth = { token: localStorage.getItem('token') }; };
+        socket.io.on('reconnect_attempt', handleReconnectAttempt);
       }
       const handleBroadcast = (msg) => {
         showToast(`📢 Admin Broadcast: ${msg}`, 'warning');
@@ -2634,6 +2986,7 @@ function AppContent() {
       socket.on('connect_error', handleConnectError);
       
       return () => {
+        if (socket.io) socket.io.off('reconnect_attempt', handleReconnectAttempt);
         socket.off('systemBroadcast', handleBroadcast);
         socket.off('connect_error', handleConnectError);
       };
@@ -2725,8 +3078,10 @@ function AppContent() {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <AppContent />
-    </BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <AppContent />
+      </BrowserRouter>
+    </ErrorBoundary>
   );
 }

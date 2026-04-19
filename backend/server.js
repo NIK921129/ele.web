@@ -79,6 +79,7 @@ app.use((req, res, next) => {
 
 let criticalSystemError = null;
 let isDbConnected = false;
+const bannedIpsCache = new Set();
 
 const PORT = process.env.PORT || 5000;
 // Fallback to live credentials to ensure zero downtime even if Render environment variables are missing
@@ -92,6 +93,10 @@ if (process.env.NODE_ENV === 'production' && (!MONGO_URI || !JWT_SECRET)) {
 
 // Prevent the server from crashing, instead returning a clean JSON error to the frontend so CORS doesn't break
 app.use('/api', async (req, res, next) => {
+  const clientIp = getClientIp(req);
+  if (bannedIpsCache.has(clientIp)) {
+    return res.status(403).json({ message: 'Your IP address has been permanently banned from accessing this service.' });
+  }
   if (criticalSystemError) {
     return res.status(503).json({ message: criticalSystemError });
   }
@@ -138,11 +143,17 @@ const connectDB = async (retries = 5) => {
     isDbConnected = true;
     criticalSystemError = null;
     console.log('Connected to MongoDB');
+    
+    // Load banned IPs into memory cache to intercept requests instantly
+    try {
+      const banned = await BannedIP.find();
+      bannedIpsCache.clear();
+      banned.forEach(b => bannedIpsCache.add(b.ip));
+    } catch(e) { console.error('Failed to load banned IPs', e); }
   } catch (err) {
     console.error(`Could not connect to MongoDB. Retries left: ${retries} -`, err.message);
     dbConnectionPromise = null;
     if (retries > 0) {
-      setTimeout(() => connectDB(retries - 1), 5000); // Wait 5 seconds and retry
       await new Promise(resolve => setTimeout(resolve, 5000));
       return connectDB(retries - 1);
     } else {
@@ -232,9 +243,24 @@ const withdrawalSchema = new mongoose.Schema({
 withdrawalSchema.index({ status: 1 }); // Optimize admin pending withdrawals query
 withdrawalSchema.index({ electrician: 1, createdAt: -1 }); // Optimize future user history lookups
 
+const bannedIpSchema = new mongoose.Schema({
+  ip: { type: String, required: true, unique: true },
+  reason: { type: String }
+}, { timestamps: true });
+
+const couponSchema = new mongoose.Schema({
+  code: { type: String, required: true, unique: true },
+  discountAmount: { type: Number, required: true, min: 1 },
+  isUsed: { type: Boolean, default: false },
+  usedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  usedAt: { type: Date }
+}, { timestamps: true });
+
 const User = mongoose.model('User', userSchema);
 const Job = mongoose.model('Job', jobSchema);
 const Withdrawal = mongoose.model('Withdrawal', withdrawalSchema);
+const BannedIP = mongoose.model('BannedIP', bannedIpSchema);
+const Coupon = mongoose.model('Coupon', couponSchema);
 
 // ==========================================
 // 2. SOCKET.IO SETUP
@@ -396,6 +422,9 @@ setInterval(() => {
   if (otpStore.size > 10000) otpStore.clear();
   if (otpRateLimits.size > 10000) otpRateLimits.clear();
   if (jobOtpAttempts.size > 10000) jobOtpAttempts.clear();
+  if (userLoginAttempts.size > 10000) userLoginAttempts.clear();
+  if (adminLoginAttempts.size > 10000) adminLoginAttempts.clear();
+  if (signupRateLimits.size > 10000) signupRateLimits.clear();
 }, 60 * 60 * 1000); // Clean up every hour
 
 // Background Job Sweeper Logic
@@ -832,7 +861,7 @@ api.post('/jobs', authenticateToken, async (req, res) => {
     // 9. Security: Enforce string limits to prevent large payload attacks
     const serviceType = String(req.body.serviceType || '').trim().substring(0, 50);
     const trimmedAddress = String(req.body.address || '').trim().substring(0, 250);
-    const { coordinates, estimatedPrice, teamSize } = req.body;
+    const { coordinates, estimatedPrice, teamSize, couponCode } = req.body;
     if (!serviceType || !trimmedAddress) return res.status(400).json({ message: 'Service type and valid address required' });
 
     // 10. DDoS Protection: Limit active jobs per customer to prevent database spam
@@ -845,6 +874,20 @@ api.post('/jobs', authenticateToken, async (req, res) => {
     const safeTeamSize = Math.max(1, Math.min(10, Number(teamSize) || 1));
     const basePrice = safeTeamSize * 299;
     const safePrice = Math.min(1000000, Math.max(basePrice, Number(estimatedPrice) || basePrice)); // 3. Pricing Exploitation Vector
+    
+    let finalPrice = safePrice;
+    let appliedCoupon = null;
+
+    if (couponCode) {
+      appliedCoupon = await Coupon.findOneAndUpdate(
+        { code: String(couponCode).toUpperCase(), isUsed: false },
+        { $set: { isUsed: true, usedBy: req.user.userId, usedAt: new Date() } },
+        { new: true }
+      );
+      if (!appliedCoupon) return res.status(400).json({ message: 'Invalid or already used coupon code.' });
+      
+      finalPrice = Math.max(0, safePrice - appliedCoupon.discountAmount);
+    }
 
     // Security: Strict coordinate validation to prevent MongoDB 2dsphere index crashes
     if (!Array.isArray(coordinates) || coordinates.length !== 2 || 
@@ -861,18 +904,42 @@ api.post('/jobs', authenticateToken, async (req, res) => {
       address: trimmedAddress,
       teamSize: safeTeamSize,
       location: { type: 'Point', coordinates },
-      estimatedPrice: safePrice,
+      estimatedPrice: finalPrice,
       paymentStatus: 'verifying',
       jobOTP: crypto.randomInt(1000, 10000).toString(), // Security: Cryptographically secure OTP
       status: 'verifying_payment'
     });
 
-    await newJob.save();
-    io.emit('adminRefresh');
-    
-    res.status(201).json(newJob);
+    try {
+      await newJob.save();
+      io.emit('adminRefresh');
+      
+      res.status(201).json(newJob);
+    } catch (saveError) {
+      // Rollback: Revert the coupon to 'unused' if the job failed to save (e.g. database timeout)
+      if (appliedCoupon) {
+        await Coupon.updateOne({ _id: appliedCoupon._id }, { $set: { isUsed: false }, $unset: { usedBy: 1, usedAt: 1 } });
+      }
+      throw saveError; // Pass error to outer catch block to send 500 response
+    }
   } catch (error) {
     res.status(500).json({ message: 'Internal server error during booking' });
+  }
+});
+
+// POST /api/coupons/validate - Customer checks coupon before booking
+api.post('/coupons/validate', authenticateToken, async (req, res) => {
+  try {
+    const code = String(req.body.code || '').trim().toUpperCase();
+    if (!code || code.length !== 9) return res.status(400).json({ message: 'Invalid coupon code format' });
+    
+    const coupon = await Coupon.findOne({ code });
+    if (!coupon) return res.status(404).json({ message: 'Invalid coupon code' });
+    if (coupon.isUsed) return res.status(400).json({ message: 'Coupon has already been used' });
+    
+    res.status(200).json({ discountAmount: coupon.discountAmount });
+  } catch (error) {
+    res.status(500).json({ message: 'Error validating coupon' });
   }
 });
 
@@ -1228,6 +1295,65 @@ api.delete('/admin/users/:id/reject', authenticateToken, async (req, res) => {
   }
 });
 
+// DELETE /api/admin/users/:id - Admin forcefully deletes any user
+api.delete('/admin/users/:id', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ message: 'Invalid User ID format' });
+    
+    // Prevent admin from deleting themselves
+    if (req.user.userId === req.params.id) return res.status(400).json({ message: 'Cannot delete your own admin account' });
+    
+    const user = await User.findByIdAndDelete(req.params.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    
+    io.emit('adminRefresh');
+    res.status(200).json({ message: 'User permanently deleted' });
+  } catch (error) {
+    res.status(500).json({ message: 'Error deleting user' });
+  }
+});
+
+// PUT /api/admin/users/:id/wallet - Admin manually adjusts user wallet balance
+api.put('/admin/users/:id/wallet', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ message: 'Invalid User ID format' });
+    
+    const walletBalance = Number(req.body.walletBalance);
+    if (isNaN(walletBalance) || walletBalance < 0) return res.status(400).json({ message: 'Invalid wallet balance amount' });
+    
+    const user = await User.findByIdAndUpdate(req.params.id, { walletBalance }, { new: true });
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    
+    io.emit('adminRefresh');
+    res.status(200).json({ message: 'Wallet balance updated', user });
+  } catch (error) {
+    res.status(500).json({ message: 'Error updating wallet balance' });
+  }
+});
+
+// PUT /api/admin/jobs/:id/cancel - Admin forcefully cancels a job
+api.put('/admin/jobs/:id/cancel', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ message: 'Invalid Job ID format' });
+    
+    const job = await Job.findByIdAndUpdate(req.params.id, { status: 'cancelled' });
+    if (!job) return res.status(404).json({ message: 'Job not found' });
+    
+    if (job.paymentStatus === 'paid' && job.status !== 'cancelled' && job.status !== 'completed') {
+       await User.findByIdAndUpdate(job.customer, { $inc: { walletBalance: job.estimatedPrice } });
+    }
+    
+    io.to(req.params.id).emit('jobCancelled');
+    io.emit('adminRefresh');
+    res.status(200).json({ message: 'Job forcefully cancelled' });
+  } catch (error) {
+    res.status(500).json({ message: 'Error cancelling job' });
+  }
+});
+
 // GET /api/admin/reports/completed-jobs - Admin report generation
 api.get('/admin/reports/completed-jobs', authenticateToken, async (req, res) => {
   try {
@@ -1463,6 +1589,76 @@ api.get('/cron/sweep', async (req, res) => {
   await runGhostJobSweeper();
   await runStuckJobSweeper();
   res.status(200).json({ message: 'Sweepers executed successfully' });
+});
+
+// POST /api/admin/security/ban-ip
+api.post('/admin/security/ban-ip', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    const { ip, reason } = req.body;
+    if (!ip) return res.status(400).json({ message: 'IP address is required' });
+    if (ip === getClientIp(req)) return res.status(400).json({ message: 'You cannot ban your own current IP address' });
+    
+    await BannedIP.findOneAndUpdate({ ip }, { reason }, { upsert: true });
+    bannedIpsCache.add(ip);
+    io.emit('adminRefresh');
+    res.status(200).json({ message: `IP ${ip} banned successfully` });
+  } catch (error) {
+    res.status(500).json({ message: 'Error banning IP' });
+  }
+});
+
+// GET /api/admin/security/banned-ips
+api.get('/admin/security/banned-ips', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    const ips = await BannedIP.find().sort({ createdAt: -1 });
+    res.status(200).json(ips);
+  } catch (error) {
+    res.status(500).json({ message: 'Error fetching banned IPs' });
+  }
+});
+
+// DELETE /api/admin/security/banned-ips/:ip
+api.delete('/admin/security/banned-ips/:ip', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    await BannedIP.findOneAndDelete({ ip: req.params.ip });
+    bannedIpsCache.delete(req.params.ip);
+    io.emit('adminRefresh');
+    res.status(200).json({ message: 'IP unbanned successfully' });
+  } catch (error) {
+    res.status(500).json({ message: 'Error unbanning IP' });
+  }
+});
+
+// POST /api/admin/coupons
+api.post('/admin/coupons', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    const amount = Number(req.body.discountAmount);
+    if (!amount || amount <= 0) return res.status(400).json({ message: 'Invalid discount amount' });
+
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    let code = '';
+    for (let i = 0; i < 9; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
+
+    const coupon = await Coupon.create({ code, discountAmount: amount });
+    res.status(201).json(coupon);
+  } catch (error) {
+    res.status(500).json({ message: 'Error generating coupon' });
+  }
+});
+
+// GET /api/admin/coupons
+api.get('/admin/coupons', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    const coupons = await Coupon.find().populate('usedBy', 'name phone').sort({ createdAt: -1 });
+    res.status(200).json(coupons);
+  } catch (error) {
+    res.status(500).json({ message: 'Error fetching coupons' });
+  }
 });
 
 app.use('/api', api);
