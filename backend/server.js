@@ -665,7 +665,10 @@ api.post('/signup', async (req, res) => {
       });
 
       const verification = await twilioRes.json();
-      if (verification.status !== 'approved') {
+      if (!twilioRes.ok) {
+        console.error('[TWILIO VERIFY ERROR]', verification);
+        return res.status(400).json({ message: `Twilio Error: ${verification.message || 'Verification failed'}` });
+      } else if (verification.status !== 'approved') {
         return res.status(400).json({ message: 'Invalid OTP code.' });
       }
     } catch (err) {
@@ -819,6 +822,7 @@ api.post('/auth/forgot-password', async (req, res) => {
       if (!twilioRes.ok) {
         const errorData = await twilioRes.json();
         console.error('[TWILIO ERROR]', errorData);
+        return res.status(500).json({ message: `Twilio Error: ${errorData.message || 'Failed to send OTP'}` });
       }
     } catch (smsError) {
       console.error('[SMS ERROR] Failed to hit Twilio:', smsError.message);
@@ -877,7 +881,7 @@ api.post('/auth/send-signup-otp', async (req, res) => {
       if (!twilioRes.ok) {
         const errorData = await twilioRes.json();
         console.error('[TWILIO ERROR]', errorData);
-        return res.status(500).json({ message: 'Failed to send OTP via Twilio' });
+        return res.status(500).json({ message: `Twilio Error: ${errorData.message || 'Failed to send OTP'}` });
       }
     } catch (smsError) {
       console.error('[SMS ERROR] Failed to hit Twilio:', smsError.message);
@@ -920,7 +924,10 @@ api.post('/auth/reset-password', async (req, res) => {
       });
 
       const verification = await twilioRes.json();
-      if (verification.status !== 'approved') {
+      if (!twilioRes.ok) {
+        console.error('[TWILIO VERIFY ERROR]', verification);
+        return res.status(400).json({ message: `Twilio Error: ${verification.message || 'Verification failed'}` });
+      } else if (verification.status !== 'approved') {
         return res.status(400).json({ message: 'Invalid OTP' });
       }
     } catch (err) {
