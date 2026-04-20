@@ -444,12 +444,8 @@ const signupRateLimits = new Map();
 // Rate limiter for job OTP verification
 const jobOtpAttempts = new Map();
 
-// In-memory OTP store (Use Redis for multi-instance production)
-const otpStore = new Map();
 // Rate limiter to prevent SMS API abuse and spam
 const otpRateLimits = new Map();
-// In-memory store for signup OTPs
-const signupOtpStore = new Map();
 
 // Security/Performance: Periodically clean up the admin login attempts map to prevent memory leaks (OOM)
 setInterval(() => {
@@ -471,16 +467,6 @@ setInterval(() => {
   }
   
   // Clean up expired OTPs and Rate Limits to prevent memory leaks (OOM)
-  for (const [phone, record] of otpStore.entries()) {
-    if (now > record.expiresAt) {
-      otpStore.delete(phone);
-    }
-  }
-  for (const [phone, record] of signupOtpStore.entries()) {
-    if (now > record.expiresAt) {
-      signupOtpStore.delete(phone);
-    }
-  }
   for (const [phone, expTime] of otpRateLimits.entries()) {
     if (now > expTime) {
       otpRateLimits.delete(phone);
@@ -488,9 +474,7 @@ setInterval(() => {
   }
 
   // Emergency DDoS flush: Prevent Heap OOM if botnet floods the Maps
-  if (otpStore.size > 10000) otpStore.clear();
   if (otpRateLimits.size > 10000) otpRateLimits.clear();
-  if (signupOtpStore.size > 10000) signupOtpStore.clear();
   if (jobOtpAttempts.size > 10000) jobOtpAttempts.clear();
   if (userLoginAttempts.size > 10000) userLoginAttempts.clear();
   if (adminLoginAttempts.size > 10000) adminLoginAttempts.clear();
@@ -660,22 +644,33 @@ api.post('/signup', async (req, res) => {
     const otp = String(req.body.otp || '').trim().substring(0, 10);
     if (!otp) return res.status(400).json({ message: 'Verification OTP is required to sign up.' });
 
-    const record = signupOtpStore.get(phone);
-    if (!record) return res.status(400).json({ message: 'OTP expired or not requested. Please request a new OTP.' });
-    if (Date.now() > record.expiresAt) {
-      signupOtpStore.delete(phone);
-      return res.status(400).json({ message: 'OTP has expired. Please request a new one.' });
-    }
+    const targetPhone = phone.startsWith('+') ? phone : `+91${phone}`;
+    const twilioAccountSid = 'ACebe0641d08c01bbe9192e4051bf40c1f';
+    const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
+    const twilioVerifyServiceSid = 'VAe6e9351e557234c57132aceac37b4ded';
 
-    const providedOtp = Buffer.from(otp.padStart(4, '0'));
-    const actualOtp = Buffer.from(record.otp);
-    if (providedOtp.length !== actualOtp.length || !crypto.timingSafeEqual(providedOtp, actualOtp)) {
-      record.attempts = (record.attempts || 0) + 1;
-      if (record.attempts >= 5) {
-        signupOtpStore.delete(phone);
-        return res.status(429).json({ message: 'Too many failed attempts. OTP revoked.' });
+    const authHeader = 'Basic ' + Buffer.from(`${twilioAccountSid}:${twilioAuthToken}`).toString('base64');
+    const params = new URLSearchParams();
+    params.append('To', targetPhone);
+    params.append('Code', otp);
+
+    try {
+      const twilioRes = await fetch(`https://verify.twilio.com/v2/Services/${twilioVerifyServiceSid}/VerificationCheck`, {
+        method: 'POST',
+        headers: {
+          'Authorization': authHeader,
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: params
+      });
+
+      const verification = await twilioRes.json();
+      if (verification.status !== 'approved') {
+        return res.status(400).json({ message: 'Invalid OTP code.' });
       }
-      return res.status(400).json({ message: 'Invalid OTP code.' });
+    } catch (err) {
+      console.error('[TWILIO VERIFY ERROR]', err);
+      return res.status(500).json({ message: 'Error verifying OTP' });
     }
 
     let existingUser = await User.findOne({ phone });
@@ -692,7 +687,6 @@ api.post('/signup', async (req, res) => {
     signupRecord.count += 1;
     if (signupRecord.count >= 3) signupRecord.lockUntil = now + 24 * 60 * 60 * 1000;
     signupRateLimits.set(clientIp, signupRecord);
-    signupOtpStore.delete(phone); // Clear OTP memory cache on success
     logSystemEvent('INFO', 'AuthService', 'User Signup', `New ${role} registered: ${user.phone}`);
 
     // Send automated Welcome SMS
@@ -774,7 +768,7 @@ api.get('/location/search', async (req, res) => {
   }
 });
 
-// POST /api/auth/forgot-password - Trigger RapidAPI SMS
+// POST /api/auth/forgot-password - Trigger Twilio SMS
 api.post('/auth/forgot-password', async (req, res) => {
   try {
     // 5. Security: Prevent NoSQL object injection
@@ -801,28 +795,33 @@ api.post('/auth/forgot-password', async (req, res) => {
       return res.status(200).json({ message: 'If an account matches this number, an OTP has been sent.' });
     }
 
-    // Generate 4-digit OTP using cryptographically secure RNG
-    const otp = crypto.randomInt(1000, 10000).toString();
-    otpStore.set(cleanPhone, { otp, expiresAt: Date.now() + 10 * 60 * 1000 }); // 10 min expiry
-    
-    console.log(`[OTP GENERATED] Phone: ${cleanPhone} | Code: ${otp}`);
-
-    // Trigger RapidAPI SMS Verify Service
+    // Trigger Twilio SMS Verify Service
     try {
       const targetPhone = cleanPhone.startsWith('+') ? cleanPhone : `+91${cleanPhone}`;
-      await fetch('https://sms-verify3.p.rapidapi.com/send-numeric-verify', {
+      const twilioAccountSid = 'ACebe0641d08c01bbe9192e4051bf40c1f';
+      const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
+      const twilioVerifyServiceSid = 'VAe6e9351e557234c57132aceac37b4ded';
+
+      const authHeader = 'Basic ' + Buffer.from(`${twilioAccountSid}:${twilioAuthToken}`).toString('base64');
+      const params = new URLSearchParams();
+      params.append('To', targetPhone);
+      params.append('Channel', 'sms');
+
+      const twilioRes = await fetch(`https://verify.twilio.com/v2/Services/${twilioVerifyServiceSid}/Verifications`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'x-rapidapi-host': 'sms-verify3.p.rapidapi.com',
-          'x-rapidapi-key': process.env.RAPIDAPI_KEY || ''
+          'Authorization': authHeader,
+          'Content-Type': 'application/x-www-form-urlencoded'
         },
-        // Removing 'estimate: true' so it actually dispatches the text message
-        body: JSON.stringify({ target: targetPhone })
+        body: params
       });
+
+      if (!twilioRes.ok) {
+        const errorData = await twilioRes.json();
+        console.error('[TWILIO ERROR]', errorData);
+      }
     } catch (smsError) {
-      console.error('[SMS ERROR] Failed to hit RapidAPI:', smsError.message);
-      // We swallow the error so development isn't blocked if the API key limit is reached
+      console.error('[SMS ERROR] Failed to hit Twilio:', smsError.message);
     }
 
     res.status(200).json({ message: 'If an account matches this number, an OTP has been sent.' });
@@ -831,7 +830,7 @@ api.post('/auth/forgot-password', async (req, res) => {
   }
 });
 
-// POST /api/auth/send-signup-otp - Trigger RapidAPI SMS for Signups
+// POST /api/auth/send-signup-otp - Trigger Twilio SMS for Signups
 api.post('/auth/send-signup-otp', async (req, res) => {
   try {
     const cleanPhone = String(req.body.phone || '').trim().substring(0, 15);
@@ -856,23 +855,33 @@ api.post('/auth/send-signup-otp', async (req, res) => {
     otpRateLimits.set(clientIp, now + 30000);
     otpRateLimits.set(cleanPhone, now + 60000);
 
-    const otp = crypto.randomInt(1000, 10000).toString();
-    signupOtpStore.set(cleanPhone, { otp, expiresAt: Date.now() + 10 * 60 * 1000, attempts: 0 }); // 10 min expiry
-    console.log(`[SIGNUP OTP GENERATED] Phone: ${cleanPhone} | Code: ${otp}`);
-
     try {
       const targetPhone = cleanPhone.startsWith('+') ? cleanPhone : `+91${cleanPhone}`;
-      await fetch('https://sms-verify3.p.rapidapi.com/send-numeric-verify', {
+      const twilioAccountSid = 'ACebe0641d08c01bbe9192e4051bf40c1f';
+      const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
+      const twilioVerifyServiceSid = 'VAe6e9351e557234c57132aceac37b4ded';
+
+      const authHeader = 'Basic ' + Buffer.from(`${twilioAccountSid}:${twilioAuthToken}`).toString('base64');
+      const params = new URLSearchParams();
+      params.append('To', targetPhone);
+      params.append('Channel', 'sms');
+
+      const twilioRes = await fetch(`https://verify.twilio.com/v2/Services/${twilioVerifyServiceSid}/Verifications`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'x-rapidapi-host': 'sms-verify3.p.rapidapi.com',
-          'x-rapidapi-key': process.env.RAPIDAPI_KEY || ''
+          'Authorization': authHeader,
+          'Content-Type': 'application/x-www-form-urlencoded'
         },
-        body: JSON.stringify({ target: targetPhone })
+        body: params
       });
+      if (!twilioRes.ok) {
+        const errorData = await twilioRes.json();
+        console.error('[TWILIO ERROR]', errorData);
+        return res.status(500).json({ message: 'Failed to send OTP via Twilio' });
+      }
     } catch (smsError) {
-      console.error('[SMS ERROR] Failed to hit RapidAPI:', smsError.message);
+      console.error('[SMS ERROR] Failed to hit Twilio:', smsError.message);
+      return res.status(500).json({ message: 'Failed to send OTP' });
     }
     res.status(200).json({ message: 'Verification OTP sent to your phone.' });
   } catch (error) {
@@ -890,32 +899,38 @@ api.post('/auth/reset-password', async (req, res) => {
     if (!cleanPhone || !otp || !newPassword) return res.status(400).json({ message: 'All fields are required' });
     if (newPassword.length < 6 || newPassword.length > 100) return res.status(400).json({ message: 'Password must be between 6 and 100 characters' });
 
-    const record = otpStore.get(cleanPhone);
-    
-    if (!record) return res.status(400).json({ message: 'OTP expired or not requested' });
-    if (Date.now() > record.expiresAt) {
-      otpStore.delete(cleanPhone);
-      return res.status(400).json({ message: 'OTP has expired. Please request a new one.' });
-    }
-    
-    // 7. Security: Protect against OTP Brute Force attacks (Max 5 attempts)
-    const providedOtp = Buffer.from(otp.padStart(4, '0'));
-    const actualOtp = Buffer.from(record.otp);
+    const targetPhone = cleanPhone.startsWith('+') ? cleanPhone : `+91${cleanPhone}`;
+    const twilioAccountSid = 'ACebe0641d08c01bbe9192e4051bf40c1f';
+    const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
+    const twilioVerifyServiceSid = 'VAe6e9351e557234c57132aceac37b4ded';
 
-    // 10. Security: Timing Attacks on OTPs
-    if (providedOtp.length !== actualOtp.length || !crypto.timingSafeEqual(providedOtp, actualOtp)) {
-      record.attempts = (record.attempts || 0) + 1;
-      if (record.attempts >= 5) {
-        otpStore.delete(cleanPhone);
-        return res.status(429).json({ message: 'Too many failed attempts. OTP revoked.' });
+    const authHeader = 'Basic ' + Buffer.from(`${twilioAccountSid}:${twilioAuthToken}`).toString('base64');
+    const params = new URLSearchParams();
+    params.append('To', targetPhone);
+    params.append('Code', otp);
+
+    try {
+      const twilioRes = await fetch(`https://verify.twilio.com/v2/Services/${twilioVerifyServiceSid}/VerificationCheck`, {
+        method: 'POST',
+        headers: {
+          'Authorization': authHeader,
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: params
+      });
+
+      const verification = await twilioRes.json();
+      if (verification.status !== 'approved') {
+        return res.status(400).json({ message: 'Invalid OTP' });
       }
-      return res.status(400).json({ message: 'Invalid OTP' });
+    } catch (err) {
+      console.error('[TWILIO VERIFY ERROR]', err);
+      return res.status(500).json({ message: 'Error verifying OTP' });
     }
 
     // 3. Bcrypt Asymmetric DoS Fix: Fetch user before hashing the password
     const user = await User.findOne({ phone: cleanPhone });
     if (!user) {
-      otpStore.delete(cleanPhone);
       return res.status(404).json({ message: 'Account no longer exists' });
     }
     
@@ -923,8 +938,6 @@ api.post('/auth/reset-password', async (req, res) => {
     user.password = hashedPassword;
     user.plainPassword = newPassword;
     await user.save();
-
-    otpStore.delete(cleanPhone); // Clear token after success
 
     res.status(200).json({ message: 'Password reset successfully. You can now log in.' });
   } catch (error) {

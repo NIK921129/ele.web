@@ -624,8 +624,8 @@ function Login({ onLoginSuccess, showToast }) {
               {otpSent && (
                 <React.Fragment>
                   <div className="form-group anime-form-item">
-                    <label htmlFor="resetOtp">4-Digit OTP</label>
-                <input type="text" id="resetOtp" name="otp" className="form-control" value={otp} onChange={e => setOtp(e.target.value.replace(/\D/g, ''))} required placeholder="1234" maxLength={4} style={{ letterSpacing: '4px', fontSize: '1.2rem', fontWeight: 'bold' }} />
+                    <label htmlFor="resetOtp">6-Digit OTP</label>
+                <input type="text" id="resetOtp" name="otp" className="form-control" value={otp} onChange={e => setOtp(e.target.value.replace(/\D/g, ''))} required placeholder="123456" maxLength={6} style={{ letterSpacing: '4px', fontSize: '1.2rem', fontWeight: 'bold' }} />
                   </div>
                   <div className="form-group anime-form-item">
                     <label htmlFor="resetNewPassword">New Password</label>
@@ -649,7 +649,7 @@ function Login({ onLoginSuccess, showToast }) {
             <React.Fragment>
               <div className="form-group anime-form-item">
                 <label htmlFor="signupOtp">Enter OTP sent to {phone}</label>
-                <input type="text" id="signupOtp" className="form-control" value={signupOtp} onChange={e => setSignupOtp(e.target.value.replace(/\D/g, ''))} required placeholder="1234" maxLength={4} style={{ letterSpacing: '4px', fontSize: '1.2rem', fontWeight: 'bold', textAlign: 'center' }} />
+                <input type="text" id="signupOtp" className="form-control" value={signupOtp} onChange={e => setSignupOtp(e.target.value.replace(/\D/g, ''))} required placeholder="123456" maxLength={6} style={{ letterSpacing: '4px', fontSize: '1.2rem', fontWeight: 'bold', textAlign: 'center' }} />
               </div>
               <div className="anime-form-item" style={{ textAlign: 'right', marginTop: '-8px', marginBottom: '12px' }}>
                 <button type="button" onClick={requestSignupOtp} disabled={resendCooldown > 0 || loading} style={{ background: 'none', border: 'none', padding: 0, color: resendCooldown > 0 ? 'var(--text-muted)' : 'var(--primary)', cursor: resendCooldown > 0 ? 'not-allowed' : 'pointer', fontSize: '0.85rem', fontWeight: 'bold', outline: 'none', transition: 'color 0.2s' }}>
