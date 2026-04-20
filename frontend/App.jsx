@@ -311,7 +311,7 @@ function Navbar({ user, onLogout, toggleTheme, isDarkMode, onEditProfile }) {
           <i className="far fa-bell"></i>
           {notifications.length > 0 && <span style={{ position: 'absolute', top: '-5px', right: '-5px', background: 'var(--danger)', color: 'white', fontSize: '0.6rem', borderRadius: '50%', padding: '2px 5px', fontWeight: 'bold' }}>{notifications.length}</span>}
           {showDropdown && (
-            <div style={{ position: 'absolute', top: '130%', right: '-10px', width: '320px', background: 'var(--surface)', border: '1px solid var(--border-light)', borderRadius: '12px', boxShadow: 'var(--shadow-lg)', zIndex: 1000, maxHeight: '350px', overflowY: 'auto', textAlign: 'left', cursor: 'default' }} onClick={e => e.stopPropagation()}>
+            <div style={{ position: 'absolute', top: '130%', right: '-10px', width: '320px', maxWidth: 'calc(100vw - 40px)', background: 'var(--surface)', border: '1px solid var(--border-light)', borderRadius: '12px', boxShadow: 'var(--shadow-lg)', zIndex: 1000, maxHeight: '350px', overflowY: 'auto', textAlign: 'left', cursor: 'default' }} onClick={e => e.stopPropagation()}>
               <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-light)', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between' }}>
                 <span>Notifications</span>
                 {notifications.length > 0 && <span style={{ fontSize: '0.8rem', color: 'var(--primary)', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); setNotifications([]); }}>Clear All</span>}
@@ -385,12 +385,12 @@ function ProfileModal({ user, onClose, onUpdate, showToast, onLogout }) {
 
   return (
     <div className="modal-overlay visible">
-      <div className="modal-content">
-        <div className="modal-header"><h3>Edit Profile</h3><button onClick={onClose}>&times;</button></div>
+      <div className="modal-content" style={{ width: '90%', maxWidth: '400px', padding: '24px', boxSizing: 'border-box' }}>
+        <div className="modal-header"><h3>Edit Profile</h3><button onClick={onClose} style={{ padding: '10px', margin: '-10px' }}>&times;</button></div>
         <form onSubmit={handleSubmit}>
           <div className="form-group anime-form-item"><label>Full Name</label><input type="text" className="form-control" value={name} onChange={e=>setName(e.target.value)} required maxLength="50" /></div>
           <div className="form-group anime-form-item"><label>Phone Number</label><input type="tel" className="form-control" value={phone} onChange={e=>setPhone(e.target.value.replace(/\D/g, ''))} pattern="[0-9]{10}" maxLength="10" required /></div>
-          <button type="submit" className="btn btn-block anime-form-item" disabled={loading}>{loading ? 'Saving...' : 'Save Changes'}</button>
+          <button type="submit" className="btn btn-block anime-form-item" disabled={loading} style={{ padding: '14px' }}>{loading ? 'Saving...' : 'Save Changes'}</button>
           <button type="button" className="btn-outline btn btn-block" style={{ marginTop: '12px', borderColor: 'var(--danger)', color: 'var(--danger)' }} onClick={onLogout}>Log Out</button>
         </form>
       </div>
@@ -463,7 +463,15 @@ function Login({ onLoginSuccess, showToast }) {
     reader.readAsDataURL(file);
   };
 
-  const requestSignupOtp = async () => {
+  const requestSignupOtp = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!name || name.trim().length === 0) return setError('Full name is required.');
+    if (!password || password.length < 6) return setError('Password must be at least 6 characters.');
+    if (role === 'electrician' && (!idCardBase64 || !address || !experienceYears || !bankDetails || !panCardBase64 || !photoBase64)) {
+      return setError('Please fill in all details, bank info, and upload all required documents.');
+    }
+    if (!phone || phone.length !== 10) return setError('Enter a valid 10-digit phone number.');
+    
     setLoading(true);
     setError(null);
     try {
@@ -484,11 +492,10 @@ function Login({ onLoginSuccess, showToast }) {
     e.preventDefault();
     
     if (!isLogin && !signupOtpSent) {
-      if (role === 'electrician' && (!idCardBase64 || !address || !experienceYears || !bankDetails || !panCardBase64 || !photoBase64)) {
-        return setError('Please fill in all details, bank info, and upload all required documents.');
-      }
-      if (!phone || phone.length !== 10) return setError('Enter a valid 10-digit phone number.');
       return requestSignupOtp();
+    }
+    if (!isLogin && signupOtpSent && (!signupOtp || signupOtp.length !== 6)) {
+      return setError('Enter a valid 6-digit OTP.');
     }
 
     setLoading(true);
@@ -525,7 +532,9 @@ function Login({ onLoginSuccess, showToast }) {
   };
 
   const handleForgotPassword = async (e) => {
-    e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault();
+    if (!phone || phone.length !== 10) return setError('Enter a valid 10-digit phone number.');
+    
     setLoading(true);
     setError(null);
     try {
@@ -537,14 +546,17 @@ function Login({ onLoginSuccess, showToast }) {
         showToast(res.message || 'If an account matches this number, an OTP has been sent.', 'success');
       }
     } catch (err) {
-      if (mounted.current) setError('Failed to request OTP. Please try again later.'); // Sanitize error exposure
+      if (mounted.current) setError(err.message || 'Failed to request OTP.'); 
     } finally {
       if (mounted.current) setLoading(false);
     }
   };
 
   const handleResetPassword = async (e) => {
-    e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault();
+    if (!otp || otp.length !== 6) return setError('Enter a valid 6-digit OTP.');
+    if (!newPassword || newPassword.length < 6) return setError('Password must be at least 6 characters.');
+    
     setLoading(true);
     setError(null);
     try {
@@ -600,7 +612,7 @@ function Login({ onLoginSuccess, showToast }) {
         <div className="logo-text">WATT<span>ZEN</span></div>
       </div>
       <div style={{ textAlign: 'center', color: 'var(--primary)', fontWeight: '700', letterSpacing: '1.5px', marginBottom: '32px', fontSize: '0.85rem' }}>POWER YOUR NETWORK</div>
-      <div className="login-card">
+      <div className="login-card" style={{ width: '100%', maxWidth: '420px', margin: '0 auto', padding: '32px 24px', boxSizing: 'border-box' }}>
         <h1>{isForgotPassword ? 'Reset Password' : (isLogin ? 'Welcome Back' : 'Create Account')}</h1>
         <p>{isForgotPassword ? 'Enter your details below to recover your account.' : (isLogin ? 'Log in to your account to continue.' : 'Join the best electrician network.')}</p>
         
@@ -1326,7 +1338,7 @@ Support: projects.nikunj.singh@gmail.com
                 </div>
               )}
             </div>
-            <div style={{ display: 'flex', gap: '8px', marginTop: '12px', paddingLeft: '32px' }}>
+            <div style={{ display: 'flex', gap: '8px', marginTop: '12px', paddingLeft: '32px', flexWrap: 'wrap' }}>
               {['Home', 'Work'].map(type => (
                 <div key={type} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                   <button className="btn btn-outline" style={{ padding: '4px 12px', fontSize: '0.75rem', borderRadius: '12px', borderColor: 'var(--border-light)', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '6px' }} onClick={() => {
@@ -1424,9 +1436,9 @@ Support: projects.nikunj.singh@gmail.com
                 <small style={{ color: 'var(--text-muted)' }}>How many electricians do you need?</small>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'var(--surface)', padding: '6px', borderRadius: '20px', boxShadow: 'var(--shadow-sm)' }}>
-                <button onClick={() => setTeamSize(Math.max(1, teamSize - 1))} style={{ width: '32px', height: '32px', borderRadius: '50%', border: 'none', background: 'var(--secondary)', color: 'var(--text-main)', cursor: 'pointer', fontWeight: 'bold' }}>-</button>
+                <button onClick={() => setTeamSize(Math.max(1, teamSize - 1))} style={{ width: '40px', height: '40px', borderRadius: '50%', border: 'none', background: 'var(--secondary)', color: 'var(--text-main)', cursor: 'pointer', fontWeight: 'bold' }}>-</button>
                 <strong style={{ width: '20px', textAlign: 'center', color: 'var(--primary)' }}>{teamSize}</strong>
-                <button onClick={() => setTeamSize(Math.min(10, teamSize + 1))} style={{ width: '32px', height: '32px', borderRadius: '50%', border: 'none', background: 'var(--primary)', color: 'white', cursor: 'pointer', fontWeight: 'bold' }}>+</button>
+                <button onClick={() => setTeamSize(Math.min(10, teamSize + 1))} style={{ width: '40px', height: '40px', borderRadius: '50%', border: 'none', background: 'var(--primary)', color: 'white', cursor: 'pointer', fontWeight: 'bold' }}>+</button>
               </div>
             </div>
           )}
@@ -2125,8 +2137,7 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
     try {
       const acceptedJob = await fetchJson(`/jobs/${jobId}/accept`, { method: 'PUT' });
       
-      // Fix: Join room AFTER API responds successfully to prevent phantom socket connections if API fails
-      socket.emit('joinJobRoom', jobId);
+      // The activeJobId useEffect will automatically handle joining the socket room safely
       setActiveJobId(jobId); // Link the job and join the chat room only AFTER accepting
       setAvailableJobs([]); // Clear the list to focus on the active job
       setCurrentJob(acceptedJob); // Set the full job object
@@ -2494,7 +2505,8 @@ function TabButton({ active, onClick, icon, label }) {
     <button 
       onClick={onClick}
       style={{
-        padding: '10px 20px',
+        flexShrink: 0,
+        padding: '12px 20px',
         background: active ? 'var(--primary)' : 'var(--surface)',
         color: active ? 'white' : 'var(--text-main)',
         border: '1px solid',
@@ -2558,6 +2570,10 @@ function AdminPanel({ user, onLogout, showToast }) {
   const [mockData, setMockData] = useState([]);
   const [systemStatus, setSystemStatus] = useState({ uptime: 0, dbConnected: false });
   
+  const [liveActiveJobs, setLiveActiveJobs] = useState([]);
+  const [systemMetrics, setSystemMetrics] = useState({ clientsCount: 0 });
+  const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
+  
   const mounted = useRef(true);
   useEffect(() => { return () => { mounted.current = false; }; }, []);
 
@@ -2578,6 +2594,10 @@ function AdminPanel({ user, onLogout, showToast }) {
       setArchivedUsers(Array.isArray(archives) ? archives : []);
       const health = await fetchJson('/health');
       setSystemStatus(health || { uptime: 0, dbConnected: false });
+      const activeJ = await fetchJson('/admin/live-jobs');
+      setLiveActiveJobs(Array.isArray(activeJ) ? activeJ : []);
+      const sys = await fetchJson('/admin/system-status');
+      setIsMaintenanceMode(sys.maintenanceMode);
     } catch (error) {
       showToast(`Failed to fetch dashboard data: ${error.message}`, 'error');
       console.error('Dashboard error:', error);
@@ -2592,10 +2612,14 @@ function AdminPanel({ user, onLogout, showToast }) {
     setMockData(generateMockUsers());
 
     const handleAdminRefresh = () => fetchDashboardData();
+    const handleMetrics = (data) => setSystemMetrics(data);
+    
     socket.on('adminRefresh', handleAdminRefresh);
+    socket.on('adminMetrics', handleMetrics);
 
     return () => {
       socket.off('adminRefresh', handleAdminRefresh);
+      socket.off('adminMetrics', handleMetrics);
     };
   }, [socket, fetchDashboardData]);
 
@@ -2683,6 +2707,39 @@ function AdminPanel({ user, onLogout, showToast }) {
     } finally {
       if (mounted.current) setIsDownloading(false);
     }
+  };
+
+  const handleExportUsers = () => {
+    const headers = ['User ID', 'Role', 'Name', 'Phone', 'Wallet Balance', 'Jobs Completed', 'Status'];
+    const csvRows = [headers.join(',')];
+    currentData.forEach(u => {
+      csvRows.push([u._id, u.role, `"${u.name}"`, u.phone, u.walletBalance, u.jobsCompleted, u.isApproved ? 'Approved' : 'Pending'].join(','));
+    });
+    const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `Users_Export_${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); window.URL.revokeObjectURL(url);
+  };
+
+  const handleImpersonate = async (id) => {
+    if (!window.confirm('Ghost Login: You will be logged into this user account immediately. Continue?')) return;
+    try {
+      const res = await fetchJson(`/admin/users/${id}/impersonate`, { method: 'POST' });
+      localStorage.setItem('token', res.token);
+      localStorage.setItem('user', JSON.stringify(res.user));
+      window.location.href = `/${res.user.role}`; // Hard reload to switch session context
+    } catch(e) { showToast(e.message, 'error'); }
+  };
+
+  const handleSaveNotes = async (id, currentNotes) => {
+    const notes = window.prompt(`Admin Notes for User ${id}:`, currentNotes || '');
+    if (notes === null) return;
+    try {
+      await fetchJson(`/admin/users/${id}/notes`, { method: 'PUT', body: { notes } });
+      showToast('Notes saved successfully', 'success');
+      fetchDashboardData();
+    } catch(e) { showToast(e.message, 'error'); }
   };
 
   const handleViewActivity = async (user) => {
@@ -2814,6 +2871,15 @@ function AdminPanel({ user, onLogout, showToast }) {
     }
   };
 
+  const handleSuspend = async (id) => {
+    if (!window.confirm('Suspend user? They will instantly lose approval and cannot accept new jobs.')) return;
+    try {
+      await fetchJson(`/admin/users/${id}/suspend`, { method: 'PUT' });
+      showToast('Account suspended', 'success');
+      fetchDashboardData();
+    } catch(e) { showToast('Failed to suspend', 'error'); }
+  };
+
   const handleRejectElectrician = async (id) => {
     if (!window.confirm('Are you sure you want to reject this application? The account will be deleted.')) return;
     try {
@@ -2868,6 +2934,23 @@ function AdminPanel({ user, onLogout, showToast }) {
     }
   };
 
+  const handleForceCompleteJob = async (id) => {
+    if (!window.confirm('Force complete this job? Earnings will be paid out to the electricians.')) return;
+    try {
+      await fetchJson(`/admin/jobs/${id}/force-complete`, { method: 'PUT' });
+      showToast('Job forcefully completed and paid out.', 'success');
+    } catch(e) { showToast(e.message, 'error'); }
+  };
+
+  const handleToggleMaintenance = async () => {
+    if (!window.confirm(`Turn Maintenance Mode ${isMaintenanceMode ? 'OFF' : 'ON'}?`)) return;
+    try {
+      const res = await fetchJson('/admin/toggle-maintenance', { method: 'POST' });
+      setIsMaintenanceMode(res.maintenanceMode);
+      showToast(res.message, 'success');
+    } catch(e) { showToast(e.message, 'error'); }
+  };
+
   const handleGenerateCoupon = async (e) => {
     e.preventDefault();
     if (!newCouponAmount || Number(newCouponAmount) <= 0) return showToast('Please enter a valid discount amount.', 'error');
@@ -2902,26 +2985,30 @@ function AdminPanel({ user, onLogout, showToast }) {
         </button>
       </div>
 
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '24px' }}>
-        <input type="text" value={broadcastMsg} onChange={e => setBroadcastMsg(e.target.value)} placeholder="Type a system-wide broadcast message..." className="form-control" style={{ margin: 0, flex: 1 }} maxLength="1000" />
-        <button className="btn" style={{ background: 'var(--warning)' }} onClick={handleBroadcast}><i className="fas fa-bullhorn"></i> Send Broadcast</button>
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '24px', flexWrap: 'wrap' }}>
+        <input type="text" value={broadcastMsg} onChange={e => setBroadcastMsg(e.target.value)} placeholder="Type a system-wide broadcast message..." className="form-control" style={{ margin: 0, flex: '1 1 200px' }} maxLength="1000" />
+        <button className="btn" style={{ background: 'var(--warning)', flex: '1 1 auto', justifyContent: 'center' }} onClick={handleBroadcast}><i className="fas fa-bullhorn"></i> Send Broadcast</button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '12px', marginBottom: '24px' }}>
         <MetricCard icon="fa-users" title="Total Users" value={currentData.length.toLocaleString()} trend={`${totalCustomers} Customers, ${totalElectricians} Electricians`} color="var(--primary)" />
-        <MetricCard icon="fa-helmet-safety" title="Total Electricians" value={totalElectricians.toLocaleString()} trend="Verified professionals" color="var(--warning)" />
+        <MetricCard icon="fa-plug" title="Live Connections" value={systemMetrics.clientsCount.toLocaleString()} trend="Active socket users right now" color="var(--warning)" />
         <MetricCard icon="fa-sack-dollar" title="Gross Revenue" value={`₹${(financeData.stats?.totalRevenue || 0).toLocaleString()}`} trend="From all completed jobs" color="var(--success)" />
         <MetricCard icon="fa-server" title="Server Uptime" value={formatUptime(systemStatus.uptime)} trend={systemStatus.dbConnected ? "Database Connected" : "Database Offline"} color={systemStatus.dbConnected ? "var(--success)" : "var(--danger)"} />
       </div>
 
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
+        <div className="hide-scrollbar" style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '4px', WebkitOverflowScrolling: 'touch', width: '100%' }}>
         <TabButton active={activeTab === 'database'} onClick={() => setActiveTab('database')} icon="fa-database" label="Global Database" />
+        <TabButton active={activeTab === 'live'} onClick={() => setActiveTab('live')} icon="fa-satellite-dish" label="Live Jobs" />
         <TabButton active={activeTab === 'finance'} onClick={() => setActiveTab('finance')} icon="fa-indian-rupee-sign" label="Finance & Approvals" />
         <TabButton active={activeTab === 'security'} onClick={() => setActiveTab('security')} icon="fa-shield-halved" label="Security & Bans" />
         <TabButton active={activeTab === 'archives'} onClick={() => setActiveTab('archives')} icon="fa-box-archive" label="Deleted Archives" />
         <TabButton active={activeTab === 'coupons'} onClick={() => setActiveTab('coupons')} icon="fa-ticket" label="Discount Coupons" />
         <TabButton active={activeTab === 'logs'} onClick={() => setActiveTab('logs')} icon="fa-terminal" label="System Logs" />
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+        <TabButton active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} icon="fa-cogs" label="Control Panel" />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap', justifyContent: 'space-between', width: '100%' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: 'var(--text-main)', fontSize: '0.9rem', fontWeight: 600, background: 'var(--surface)', padding: '8px 16px', borderRadius: '30px', border: '1px solid var(--border-light)' }}>
             <input type="checkbox" checked={useMockData} onChange={(e) => setUseMockData(e.target.checked)} style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: 'var(--primary)' }} />
             Enable Mock Data
@@ -2929,9 +3016,6 @@ function AdminPanel({ user, onLogout, showToast }) {
         <button className="btn btn-outline" style={{ borderColor: 'var(--success)', color: 'var(--success)' }} onClick={handleRefresh} disabled={isLoading || isRefreshing}>
           <i className={`fas ${isLoading || isRefreshing ? 'fa-spinner fa-spin' : 'fa-sync'}`}></i> Refresh Data
         </button>
-          <button className="btn btn-outline" style={{ borderColor: 'var(--primary)', color: 'var(--primary)' }} onClick={handleDownloadReport} disabled={isDownloading}>
-            <i className={`fas ${isDownloading ? 'fa-spinner fa-spin' : 'fa-file-csv'}`}></i> {isDownloading ? 'Generating...' : 'Export Completed Jobs'}
-          </button>
         </div>
       </div>
 
@@ -2940,17 +3024,26 @@ function AdminPanel({ user, onLogout, showToast }) {
           <div>
             <div style={{ padding: '16px', borderBottom: '1px solid var(--border-light)', display: 'flex', flexWrap: 'wrap', gap: '12px', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ margin: 0 }}><i className="fas fa-table" style={{ color: 'var(--primary)' }}></i> Master Records</h3>
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <button className="btn btn-outline" style={{ borderColor: 'var(--success)', color: 'var(--success)' }} onClick={async () => {
+                  if(!window.confirm('Bulk approve all pending electricians who have paid?')) return;
+                  try { const r = await fetchJson('/admin/users/bulk-approve', {method:'PUT'}); showToast(r.message, 'success'); fetchDashboardData(); } catch(e) { showToast(e.message, 'error'); }
+                }}><i className="fas fa-check-double"></i> Bulk Approve</button>
+                <button className="btn btn-outline" style={{ borderColor: 'var(--primary)', color: 'var(--primary)' }} onClick={handleExportUsers}>
+                  <i className="fas fa-file-csv"></i> Export Users
+                </button>
+              </div>
               <input type="text" aria-label="Search records" placeholder="Search IDs, Names, Locations..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{ padding: '8px 16px', borderRadius: '20px', border: '1px solid var(--border-light)', width: '100%', maxWidth: '300px', outline: 'none' }} />
             </div>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem', textAlign: 'left' }}>
                 <thead style={{ background: 'var(--secondary)', color: 'var(--text-muted)' }}>
                   <tr>
-                    <th style={{ padding: '14px 16px' }}>System ID</th>
-                    <th style={{ padding: '14px 16px' }}>Type</th>
-                    <th style={{ padding: '14px 16px' }}>Full Name</th>
-                    <th style={{ padding: '14px 16px' }}>Phone & Password</th>
-                    <th style={{ padding: '14px 16px' }}>Status</th>
+                    <th style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>System ID</th>
+                    <th style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>Type</th>
+                    <th style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>Full Name</th>
+                    <th style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>Phone & Password</th>
+                    <th style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>Status</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2970,13 +3063,18 @@ function AdminPanel({ user, onLogout, showToast }) {
                       <td style={{ padding: '14px 16px', fontWeight: 500 }}>{row.name}</td>
                       <td style={{ padding: '14px 16px' }}>
                         <div style={{ fontWeight: 'bold' }}><i className="fas fa-phone" style={{ color: 'var(--text-muted)', marginRight: '4px' }}></i> {row.phone}</div>
-                        <div style={{ fontSize: '0.85rem', color: 'var(--danger)', marginTop: '4px' }} title="Real Password"><i className="fas fa-unlock-keyhole" style={{ marginRight: '4px' }}></i> {row.plainPassword || '***'}</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px', cursor: 'pointer' }} onClick={() => handleSaveNotes(row._id, row.adminNotes)} title="Click to edit notes">
+                          <i className="fas fa-note-sticky"></i> {row.adminNotes ? `${row.adminNotes.substring(0, 15)}...` : 'Add Note'}
+                        </div>
                       </td>
                       <td style={{ padding: '14px 16px' }}>
                         <span style={{ color: calcStatus(row) === 'New' ? 'var(--warning)' : 'var(--success)', fontWeight: 600 }}>
                           • {row.status || calcStatus(row)}
                         </span>
                         <div style={{ marginTop: '8px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                          <button className="btn btn-outline" style={{ padding: '6px 12px', fontSize: '0.8rem', color: 'var(--text-main)', borderColor: 'var(--border-light)' }} onClick={() => handleImpersonate(row._id)} title="Login as User">
+                            <i className="fas fa-ghost"></i>
+                          </button>
                           <button className="btn btn-outline" style={{ padding: '6px 12px', fontSize: '0.8rem', color: 'var(--text-main)', borderColor: 'var(--border-light)' }} onClick={() => handleViewActivity(row)} title="View User Logs & Timings">
                             <i className="fas fa-clock-rotate-left"></i> Logs
                           </button>
@@ -2990,6 +3088,9 @@ function AdminPanel({ user, onLogout, showToast }) {
                               <button className="btn btn-outline" style={{ padding: '6px 12px', fontSize: '0.8rem', color: 'var(--success)', borderColor: 'var(--success)' }} onClick={() => handleEditWallet(row)} title="Edit Wallet Balance">
                                 <i className="fas fa-wallet"></i> ₹{row.walletBalance || 0}
                               </button>
+                              {row.role === 'electrician' && row.isApproved && (
+                                <button className="btn btn-outline" style={{ padding: '6px 12px', fontSize: '0.8rem', color: 'var(--warning)', borderColor: 'var(--warning)' }} onClick={() => handleSuspend(row._id)} title="Suspend Account"><i className="fas fa-ban"></i></button>
+                              )}
                               <button className="btn btn-outline" style={{ padding: '6px 12px', fontSize: '0.8rem', color: 'var(--danger)', borderColor: 'var(--danger)' }} onClick={() => handleDeleteUser(row._id)} title="Force Delete User">
                                 <i className="fas fa-trash"></i>
                               </button>
@@ -3120,7 +3221,7 @@ function AdminPanel({ user, onLogout, showToast }) {
                     <strong>{job.serviceType}</strong> - ₹{job.estimatedPrice} {job.originalPrice && job.originalPrice !== job.estimatedPrice ? <span style={{ fontSize: '0.8rem', color: 'var(--warning)' }}>(Coupon Used)</span> : ''} <br/>
                     <small>Customer: {job.customer?.name} ({job.customer?.phone})</small>
                   </div>
-                  <div style={{ display: 'flex', gap: '8px' }}>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                     <button className="btn" style={{ background: 'var(--success)' }} onClick={() => handleApprovePayment(job._id)}>Approve Payment</button>
                     <button className="btn btn-outline" style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }} onClick={() => handleForceCancelJob(job._id)}>Force Cancel</button>
                   </div>
@@ -3137,7 +3238,7 @@ function AdminPanel({ user, onLogout, showToast }) {
                     <strong>Electrician: {req.electrician?.name}</strong> <br/>
                     <small>Phone: {req.electrician?.phone}</small>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
                     <strong style={{ fontSize: '1.2rem' }}>₹{req.amount}</strong>
                     <button className="btn" style={{ background: 'var(--primary)' }} onClick={() => handleApproveWithdrawal(req._id)}>Mark as Transferred</button>
                     <button className="btn btn-outline" style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }} onClick={() => handleRejectWithdrawal(req._id)}>Reject</button>
@@ -3146,17 +3247,22 @@ function AdminPanel({ user, onLogout, showToast }) {
               ))}
             </div>
 
-            <h3 style={{ color: 'var(--text-main)', marginBottom: '16px', marginTop: '32px' }}><i className="fas fa-file-invoice-dollar"></i> Completed Job Revenue Logs</h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', marginTop: '32px' }}>
+              <h3 style={{ color: 'var(--text-main)', margin: 0 }}><i className="fas fa-file-invoice-dollar"></i> Completed Job Revenue Logs</h3>
+              <button className="btn btn-outline" style={{ borderColor: 'var(--primary)', color: 'var(--primary)', padding: '6px 12px' }} onClick={handleDownloadReport} disabled={isDownloading}>
+                <i className={`fas ${isDownloading ? 'fa-spinner fa-spin' : 'fa-download'}`}></i> Export CSV
+              </button>
+            </div>
             <div style={{ overflowX: 'auto', background: 'var(--surface)', borderRadius: '12px', border: '1px solid var(--border-light)' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem', textAlign: 'left' }}>
                 <thead style={{ background: 'var(--secondary)', color: 'var(--text-muted)' }}>
                   <tr>
-                    <th style={{ padding: '14px 16px' }}>Date</th>
-                    <th style={{ padding: '14px 16px' }}>Service</th>
-                    <th style={{ padding: '14px 16px' }}>Customer</th>
-                    <th style={{ padding: '14px 16px' }}>Electrician(s)</th>
-                    <th style={{ padding: '14px 16px' }}>Gross Revenue</th>
-                    <th style={{ padding: '14px 16px' }}>Profit (20%)</th>
+                    <th style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>Date</th>
+                    <th style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>Service</th>
+                    <th style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>Customer</th>
+                    <th style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>Electrician(s)</th>
+                    <th style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>Gross Revenue</th>
+                    <th style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>Profit (20%)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -3182,11 +3288,11 @@ function AdminPanel({ user, onLogout, showToast }) {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem', textAlign: 'left' }}>
                 <thead style={{ background: 'var(--secondary)', color: 'var(--text-muted)' }}>
                   <tr>
-                    <th style={{ padding: '14px 16px' }}>Date Processed</th>
-                    <th style={{ padding: '14px 16px' }}>Electrician</th>
-                    <th style={{ padding: '14px 16px' }}>Phone</th>
-                    <th style={{ padding: '14px 16px' }}>Amount</th>
-                    <th style={{ padding: '14px 16px' }}>Status</th>
+                    <th style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>Date Processed</th>
+                    <th style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>Electrician</th>
+                    <th style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>Phone</th>
+                    <th style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>Amount</th>
+                    <th style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>Status</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -3221,10 +3327,10 @@ function AdminPanel({ user, onLogout, showToast }) {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem', textAlign: 'left' }}>
                 <thead style={{ background: 'var(--secondary)', color: 'var(--text-muted)' }}>
                   <tr>
-                    <th style={{ padding: '14px 16px' }}>IP Address</th>
-                    <th style={{ padding: '14px 16px' }}>Reason</th>
-                    <th style={{ padding: '14px 16px' }}>Date Banned</th>
-                    <th style={{ padding: '14px 16px' }}>Action</th>
+                    <th style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>IP Address</th>
+                    <th style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>Reason</th>
+                    <th style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>Date Banned</th>
+                    <th style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -3252,11 +3358,11 @@ function AdminPanel({ user, onLogout, showToast }) {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem', textAlign: 'left' }}>
                 <thead style={{ background: 'var(--secondary)', color: 'var(--text-muted)' }}>
                   <tr>
-                    <th style={{ padding: '14px 16px' }}>Original ID</th>
-                    <th style={{ padding: '14px 16px' }}>Name & Phone</th>
-                    <th style={{ padding: '14px 16px' }}>Deleted By</th>
-                    <th style={{ padding: '14px 16px' }}>Deleted At</th>
-                    <th style={{ padding: '14px 16px' }}>Actions</th>
+                    <th style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>Original ID</th>
+                    <th style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>Name & Phone</th>
+                    <th style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>Deleted By</th>
+                    <th style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>Deleted At</th>
+                    <th style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -3299,10 +3405,10 @@ function AdminPanel({ user, onLogout, showToast }) {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem', textAlign: 'left' }}>
                 <thead style={{ background: 'var(--secondary)', color: 'var(--text-muted)' }}>
                   <tr>
-                    <th style={{ padding: '14px 16px' }}>Code</th>
-                    <th style={{ padding: '14px 16px' }}>Discount</th>
-                    <th style={{ padding: '14px 16px' }}>Status</th>
-                    <th style={{ padding: '14px 16px' }}>Generated At</th>
+                    <th style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>Code</th>
+                    <th style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>Discount</th>
+                    <th style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>Status</th>
+                    <th style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>Generated At</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -3329,6 +3435,19 @@ function AdminPanel({ user, onLogout, showToast }) {
                 <span style={{ color: '#f8fafc', flex: 1 }}>{log.event}: <span style={{ color: '#94a3b8' }}>{log.details}</span></span>
               </div>
             ))}
+          </div>
+        )}
+        
+        {activeTab === 'settings' && (
+          <div style={{ padding: '20px' }}>
+            <h3 style={{ color: 'var(--text-main)', marginBottom: '16px' }}><i className="fas fa-cogs"></i> System Settings</h3>
+            <div style={{ background: 'var(--secondary)', padding: '20px', borderRadius: '12px', border: `1px dashed ${isMaintenanceMode ? 'var(--danger)' : 'var(--border-light)'}`, marginBottom: '24px' }}>
+              <h4 style={{ color: isMaintenanceMode ? 'var(--danger)' : 'var(--text-main)', margin: '0 0 12px 0' }}>Platform Maintenance Mode</h4>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '16px' }}>Enabling Maintenance Mode will instantly lock out all Customers and Electricians. Ongoing jobs may be disrupted. Use only for critical database upgrades.</p>
+              <button className="btn" style={{ background: isMaintenanceMode ? 'var(--success)' : 'var(--danger)' }} onClick={handleToggleMaintenance}>
+                <i className={`fas ${isMaintenanceMode ? 'fa-play' : 'fa-power-off'}`}></i> {isMaintenanceMode ? 'Turn Maintenance Mode OFF (Restore Access)' : 'Enable Maintenance Mode (Lock Platform)'}
+              </button>
+            </div>
           </div>
         )}
       </div>

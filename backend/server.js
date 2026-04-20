@@ -37,7 +37,7 @@ const corsOptions = {
       'http://127.0.0.1:5173'
     ];
     const isLocalNetwork = /^http:\/\/(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)\d{1,3}(:\d+)?$/.test(origin);
-    const isVercelPreview = /^https:\/\/.*\.vercel\.app$/.test(origin); // 1. Support dynamic Vercel Preview Branch URLs
+    const isVercelPreview = /^https:\/\/.*\.vercel\.app$/.test(origin); // Support Vercel Preview Branches
     const isRenderPreview = /^https:\/\/.*\.onrender\.com$/.test(origin); // Support Render Preview Branches
     if (!origin || allowedOrigins.includes(origin) || isLocalNetwork || isVercelPreview || isRenderPreview) {
       callback(null, true);
@@ -54,6 +54,7 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions)); // Explicitly handle CORS preflight for serverless hosting
 // 1. Prevent OOM Crashes: Restrict incoming JSON payloads to 20mb max to allow multiple document uploads
 app.use(express.json({ limit: '20mb' }));
+app.use(express.urlencoded({ extended: true, limit: '20mb' })); // Support generic form payloads safely
 
 // Apply strict Security Headers to prevent Clickjacking and Framework Fingerprinting
 app.disable('x-powered-by');
@@ -80,6 +81,7 @@ app.use((req, res, next) => {
 let criticalSystemError = null;
 let isDbConnected = false;
 const bannedIpsCache = new Set();
+global.MAINTENANCE_MODE = false; // System-wide lock flag
 
 const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -93,6 +95,10 @@ if (!MONGO_URI || !JWT_SECRET) {
 // Prevent the server from crashing, instead returning a clean JSON error to the frontend so CORS doesn't break
 app.use('/api', async (req, res, next) => {
   const clientIp = getClientIp(req);
+  // 1. Maintenance Mode Interceptor
+  if (global.MAINTENANCE_MODE && !req.url.startsWith('/admin') && !req.url.startsWith('/login') && !req.url.startsWith('/me')) {
+    return res.status(503).json({ message: 'The system is currently down for maintenance. Please check back shortly.' });
+  }
   if (bannedIpsCache.has(clientIp)) {
     return res.status(403).json({ message: 'Your IP address has been permanently banned from accessing this service.' });
   }
@@ -169,7 +175,7 @@ if (!process.env.VERCEL) {
   
   // Render Load Balancer Fix: Keep-Alive timeout must exceed the LB's 100s timeout to prevent 502 errors
   server.keepAliveTimeout = 120000; // 120 seconds
-  server.headersTimeout = 120000;
+  server.headersTimeout = 121000; // MUST be strictly greater than keepAliveTimeout to prevent 502 race conditions
 }
 connectDB(); // Initiate DB connection asynchronously
 
@@ -190,7 +196,8 @@ const userSchema = new mongoose.Schema({
   photoUrl: { type: String }, // Base64 image
   bankDetails: { type: String }, // Account Number and IFSC
   isApproved: { type: Boolean, default: true }, // Requires Admin approval for electricians
-  safetyDepositPaid: { type: Boolean, default: true } // Requires ₹500 deposit for electricians
+  safetyDepositPaid: { type: Boolean, default: true }, // Requires ₹500 deposit for electricians
+  adminNotes: { type: String, default: '' } // Internal admin remarks
 }, { timestamps: true });
 
 const jobSchema = new mongoose.Schema({
@@ -417,6 +424,13 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => socketRateLimits.delete(socket.id));
 });
 
+// Real-time Admin Metrics Broadcaster
+setInterval(() => {
+  if (io && io.engine) {
+    io.emit('adminMetrics', { clientsCount: io.engine.clientsCount });
+  }
+}, 5000);
+
 // ==========================================
 // 3. EXPRESS ROUTING & MIDDLEWARE
 // ==========================================
@@ -488,12 +502,16 @@ const runGhostJobSweeper = async () => {
     const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
     const stuckJobs = await Job.find({ status: 'searching', updatedAt: { $lt: twoHoursAgo } });
     for (const job of stuckJobs) {
-      job.status = 'cancelled';
-      await job.save();
-      if (job.paymentStatus === 'paid') {
-        await User.findByIdAndUpdate(job.customer, { $inc: { walletBalance: job.estimatedPrice } });
+      try {
+        job.status = 'cancelled';
+        await job.save();
+        if (job.paymentStatus === 'paid') {
+          await User.findByIdAndUpdate(job.customer, { $inc: { walletBalance: job.estimatedPrice } });
+        }
+        io.to(job._id.toString()).emit('jobCancelled');
+      } catch (innerErr) {
+        console.error(`Ghost sweep failed for job ${job._id}:`, innerErr);
       }
-      io.to(job._id.toString()).emit('jobCancelled');
     }
   } catch (err) { console.error('Ghost job cleanup failed:', err); }
 };
@@ -505,19 +523,23 @@ const runStuckJobSweeper = async () => {
     const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const stuckJobs = await Job.find({ status: 'in_progress', updatedAt: { $lt: oneDayAgo } });
     for (const job of stuckJobs) {
-      job.status = 'completed';
-      await job.save({ validateModifiedOnly: true }); // 12. Robust ghost saving
-      
-      if (job.electricians && job.electricians.length > 0) {
-        const uniqueElectricians = [...new Set(job.electricians.map(e => e.toString()))];
-        const basePayout = job.originalPrice || job.estimatedPrice;
-        const earningsPerElectrician = Math.floor(((basePayout * 0.8) / Math.max(1, uniqueElectricians.length)) * 100) / 100;
-        await User.updateMany(
-          { _id: { $in: uniqueElectricians } },
-          { $inc: { walletBalance: earningsPerElectrician, jobsCompleted: 1 } }
-        );
+      try {
+        job.status = 'completed';
+        await job.save({ validateModifiedOnly: true }); // 12. Robust ghost saving
+        
+        if (job.electricians && job.electricians.length > 0) {
+          const uniqueElectricians = [...new Set(job.electricians.map(e => e.toString()))];
+          const basePayout = job.originalPrice || job.estimatedPrice;
+          const earningsPerElectrician = Math.floor(((basePayout * 0.8) / Math.max(1, uniqueElectricians.length)) * 100) / 100;
+          await User.updateMany(
+            { _id: { $in: uniqueElectricians } },
+            { $inc: { walletBalance: earningsPerElectrician, jobsCompleted: 1 } }
+          );
+        }
+        io.to(job._id.toString()).emit('jobCompleted');
+      } catch (innerErr) {
+        console.error(`Stuck sweep failed for job ${job._id}:`, innerErr);
       }
-      io.to(job._id.toString()).emit('jobCompleted');
     }
   } catch (err) { console.error('Stuck job auto-complete failed:', err); }
 };
@@ -644,40 +666,46 @@ api.post('/signup', async (req, res) => {
     const otp = String(req.body.otp || '').trim().substring(0, 10);
     if (!otp) return res.status(400).json({ message: 'Verification OTP is required to sign up.' });
 
+    // Security & Financial: Check DB BEFORE hitting Twilio to prevent SMS API billing exploitation
+    let existingUser = await User.findOne({ phone });
+    if (existingUser) return res.status(400).json({ message: 'Phone number already registered' });
+
     const targetPhone = phone.startsWith('+') ? phone : `+91${phone}`;
     const twilioAccountSid = 'ACebe0641d08c01bbe9192e4051bf40c1f';
     const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
     const twilioVerifyServiceSid = 'VAe6e9351e557234c57132aceac37b4ded';
 
-    const authHeader = 'Basic ' + Buffer.from(`${twilioAccountSid}:${twilioAuthToken}`).toString('base64');
-    const params = new URLSearchParams();
-    params.append('To', targetPhone);
-    params.append('Code', otp);
+    if (!twilioAuthToken) {
+      console.warn(`[DEV MODE] Bypassing Twilio SMS Verify for signup. Accepting OTP 123456 for ${targetPhone}`);
+      if (otp !== '123456') return res.status(400).json({ message: 'Invalid OTP code.' });
+    } else {
+      const authHeader = 'Basic ' + Buffer.from(`${twilioAccountSid}:${twilioAuthToken}`).toString('base64');
+      const params = new URLSearchParams();
+      params.append('To', targetPhone);
+      params.append('Code', otp);
 
-    try {
-      const twilioRes = await fetch(`https://verify.twilio.com/v2/Services/${twilioVerifyServiceSid}/VerificationCheck`, {
-        method: 'POST',
-        headers: {
-          'Authorization': authHeader,
-          'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: params
-      });
+      try {
+        const twilioRes = await fetch(`https://verify.twilio.com/v2/Services/${twilioVerifyServiceSid}/VerificationCheck`, {
+          method: 'POST',
+          headers: {
+            'Authorization': authHeader,
+            'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          body: params.toString()
+        });
 
-      const verification = await twilioRes.json();
-      if (!twilioRes.ok) {
-        console.error('[TWILIO VERIFY ERROR]', verification);
-        return res.status(400).json({ message: `Twilio Error: ${verification.message || 'Verification failed'}` });
-      } else if (verification.status !== 'approved') {
-        return res.status(400).json({ message: 'Invalid OTP code.' });
+        const verification = await twilioRes.json();
+        if (!twilioRes.ok) {
+          console.error('[TWILIO VERIFY ERROR]', verification);
+          return res.status(400).json({ message: `Twilio Error: ${verification.message || 'Verification failed'}` });
+        } else if (verification.status !== 'approved') {
+          return res.status(400).json({ message: 'Invalid OTP code.' });
+        }
+      } catch (err) {
+        console.error('[TWILIO VERIFY ERROR]', err);
+        return res.status(500).json({ message: 'Error verifying OTP' });
       }
-    } catch (err) {
-      console.error('[TWILIO VERIFY ERROR]', err);
-      return res.status(500).json({ message: 'Error verifying OTP' });
     }
-
-    let existingUser = await User.findOne({ phone });
-    if (existingUser) return res.status(400).json({ message: 'Phone number already registered' });
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const isApproved = role === 'electrician' ? false : true;
@@ -805,24 +833,28 @@ api.post('/auth/forgot-password', async (req, res) => {
       const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
       const twilioVerifyServiceSid = 'VAe6e9351e557234c57132aceac37b4ded';
 
-      const authHeader = 'Basic ' + Buffer.from(`${twilioAccountSid}:${twilioAuthToken}`).toString('base64');
-      const params = new URLSearchParams();
-      params.append('To', targetPhone);
-      params.append('Channel', 'sms');
+      if (!twilioAuthToken) {
+        console.warn(`[DEV MODE] Mocking Twilio SMS reset to ${targetPhone}. Use OTP 123456 to verify.`);
+      } else {
+        const authHeader = 'Basic ' + Buffer.from(`${twilioAccountSid}:${twilioAuthToken}`).toString('base64');
+        const params = new URLSearchParams();
+        params.append('To', targetPhone);
+        params.append('Channel', 'sms');
 
-      const twilioRes = await fetch(`https://verify.twilio.com/v2/Services/${twilioVerifyServiceSid}/Verifications`, {
-        method: 'POST',
-        headers: {
-          'Authorization': authHeader,
-          'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: params
-      });
+        const twilioRes = await fetch(`https://verify.twilio.com/v2/Services/${twilioVerifyServiceSid}/Verifications`, {
+          method: 'POST',
+          headers: {
+            'Authorization': authHeader,
+            'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          body: params.toString()
+        });
 
-      if (!twilioRes.ok) {
-        const errorData = await twilioRes.json();
-        console.error('[TWILIO ERROR]', errorData);
-        return res.status(500).json({ message: `Twilio Error: ${errorData.message || 'Failed to send OTP'}` });
+        if (!twilioRes.ok) {
+          const errorData = await twilioRes.json();
+          console.error('[TWILIO ERROR]', errorData);
+          return res.status(500).json({ message: `Twilio Error: ${errorData.message || 'Failed to send OTP'}` });
+        }
       }
     } catch (smsError) {
       console.error('[SMS ERROR] Failed to hit Twilio:', smsError.message);
@@ -865,23 +897,27 @@ api.post('/auth/send-signup-otp', async (req, res) => {
       const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
       const twilioVerifyServiceSid = 'VAe6e9351e557234c57132aceac37b4ded';
 
-      const authHeader = 'Basic ' + Buffer.from(`${twilioAccountSid}:${twilioAuthToken}`).toString('base64');
-      const params = new URLSearchParams();
-      params.append('To', targetPhone);
-      params.append('Channel', 'sms');
+      if (!twilioAuthToken) {
+        console.warn(`[DEV MODE] Mocking Twilio SMS send to ${targetPhone}. Use OTP 123456 to verify.`);
+      } else {
+        const authHeader = 'Basic ' + Buffer.from(`${twilioAccountSid}:${twilioAuthToken}`).toString('base64');
+        const params = new URLSearchParams();
+        params.append('To', targetPhone);
+        params.append('Channel', 'sms');
 
-      const twilioRes = await fetch(`https://verify.twilio.com/v2/Services/${twilioVerifyServiceSid}/Verifications`, {
-        method: 'POST',
-        headers: {
-          'Authorization': authHeader,
-          'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: params
-      });
-      if (!twilioRes.ok) {
-        const errorData = await twilioRes.json();
-        console.error('[TWILIO ERROR]', errorData);
-        return res.status(500).json({ message: `Twilio Error: ${errorData.message || 'Failed to send OTP'}` });
+        const twilioRes = await fetch(`https://verify.twilio.com/v2/Services/${twilioVerifyServiceSid}/Verifications`, {
+          method: 'POST',
+          headers: {
+            'Authorization': authHeader,
+            'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          body: params.toString()
+        });
+        if (!twilioRes.ok) {
+          const errorData = await twilioRes.json();
+          console.error('[TWILIO ERROR]', errorData);
+          return res.status(500).json({ message: `Twilio Error: ${errorData.message || 'Failed to send OTP'}` });
+        }
       }
     } catch (smsError) {
       console.error('[SMS ERROR] Failed to hit Twilio:', smsError.message);
@@ -903,6 +939,12 @@ api.post('/auth/reset-password', async (req, res) => {
     if (!cleanPhone || !otp || !newPassword) return res.status(400).json({ message: 'All fields are required' });
     if (newPassword.length < 6 || newPassword.length > 100) return res.status(400).json({ message: 'Password must be between 6 and 100 characters' });
 
+    // 3. Bcrypt Asymmetric DoS Fix: Fetch user BEFORE hitting Twilio to save costs and verify existence
+    const user = await User.findOne({ phone: cleanPhone });
+    if (!user) {
+      return res.status(404).json({ message: 'Account no longer exists' });
+    }
+
     const targetPhone = cleanPhone.startsWith('+') ? cleanPhone : `+91${cleanPhone}`;
     const twilioAccountSid = 'ACebe0641d08c01bbe9192e4051bf40c1f';
     const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
@@ -920,7 +962,7 @@ api.post('/auth/reset-password', async (req, res) => {
           'Authorization': authHeader,
           'Content-Type': 'application/x-www-form-urlencoded'
         },
-        body: params
+        body: params.toString()
       });
 
       const verification = await twilioRes.json();
@@ -935,12 +977,6 @@ api.post('/auth/reset-password', async (req, res) => {
       return res.status(500).json({ message: 'Error verifying OTP' });
     }
 
-    // 3. Bcrypt Asymmetric DoS Fix: Fetch user before hashing the password
-    const user = await User.findOne({ phone: cleanPhone });
-    if (!user) {
-      return res.status(404).json({ message: 'Account no longer exists' });
-    }
-    
     const hashedPassword = await bcrypt.hash(newPassword, 10);
     user.password = hashedPassword;
     user.plainPassword = newPassword;
@@ -956,7 +992,7 @@ api.post('/auth/reset-password', async (req, res) => {
 api.get('/me', authenticateToken, async (req, res) => {
   try {
     // FIX: Explicitly exclude the password hash from being sent to the client
-    const user = await User.findById(req.user.userId).select('-password -__v'); 
+    const user = await User.findById(req.user.userId).select('-password -plainPassword -__v'); 
     if (!user) {
       // This case can happen if the user was deleted but the token is still valid.
       return res.status(404).json({ message: 'User not found' });
@@ -984,7 +1020,7 @@ api.put('/me', authenticateToken, async (req, res) => {
 
     const updatedUser = await User.findByIdAndUpdate(
       req.user.userId, { name, phone }, { new: true }
-    ).select('-password -__v');
+    ).select('-password -plainPassword -__v');
     
     if (!updatedUser) return res.status(404).json({ message: 'User not found' });
     io.emit('adminRefresh'); // Update admin dashboard lists
@@ -998,7 +1034,7 @@ api.put('/me', authenticateToken, async (req, res) => {
 api.post('/electrician/pay-deposit', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'electrician') return res.status(403).json({ message: 'Forbidden' });
-    const updatedUser = await User.findByIdAndUpdate(req.user.userId, { safetyDepositPaid: true }, { new: true, runValidators: true }).select('-password -__v');
+    const updatedUser = await User.findByIdAndUpdate(req.user.userId, { safetyDepositPaid: true }, { new: true, runValidators: true }).select('-password -plainPassword -__v');
     res.status(200).json(updatedUser.toObject());
   } catch (error) {
     res.status(500).json({ message: 'Internal server error processing deposit' });
@@ -1131,7 +1167,9 @@ api.get('/jobs/active', authenticateToken, async (req, res) => {
 
     // 8. Bug Fix: Customers MUST see the jobOTP to read it to the electrician, but electricians should not see it!
     const selectFields = req.user.role === 'electrician' ? '-jobOTP' : '';
-    const job = await Job.findOne(query).select(selectFields).populate('electricians', 'name phone averageRating totalReviews');
+    let queryBuilder = Job.findOne(query).populate('electricians', 'name phone averageRating totalReviews');
+    if (selectFields) queryBuilder = queryBuilder.select(selectFields);
+    const job = await queryBuilder;
     res.status(200).json(job || {});
   } catch (error) {
     console.error('Error fetching active job:', error);
@@ -1319,6 +1357,7 @@ api.put('/jobs/:id/drop', authenticateToken, async (req, res) => {
     }
     
     io.to(job._id.toString()).emit('electricianDropped', { electricianId: req.user.userId });
+    io.to(job._id.toString()).emit('jobStatusUpdated', { status: 'searching' }); // Inform remaining team members to update their UI
     io.emit('newJobAvailable', job); // Re-broadcast to other electricians
     res.status(200).json({ message: 'Job dropped successfully' });
   } catch (error) {
@@ -1464,7 +1503,7 @@ api.put('/admin/users/:id/approve', authenticateToken, async (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ message: 'Invalid User ID format' });
     
-    const user = await User.findByIdAndUpdate(req.params.id, { isApproved: true }, { new: true, runValidators: true });
+    const user = await User.findByIdAndUpdate(req.params.id, { isApproved: true }, { new: true, runValidators: true }).select('-password -__v');
     if (!user) return res.status(404).json({ message: 'User not found' });
     
     io.emit('adminRefresh');
@@ -1529,7 +1568,7 @@ api.put('/admin/users/:id/wallet', authenticateToken, async (req, res) => {
     const walletBalance = Number(req.body.walletBalance);
     if (isNaN(walletBalance) || walletBalance < 0) return res.status(400).json({ message: 'Invalid wallet balance amount' });
     
-    const user = await User.findByIdAndUpdate(req.params.id, { walletBalance }, { new: true });
+    const user = await User.findByIdAndUpdate(req.params.id, { walletBalance }, { new: true }).select('-password -__v');
     if (!user) return res.status(404).json({ message: 'User not found' });
     
     io.emit('adminRefresh');
@@ -1975,6 +2014,97 @@ api.delete('/admin/archives/users/:id', authenticateToken, async (req, res) => {
   } catch (error) {
     res.status(500).json({ message: 'Error purging archived record' });
   }
+});
+
+// ==========================================
+// ADMIN 10+ NEW FEATURES EXTENSION
+// ==========================================
+
+// GET /api/admin/system-status - Fetch maintenance state
+api.get('/admin/system-status', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+  res.status(200).json({ maintenanceMode: global.MAINTENANCE_MODE });
+});
+
+// POST /api/admin/toggle-maintenance
+api.post('/admin/toggle-maintenance', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+  global.MAINTENANCE_MODE = !global.MAINTENANCE_MODE;
+  io.emit('systemBroadcast', global.MAINTENANCE_MODE ? '⚠️ Platform is now entering Maintenance Mode. Active services may be paused.' : '✅ Maintenance complete. Platform is back online.');
+  res.status(200).json({ maintenanceMode: global.MAINTENANCE_MODE, message: `Maintenance Mode is now ${global.MAINTENANCE_MODE ? 'ON' : 'OFF'}` });
+});
+
+// GET /api/admin/live-jobs - Dashboard for currently running jobs
+api.get('/admin/live-jobs', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    const liveJobs = await Job.find({ status: { $in: ['searching', 'assigned', 'in_progress'] } })
+      .populate('customer', 'name phone')
+      .populate('electricians', 'name phone')
+      .sort({ updatedAt: -1 });
+    res.status(200).json(liveJobs);
+  } catch (error) { res.status(500).json({ message: 'Error fetching live jobs' }); }
+});
+
+// PUT /api/admin/jobs/:id/force-complete - Force override stuck jobs
+api.put('/admin/jobs/:id/force-complete', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    const job = await Job.findByIdAndUpdate(req.params.id, { status: 'completed' }, { new: true });
+    if (!job) return res.status(404).json({ message: 'Job not found' });
+    
+    if (job.electricians && job.electricians.length > 0) {
+      const uniqueElectricians = [...new Set(job.electricians.map(e => e.toString()))];
+      const basePayout = job.originalPrice || job.estimatedPrice;
+      const earningsPerElectrician = Math.floor(((basePayout * 0.8) / Math.max(1, uniqueElectricians.length)) * 100) / 100;
+      await User.updateMany({ _id: { $in: uniqueElectricians } }, { $inc: { walletBalance: earningsPerElectrician, jobsCompleted: 1 } });
+    }
+    io.to(req.params.id).emit('jobCompleted');
+    io.emit('adminRefresh');
+    res.status(200).json({ message: 'Job forcefully completed and paid out.' });
+  } catch (error) { res.status(500).json({ message: 'Error forcing job completion' }); }
+});
+
+// POST /api/admin/users/:id/impersonate - Ghost login token generator
+api.post('/admin/users/:id/impersonate', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    const targetUser = await User.findById(req.params.id);
+    if (!targetUser) return res.status(404).json({ message: 'User not found' });
+    
+    logSystemEvent('WARN', 'AdminPortal', 'User Impersonation', `Admin ${req.user.userId} is impersonating ${targetUser._id}`);
+    const token = jwt.sign({ userId: targetUser._id, role: targetUser.role }, JWT_SECRET, { expiresIn: '1h', issuer: 'wattzen-api' });
+    res.status(200).json({ token, user: { _id: targetUser._id, name: targetUser.name, phone: targetUser.phone, role: targetUser.role } });
+  } catch (error) { res.status(500).json({ message: 'Error generating impersonation token' }); }
+});
+
+// PUT /api/admin/users/:id/notes - Save admin private notes
+api.put('/admin/users/:id/notes', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    const user = await User.findByIdAndUpdate(req.params.id, { adminNotes: String(req.body.notes || '').substring(0, 1000) }, { new: true });
+    res.status(200).json({ message: 'Notes saved', adminNotes: user.adminNotes });
+  } catch (error) { res.status(500).json({ message: 'Error saving notes' }); }
+});
+
+// PUT /api/admin/users/:id/suspend - Soft ban / revoke approval
+api.put('/admin/users/:id/suspend', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    const user = await User.findByIdAndUpdate(req.params.id, { isApproved: false }, { new: true });
+    io.emit('adminRefresh');
+    res.status(200).json({ message: 'User account suspended.' });
+  } catch (error) { res.status(500).json({ message: 'Error suspending user' }); }
+});
+
+// PUT /api/admin/users/bulk-approve - 1-Click approve all pending electricians
+api.put('/admin/users/bulk-approve', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    const result = await User.updateMany({ role: 'electrician', isApproved: false, safetyDepositPaid: true }, { isApproved: true });
+    io.emit('adminRefresh');
+    res.status(200).json({ message: `${result.modifiedCount} electricians approved.` });
+  } catch (error) { res.status(500).json({ message: 'Error in bulk approval' }); }
 });
 
 app.use('/api', api);
