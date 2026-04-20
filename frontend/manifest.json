@@ -1,11 +1,10 @@
 {
-  "name": "WATTZEN - Power Your Network",
-  "short_name": "WATTZEN",
-  "description": "Instant connections, live tracking, and certified safety.",
+  "short_name": "Wattzen",
+  "name": "Wattzen Electrical Services",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#020617",
-  "theme_color": "#0d9488",
+  "theme_color": "#ffffff",
+  "background_color": "#ffffff",
   "icons": [
     {
       "src": "/wmremove-transformed.png",
