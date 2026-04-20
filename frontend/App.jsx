@@ -903,6 +903,9 @@ function CustomerHome({ user, showToast, onEditProfile }) {
           setActiveJobId(job._id);
           setSelectedService(job.serviceType);
           setAddress(job.address);
+          if (job.location && job.location.coordinates) {
+            setCoordinates(job.location.coordinates);
+          }
           if (job.jobOTP) setJobOTP(job.jobOTP);
           setBookingPrice(job.estimatedPrice);
           setTeamSize(job.teamSize || 1);
