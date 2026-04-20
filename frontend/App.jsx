@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, useNavigate, Navigate, useLocation } from
 
 import logoImage from './wmremove-transformed.png';
 import { useSocket } from './SocketContext.jsx';
+import ErrorBoundary from './ErrorBoundary.jsx';
 
 // ==========================================
 // 1. API & SOCKET UTILITIES
@@ -130,32 +131,6 @@ async function sendPush(title, body, data = null, actions = []) {
 // ==========================================
 // 2. COMPONENTS
 // ==========================================
-
-class ErrorBoundary extends React.Component {
-  constructor(props) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
-  static getDerivedStateFromError(error) {
-    return { hasError: true, error };
-  }
-  componentDidCatch(error, errorInfo) {
-    console.error('ErrorBoundary caught an error:', error, errorInfo);
-  }
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div style={{ padding: '40px', textAlign: 'center', marginTop: '10vh' }}>
-          <i className="fas fa-exclamation-triangle fa-4x" style={{ color: 'var(--danger)', marginBottom: '20px' }}></i>
-          <h2 style={{ color: 'var(--text-main)' }}>Oops! Something went wrong.</h2>
-          <p style={{ color: 'var(--text-muted)', marginBottom: '20px' }}>We're working on fixing this right away.</p>
-          <button className="btn" onClick={() => window.location.reload()}>Reload Page</button>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
 
 // --- Landing Component ---
 function Landing({ onEnter, onSecret }) {
@@ -1819,7 +1794,8 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
         if (isMounted && job && job._id) {
           setActiveJobId(job._id);
           setCurrentJob(job);
-          if (job.status === 'assigned' || job.status === 'in_progress') {
+          // FIX: Don't start simulated driving if already in_progress (meaning they have arrived)
+          if (job.status === 'assigned') {
             setIsTracking(true);
           }
           if (job.messages && job.messages.length > 0) {
@@ -3622,10 +3598,10 @@ function AppContent() {
       
       if (!socket.connected) {
         socket.connect();
-        
-        // 5. Inject fresh token on reconnect attempts if the user logs out/in while offline
-        socket.io.on('reconnect_attempt', handleReconnectAttempt);
       }
+      // FIX: Register listener unconditionally so it attaches even if re-rendering while already connected
+      socket.io.on('reconnect_attempt', handleReconnectAttempt);
+      
       const handleBroadcast = (msg) => {
         showToast(`📢 Admin Broadcast: ${msg}`, 'warning');
         sendPush('Admin Broadcast', msg);

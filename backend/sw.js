@@ -27,22 +27,27 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  
+  // Skip API requests and WebSockets to prevent caching dynamic data
+  if (event.request.url.includes('/api/') || event.request.url.includes('socket.io')) return;
+
   event.respondWith(
-    fetch(event.request).then((networkResponse) => {
-      // Network-First Strategy: Seamlessly update cache with the latest deployment version
-      if (networkResponse && networkResponse.status === 200) {
-        const responseClone = networkResponse.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseClone));
+    caches.open(CACHE_NAME).then(async (cache) => {
+      try {
+        const networkResponse = await fetch(event.request);
+        // Dynamically cache successful asset requests (JS, CSS, Images)
+        if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
+          cache.put(event.request, networkResponse.clone());
+        }
+        return networkResponse;
+      } catch (err) {
+        const cachedResponse = await cache.match(event.request);
+        if (cachedResponse) return cachedResponse;
+        
+        // Offline SPA Fallback
+        if (event.request.mode === 'navigate') return cache.match('/index.html');
+        return new Response('', { status: 404, statusText: 'Offline' });
       }
-      return networkResponse;
-    }).catch(async () => {
-      const cachedResponse = await caches.match(event.request);
-      if (cachedResponse) return cachedResponse;
-      
-      // 7. Offline SPA Fallback: Serve index.html shell for deep links when offline
-      if (event.request.mode === 'navigate') return caches.match('/index.html');
-      
-      return new Response('', { status: 404, statusText: 'Not Found' });
     })
   );
 });
