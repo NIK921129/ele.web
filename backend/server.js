@@ -413,10 +413,8 @@ io.on('connection', (socket) => {
       if (socket.rooms.has(data.jobId)) socket.to(data.jobId).emit('userStopTyping', data);
     }
   });
-  socket.on('triggerSOS', (data) => {
+  socket.on('triggerSOS', async (data) => {
     if (data && typeof data.jobId === 'string') {
-      // Alert all active Admin clients via the systemBroadcast channel
-      io.emit('systemBroadcast', `🚨 EMERGENCY SOS TRIGGERED by ${String(data.role).toUpperCase()} in Job: ${data.jobId} 🚨`);
       logSystemEvent('WARN', 'Safety', 'SOS Triggered', `SOS from ${data.userId} on Job ${data.jobId}`);
       
       // Target ONLY active admins to prevent a platform-wide user panic
