@@ -179,7 +179,9 @@ function Landing({ onEnter, onSecret }) {
   // Anime.js Entrance Animation
   useEffect(() => {
     let checkInterval;
+    let isMounted = true;
     const triggerAnim = () => {
+      if (!isMounted) return true;
       if (typeof window !== 'undefined' && window.anime) {
         window.anime.timeline({ easing: 'easeOutCubic' })
           .add({
@@ -200,7 +202,11 @@ function Landing({ onEnter, onSecret }) {
       return false;
     };
     if (!triggerAnim()) checkInterval = setInterval(() => { if (triggerAnim()) clearInterval(checkInterval); }, 200);
-    return () => { if (checkInterval) clearInterval(checkInterval); };
+    return () => { 
+      isMounted = false;
+      if (checkInterval) clearInterval(checkInterval); 
+      if (window.anime) window.anime.remove('.landing-glass-card, .anime-element');
+    };
   }, []);
 
   return (
@@ -347,7 +353,9 @@ function ProfileModal({ user, onClose, onUpdate, showToast, onLogout }) {
   // Anime.js Form Toggle Animation
   useEffect(() => {
     let checkInterval;
+    let isMounted = true;
     const triggerAnim = () => {
+      if (!isMounted) return true;
       if (typeof window !== 'undefined' && window.anime) {
         window.anime({ targets: '.anime-form-item', translateX: [20, 0], opacity: [0, 1], delay: window.anime && typeof window.anime.stagger === 'function' ? window.anime.stagger(100) : 0, duration: 500, easing: 'easeOutQuad' });
         return true;
@@ -355,7 +363,11 @@ function ProfileModal({ user, onClose, onUpdate, showToast, onLogout }) {
       return false;
     };
     if (!triggerAnim()) checkInterval = setInterval(() => { if (triggerAnim()) clearInterval(checkInterval); }, 200);
-    return () => { if (checkInterval) clearInterval(checkInterval); };
+    return () => { 
+      isMounted = false;
+      if (checkInterval) clearInterval(checkInterval); 
+      if (window.anime) window.anime.remove('.anime-form-item');
+    };
   }, []);
 
   return (
@@ -558,7 +570,9 @@ function Login({ onLoginSuccess, showToast }) {
   // Anime.js Form Toggle Animation
   useEffect(() => {
     let checkInterval;
+    let isMounted = true;
     const triggerAnim = () => {
+      if (!isMounted) return true;
       if (typeof window !== 'undefined' && window.anime) {
         window.anime({ targets: '.anime-form-item', translateX: [20, 0], opacity: [0, 1], delay: window.anime && typeof window.anime.stagger === 'function' ? window.anime.stagger(100) : 0, duration: 500, easing: 'easeOutQuad' });
         return true;
@@ -566,7 +580,11 @@ function Login({ onLoginSuccess, showToast }) {
       return false;
     };
     if (!triggerAnim()) checkInterval = setInterval(() => { if (triggerAnim()) clearInterval(checkInterval); }, 200);
-    return () => { if (checkInterval) clearInterval(checkInterval); };
+    return () => { 
+      isMounted = false;
+      if (checkInterval) clearInterval(checkInterval); 
+      if (window.anime) window.anime.remove('.anime-form-item');
+    };
   }, [isLogin, isForgotPassword, otpSent, signupOtpSent]);
 
   // Handle OTP Resend Cooldown Timer
@@ -741,6 +759,7 @@ function TrackingMap({ origin, destination }) {
 
     const initMap = () => {
       if (!window.L) return false;
+      if (!mapRef.current) return true; // Stop trying to initialize if component unmounted
 
       if (!mapInstance.current) {
             const startLat = origin && origin.length === 2 ? origin[1] : 0;
@@ -884,6 +903,8 @@ function CustomerHome({ user, showToast, onEditProfile }) {
   
   const mounted = useRef(true);
   useEffect(() => { return () => { mounted.current = false; }; }, []);
+  const activeJobIdRef = useRef(activeJobId);
+  useEffect(() => { activeJobIdRef.current = activeJobId; }, [activeJobId]);
 
   const categories = [
     { id: 'repairs', name: 'Quick Repairs', icon: 'fa-screwdriver-wrench' },
@@ -983,10 +1004,6 @@ function CustomerHome({ user, showToast, onEditProfile }) {
     const onLoc = (data) => setLiveLocation(data);
     const onMsg = (data) => {
       setMessages((prev) => [...prev, { ...data, isSelf: false }]);
-      // Trigger a native push notification if the app is minimized/hidden
-      if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
-        new Notification(`New message from ${data.senderName}`, { body: data.text, icon: '/wmremove-transformed.png' });
-      }
       sendPush(`New message from ${data.senderName}`, data.text);
     };
     const onType = (data) => setTypingUser(data.senderName);
@@ -1608,7 +1625,7 @@ Support: projects.nikunj.singh@gmail.com
                     if (socket?.connected) {
                       socket.emit('typing', { jobId: activeJobId, senderName: user?.name?.split(' ')[0] || 'Customer' }); 
                       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-                      typingTimeoutRef.current = setTimeout(() => socket.emit('stopTyping', { jobId: activeJobId }), 1500);
+              typingTimeoutRef.current = setTimeout(() => { socket.emit('stopTyping', { jobId: activeJobIdRef.current }); typingTimeoutRef.current = null; }, 1500);
                     }
                   }} onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()} placeholder="Type a message..." maxLength="1000" style={{ flex: 1, padding: '10px', borderRadius: '20px', border: '1px solid var(--border-light)', outline: 'none' }} /> 
                   <button className="btn" style={{ padding: '10px 16px', borderRadius: '20px' }} onClick={handleSendMessage}><i className="fas fa-paper-plane"></i></button>
@@ -1734,6 +1751,8 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
   
   const mounted = useRef(true);
   useEffect(() => { return () => { mounted.current = false; }; }, []);
+  const activeJobIdRef = useRef(activeJobId);
+  useEffect(() => { activeJobIdRef.current = activeJobId; }, [activeJobId]);
   const userId = user?._id || user?.id;
   const isApproved = user?.isApproved;
   const safetyDepositPaid = user?.safetyDepositPaid;
@@ -1815,10 +1834,6 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
     if (isOnline) {
       const onMsg = (data) => {
         setMessages((prev) => [...prev, { ...data, isSelf: false }]);
-        // Trigger a native push notification if the app is minimized/hidden
-        if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
-          new Notification(`New message from ${data.senderName}`, { body: data.text, icon: '/wmremove-transformed.png' });
-        }
         sendPush(`New message from ${data.senderName}`, data.text);
       };
       const onType = (data) => setTypingUser(data.senderName);
@@ -2007,11 +2022,14 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
 
   // Render Job History Earnings Chart
   useEffect(() => {
+    // Completely halt the rendering loop if the user isn't looking at the history tab
+    if (currentTab !== 'history' || jobHistory.length === 0) return;
+
     let retryCount = 0;
     let checkInterval;
 
     const renderChart = () => {
-    if (currentTab === 'history' && jobHistory.length > 0 && chartRef.current) {
+      if (chartRef.current) {
       if (!window.Chart || !chartRef.current) {
         if (retryCount < 10) {
           retryCount++;
@@ -2046,7 +2064,7 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
         },
         options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
       });
-    }
+      }
     };
 
     renderChart();
@@ -2114,6 +2132,11 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
     if (acceptingJobId) return;
     setAcceptingJobId(jobId);
     try {
+      // Pre-join the room immediately to prevent missing WebSocket events during the HTTP roundtrip
+      if (socket?.connected) {
+        socket.emit('joinJobRoom', jobId);
+      }
+
       const acceptedJob = await fetchJson(`/jobs/${jobId}/accept`, { method: 'PUT' });
       
       // The activeJobId useEffect will automatically handle joining the socket room safely
@@ -2370,7 +2393,7 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
                     } else {
                       clearTimeout(typingTimeoutRef.current);
                     }
-                    typingTimeoutRef.current = setTimeout(() => { socket.emit('stopTyping', { jobId: activeJobId }); typingTimeoutRef.current = null; }, 1500);
+            typingTimeoutRef.current = setTimeout(() => { socket.emit('stopTyping', { jobId: activeJobIdRef.current }); typingTimeoutRef.current = null; }, 1500);
                   }
                 }} onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()} placeholder="Type a message..." maxLength="1000" style={{ flex: 1, padding: '10px', borderRadius: '20px', border: '1px solid var(--border-light)', outline: 'none' }} /> 
             <button className="btn" style={{ padding: '10px 16px', borderRadius: '20px' }} onClick={handleSendMessage}><i className="fas fa-paper-plane"></i></button>

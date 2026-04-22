@@ -352,7 +352,8 @@ io.on('connection', (socket) => {
         const job = await Job.findById(jobId).select('customer electricians');
         if (!job) return;
         const userId = socket.user.userId;
-        const isAuth = socket.user.role === 'admin' || job.customer.toString() === userId || job.electricians.some(e => e.toString() === userId);
+        // Allow electricians to join 'searching' jobs pre-emptively to fix the acceptance race condition
+        const isAuth = socket.user.role === 'admin' || job.customer.toString() === userId || job.electricians.some(e => e.toString() === userId) || (socket.user.role === 'electrician' && job.status === 'searching');
         if (isAuth) socket.join(jobId);
       } catch (err) { console.error('Socket join error:', err); }
     }
@@ -440,16 +441,27 @@ setInterval(() => {
 // ==========================================
 // 3. EXPRESS ROUTING & MIDDLEWARE
 // ==========================================
-const authenticateToken = (req, res, next) => {
+const authenticateToken = async (req, res, next) => {
   const authHeader = req.headers.authorization;
   if (!authHeader) return res.status(401).json({ message: 'Unauthorized: Missing token' });
 
   const token = authHeader.split(' ')[1];
   try {
     req.user = jwt.verify(token, JWT_SECRET);
-    next();
   } catch (err) {
     return res.status(401).json({ message: 'Unauthorized: Invalid or expired token' });
+  }
+
+  try {
+    if (isDbConnected) {
+      // Zombie Token Prevention: Verify user still exists in database to instantly lock out deleted/purged accounts
+      const userExists = await User.exists({ _id: req.user.userId });
+      if (!userExists) return res.status(401).json({ message: 'Session expired. Account deleted.' });
+    }
+    next();
+  } catch (dbErr) {
+    console.error('Auth DB Check Error:', dbErr);
+    next(); // Fail open on transient DB errors to avoid mass logouts
   }
 };
 
@@ -1084,6 +1096,12 @@ api.delete('/me', authenticateToken, async (req, res) => {
     const deletedUser = await User.findByIdAndDelete(req.user.userId);
     if (!deletedUser) return res.status(404).json({ message: 'User not found' });
     res.status(200).json({ message: 'Account permanently deleted' });
+
+    // Live Socket Eviction
+    const sockets = await io.fetchSockets();
+    for (const s of sockets) {
+      if (s.user?.userId === req.user.userId) { s.emit('auth-expired'); s.disconnect(true); }
+    }
   } catch (error) {
     res.status(500).json({ message: 'Internal server error during deletion' });
   }
@@ -1569,16 +1587,21 @@ api.delete('/admin/users/:id', authenticateToken, async (req, res) => {
     // Prevent admin from deleting themselves
     if (req.user.userId === req.params.id) return res.status(400).json({ message: 'Cannot delete your own admin account' });
     
-    const userToArchive = await User.findById(req.params.id);
-    if (userToArchive && req.query.hard !== 'true') {
-      await ArchivedUser.create({ ...userToArchive.toObject(), originalId: userToArchive._id, deletedBy: `Admin Force Delete (${req.user.userId})` });
-    }
-
     const user = await User.findByIdAndDelete(req.params.id);
     if (!user) return res.status(404).json({ message: 'User not found' });
     
+    if (req.query.hard !== 'true') {
+      await ArchivedUser.create({ ...user.toObject(), originalId: user._id, deletedBy: `Admin Force Delete (${req.user.userId})` });
+    }
+
     io.emit('adminRefresh');
     res.status(200).json({ message: 'User permanently deleted' });
+
+    // Live Socket Eviction
+    const sockets = await io.fetchSockets();
+    for (const s of sockets) {
+      if (s.user?.userId === req.params.id) { s.emit('auth-expired'); s.disconnect(true); }
+    }
   } catch (error) {
     res.status(500).json({ message: 'Error deleting user' });
   }
@@ -2126,6 +2149,12 @@ api.put('/admin/users/:id/suspend', authenticateToken, async (req, res) => {
     const user = await User.findByIdAndUpdate(req.params.id, { isApproved: false }, { new: true });
     io.emit('adminRefresh');
     res.status(200).json({ message: 'User account suspended.' });
+    
+    // Instantly disconnect suspended electricians to prevent them from taking jobs
+    const sockets = await io.fetchSockets();
+    for (const s of sockets) {
+      if (s.user?.userId === req.params.id) { s.emit('auth-expired'); s.disconnect(true); }
+    }
   } catch (error) { res.status(500).json({ message: 'Error suspending user' }); }
 });
 
