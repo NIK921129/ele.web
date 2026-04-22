@@ -289,7 +289,6 @@ function Navbar({ user, onLogout, toggleTheme, isDarkMode, onEditProfile }) {
         <button onClick={toggleTheme} title="Toggle Theme" style={{ border: 'none', background: 'var(--secondary)', width: '42px', height: '42px', borderRadius: '50%', cursor: 'pointer', color: 'var(--text-main)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border-light)' }}>
           <i className={`fas ${isDarkMode ? 'fa-sun' : 'fa-moon'}`} style={{ fontSize: '1.2rem' }}></i>
         </button>
-        <div className="notification-icon"><i className="far fa-bell"></i></div>
         <div className="notification-icon" style={{ position: 'relative', cursor: 'pointer' }} onClick={() => setShowDropdown(!showDropdown)}>
           <i className="far fa-bell"></i>
           {notifications.length > 0 && <span style={{ position: 'absolute', top: '-5px', right: '-5px', background: 'var(--danger)', color: 'white', fontSize: '0.6rem', borderRadius: '50%', padding: '2px 5px', fontWeight: 'bold' }}>{notifications.length}</span>}
