@@ -117,11 +117,13 @@ async function sendPush(title, body, data = null, actions = []) {
   if (typeof document !== 'undefined' && document.hidden && 'Notification' in window && Notification.permission === 'granted') {
     try {
       if ('serviceWorker' in navigator) {
-        const reg = await navigator.serviceWorker.ready;
-        reg.showNotification(title, { body, icon: '/wmremove-transformed.png', data, actions });
-      } else {
-        new Notification(title, { body, icon: '/wmremove-transformed.png' });
+          const reg = await navigator.serviceWorker.getRegistration();
+          if (reg) {
+            reg.showNotification(title, { body, icon: '/wmremove-transformed.png', data, actions });
+            return;
+          }
       }
+        new Notification(title, { body, icon: '/wmremove-transformed.png' });
     } catch (e) {
       console.error('Push notification failed', e);
     }
@@ -317,6 +319,11 @@ function Navbar({ user, onLogout, toggleTheme, isDarkMode, onEditProfile }) {
             <i className="fas fa-user-circle" style={{ fontSize: '28px', color: 'var(--primary)' }}></i>
           </div>
         </div>
+        {user?.role === 'customer' && user.walletBalance > 0 && (
+          <div className="badge desktop-only" style={{ background: 'var(--success)', marginLeft: '10px', padding: '6px 12px', fontWeight: 'bold' }}>
+            <i className="fas fa-wallet"></i> ₹{user.walletBalance.toFixed(0)}
+          </div>
+        )}
         <button className="btn btn-outline desktop-only" style={{ padding: '6px 12px', marginLeft: '10px' }} onClick={onLogout}>Logout</button>
       </div>
     </div>
@@ -1151,6 +1158,7 @@ function CustomerHome({ user, showToast, onEditProfile }) {
   };
 
   const handleCancelJob = async () => {
+    if (!window.confirm('Are you sure you want to cancel this job?')) return;
     try {
       await fetchJson(`/jobs/${activeJobId}/cancel`, { method: 'PUT' });
       setActiveJobId(null);
@@ -1185,6 +1193,11 @@ function CustomerHome({ user, showToast, onEditProfile }) {
     socket.emit('sendMessage', msgData);
     setMessages((prev) => [...prev, { ...msgData, isSelf: true }]);
     setChatInput('');
+    if (socket?.connected) socket.emit('stopTyping', { jobId: activeJobId });
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
   };
 
   const handleLocateMe = () => {
@@ -1302,7 +1315,8 @@ Support: projects.nikunj.singh@gmail.com
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const finalPrice = appliedCoupon ? Math.max(0, bookingPrice - appliedCoupon.discount) : bookingPrice;
+  // Recalculate price dynamically accounting for wallet offsets
+  const finalPrice = Math.max(0, (appliedCoupon ? Math.max(0, bookingPrice - appliedCoupon.discount) : bookingPrice) - (user?.walletBalance || 0));
 
   const handleSaveAddress = (type) => {
     if (!address || !coordinates) return showToast('Please select a valid location first.', 'warning');
@@ -1478,6 +1492,7 @@ Support: projects.nikunj.singh@gmail.com
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}><span>Team Size Multiplier:</span> <span>x{teamSize}</span></div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}><span>Platform Fee:</span> <span style={{ color: 'var(--success)' }}>₹0 (Waived)</span></div>
                     {appliedCoupon && <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}><span>Coupon Discount:</span> <span style={{ color: 'var(--success)' }}>-₹{appliedCoupon.discount}</span></div>}
+                      {user?.walletBalance > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}><span>Wallet Balance Applied:</span> <span style={{ color: 'var(--success)' }}>-₹{Math.min(user.walletBalance, (appliedCoupon ? Math.max(0, bookingPrice - appliedCoupon.discount) : bookingPrice))}</span></div>}
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', borderTop: '1px solid var(--border-light)', paddingTop: '4px', marginTop: '4px' }}><span>Total Payable:</span> <span>₹{finalPrice}</span></div>
                   </div>
                 )}
@@ -1559,6 +1574,11 @@ Support: projects.nikunj.singh@gmail.com
                   <i className="fas fa-triangle-exclamation"></i>
                 </button>
               </div>
+                {!jobCompleted && (
+                  <button className="btn-outline" style={{ width: '100%', marginTop: '12px', borderColor: 'var(--danger)', color: 'var(--danger)', padding: '8px', borderRadius: '8px' }} onClick={handleCancelJob}>
+                    <i className="fas fa-times"></i> Cancel Job
+                  </button>
+                )}
             </div>
           )}
 
@@ -1623,8 +1643,11 @@ Support: projects.nikunj.singh@gmail.com
                   <input type="text" value={chatInput} onChange={(e) => {
                     setChatInput(e.target.value);
                     if (socket?.connected) {
+                    if (!typingTimeoutRef.current) {
                       socket.emit('typing', { jobId: activeJobId, senderName: user?.name?.split(' ')[0] || 'Customer' }); 
-                      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+                    } else {
+                      clearTimeout(typingTimeoutRef.current);
+                    }
               typingTimeoutRef.current = setTimeout(() => { socket.emit('stopTyping', { jobId: activeJobIdRef.current }); typingTimeoutRef.current = null; }, 1500);
                     }
                   }} onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()} placeholder="Type a message..." maxLength="1000" style={{ flex: 1, padding: '10px', borderRadius: '20px', border: '1px solid var(--border-light)', outline: 'none' }} /> 
@@ -1736,6 +1759,12 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
   const [walletBal, setWalletBal] = useState(user?.walletBalance || 0);
   const [jobsCompleted, setJobsCompleted] = useState(user?.jobsCompleted || 0);
   const [currentJob, setCurrentJob] = useState(null); // Will hold the full job object
+
+  // FIX: Sync local state when global user profile updates (e.g., after deposit payout)
+  useEffect(() => {
+    setWalletBal(user?.walletBalance || 0);
+    setJobsCompleted(user?.jobsCompleted || 0);
+  }, [user?.walletBalance, user?.jobsCompleted]);
   const chatContainerRef = useRef(null);
   const [currentTab, setCurrentTab] = useState('active');
   const [jobHistory, setJobHistory] = useState([]);
@@ -2084,14 +2113,22 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
     if (currentJob?.location?.coordinates) trackingDestRef.current = currentJob.location.coordinates;
   }, [currentJob]);
 
+  const trackingStateRef = useRef({ dist: 3.5, eta: 12 });
+  useEffect(() => {
+    if (!isTracking) {
+      trackingStateRef.current = { dist: 3.5, eta: 12 };
+    }
+  }, [isTracking]);
+
   useEffect(() => {
     let interval;
     if (isTracking) {
-      let currentDist = 3.5;
-      let currentEta = 12;
       interval = setInterval(() => {
-        currentDist = Math.max(0, currentDist - 0.5);
-        currentEta = Math.max(0, currentEta - 2);
+        trackingStateRef.current.dist = Math.max(0, trackingStateRef.current.dist - 0.5);
+        trackingStateRef.current.eta = Math.max(0, trackingStateRef.current.eta - 2);
+        
+        const currentDist = trackingStateRef.current.dist;
+        const currentEta = trackingStateRef.current.eta;
 
         const dest = trackingDestRef.current;
         const simulatedCoords = [
@@ -2126,6 +2163,11 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
     socket.emit('sendMessage', msgData);
     setMessages((prev) => [...prev, { ...msgData, isSelf: true }]);
     setChatInput('');
+    if (socket?.connected) socket.emit('stopTyping', { jobId: activeJobId });
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
   };
 
   const handleAcceptJob = async (jobId) => {
@@ -2152,6 +2194,8 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
       }
     } catch (error) {
       showToast(error.message || 'Failed to accept job.', 'error');
+      // FIX: Clean up the pre-emptive WebSocket room join so they don't spy on the job
+      if (socket?.connected) socket.emit('leaveJobRoom', jobId);
       // Remove the failed job from the UI list so they can accept a different one
       setAvailableJobs(prev => prev.filter(j => j._id !== jobId));
       setActiveJobId(null);
@@ -3632,6 +3676,9 @@ function AppContent() {
         showToast(`📢 Admin Broadcast: ${msg}`, 'warning');
         sendPush('Admin Broadcast', msg);
       };
+      const handleForceRefresh = async () => {
+        try { const fresh = await fetchJson('/me'); handleProfileUpdate(fresh); } catch(e){}
+      };
       const handleConnectError = (err) => {
         if (err.message.includes('Authentication error')) {
           window.dispatchEvent(new Event('auth-expired'));
@@ -3639,11 +3686,13 @@ function AppContent() {
       };
 
       socket.on('systemBroadcast', handleBroadcast);
+      socket.on('forceProfileRefresh', handleForceRefresh);
       socket.on('connect_error', handleConnectError);
       
       return () => {
         if (socket.io) socket.io.off('reconnect_attempt', handleReconnectAttempt);
         socket.off('systemBroadcast', handleBroadcast);
+        socket.off('forceProfileRefresh', handleForceRefresh);
         socket.off('connect_error', handleConnectError);
       };
     } else {
@@ -3704,7 +3753,7 @@ function AppContent() {
         <Route path="/customer" element={user?.role === 'customer' ? (
           <React.Fragment>
             <Navbar user={user} onLogout={handleLogout} toggleTheme={toggleTheme} isDarkMode={isDarkMode} onEditProfile={() => setIsProfileModalOpen(true)} />
-            <div style={{ padding: '20px 0', paddingBottom: '90px' }}><CustomerHome user={user} showToast={showToast} onEditProfile={() => setIsProfileModalOpen(true)} /></div>
+            <div style={{ padding: '20px 0', paddingBottom: '90px' }}><CustomerHome user={user} showToast={showToast} onEditProfile={() => setIsProfileModalOpen(true)} onUpdateUser={handleProfileUpdate} /></div>
           </React.Fragment>
         ) : <Navigate to="/login" replace />} />
 

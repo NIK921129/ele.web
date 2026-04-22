@@ -62,6 +62,7 @@ app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload'); // Enforce HTTPS at proxy level
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://unpkg.com; img-src 'self' data: https://*.tile.openstreetmap.org https://*.openstreetmap.org; connect-src 'self' ws: wss: https://nominatim.openstreetmap.org https://*.onrender.com https://*.vercel.app; font-src 'self' https://cdnjs.cloudflare.com;");
   next();
 });
 
@@ -218,6 +219,8 @@ const jobSchema = new mongoose.Schema({
   },
   estimatedPrice: { type: Number, default: 299, min: 0, max: 1000000 },
   originalPrice: { type: Number, min: 0 },
+  walletAmountUsed: { type: Number, default: 0 }, // Track applied wallet balance for correct refunds
+  couponUsed: { type: mongoose.Schema.Types.ObjectId, ref: 'Coupon' }, // Track used coupon for rollback
   currentTeamSize: { type: Number, default: 0, min: 0 }, 
   teamSize: { type: Number, default: 1, min: 1 },
   jobOTP: { type: String },
@@ -330,6 +333,11 @@ const sendSMSNotification = async (phone, message) => {
 
 // Security: JWT Authentication Middleware for WebSockets to prevent eavesdropping
 io.use((socket, next) => {
+  // FIX: Block Banned IPs from establishing persistent WebSocket connections
+  const ip = socket.handshake.address;
+  const clientIp = ip.startsWith('::ffff:') ? ip.substring(7) : ip;
+  if (bannedIpsCache.has(clientIp)) return next(new Error('Authentication error: IP Banned'));
+
   const token = socket.handshake.auth?.token;
   if (!token) return next(new Error('Authentication error: Missing token'));
   try {
@@ -340,6 +348,16 @@ io.use((socket, next) => {
   }
 });
 
+// Helper to silently trigger a real-time UI profile sync for a specific user
+const notifyUserRefresh = async (userId) => {
+  try {
+    const sockets = await io.fetchSockets();
+    for (const s of sockets) {
+      if (s.user?.userId === String(userId)) s.emit('forceProfileRefresh');
+    }
+  } catch (err) {}
+};
+
 const socketRateLimits = new Map();
 
 io.on('connection', (socket) => {
@@ -349,7 +367,7 @@ io.on('connection', (socket) => {
     if (typeof jobId === 'string' && /^[0-9a-fA-F]{24}$/.test(jobId)) {
       // 1. Security: WebSocket IDOR Protection - Verify membership before joining
       try {
-        const job = await Job.findById(jobId).select('customer electricians');
+        const job = await Job.findById(jobId).select('customer electricians status');
         if (!job) return;
         const userId = socket.user.userId;
         // Allow electricians to join 'searching' jobs pre-emptively to fix the acceptance race condition
@@ -358,6 +376,14 @@ io.on('connection', (socket) => {
       } catch (err) { console.error('Socket join error:', err); }
     }
   });
+
+  // FIX: Allow clients to drop out of rooms if they pre-emptively joined but got rejected
+  socket.on('leaveJobRoom', (jobId) => {
+    if (typeof jobId === 'string' && /^[0-9a-fA-F]{24}$/.test(jobId)) {
+      socket.leave(jobId);
+    }
+  });
+
   socket.on('updateLocation', (data) => {
     // Enforce Role: Only electricians are allowed to broadcast location data
     if (socket.user?.role !== 'electrician') return;
@@ -518,13 +544,20 @@ const runGhostJobSweeper = async () => {
   if (!isDbConnected) return;
   try {
     const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
-    const stuckJobs = await Job.find({ status: 'searching', updatedAt: { $lt: twoHoursAgo } });
+    // FIX: Include 'verifying_payment' so abandoned checkouts don't clog the database forever
+    const stuckJobs = await Job.find({ status: { $in: ['verifying_payment', 'searching', 'assigned'] }, updatedAt: { $lt: twoHoursAgo } });
     for (const job of stuckJobs) {
       try {
         job.status = 'cancelled';
         await job.save();
         if (job.paymentStatus === 'paid') {
           await User.findByIdAndUpdate(job.customer, { $inc: { walletBalance: job.estimatedPrice } });
+        }
+        if (job.walletAmountUsed && job.walletAmountUsed > 0) {
+          await User.findByIdAndUpdate(job.customer, { $inc: { walletBalance: job.walletAmountUsed } });
+        }
+        if (job.couponUsed) {
+          await Coupon.findByIdAndUpdate(job.couponUsed, { $set: { isUsed: false }, $unset: { usedBy: 1, usedAt: 1 } });
         }
         io.to(job._id.toString()).emit('jobCancelled');
       } catch (innerErr) {
@@ -1144,6 +1177,20 @@ api.post('/jobs', authenticateToken, async (req, res) => {
       finalPrice = Math.max(0, safePrice - appliedCoupon.discountAmount);
     }
 
+    // FIX: Wallet Trap - Use customer's wallet balance to offset the booking cost atomically
+    const customerData = await User.findById(req.user.userId);
+    let walletDeduction = 0;
+    if (customerData && customerData.walletBalance > 0) {
+      walletDeduction = Math.min(finalPrice, customerData.walletBalance);
+      finalPrice -= walletDeduction;
+    }
+    if (walletDeduction > 0) {
+      await User.findOneAndUpdate(
+        { _id: req.user.userId, walletBalance: { $gte: walletDeduction } },
+        { $inc: { walletBalance: -walletDeduction } }
+      );
+    }
+
     // Security: Strict coordinate validation to prevent MongoDB 2dsphere index crashes
     if (!Array.isArray(coordinates) || coordinates.length !== 2 || 
         typeof coordinates[0] !== 'number' || typeof coordinates[1] !== 'number' ||
@@ -1161,6 +1208,8 @@ api.post('/jobs', authenticateToken, async (req, res) => {
       location: { type: 'Point', coordinates },
       estimatedPrice: finalPrice,
       originalPrice: safePrice,
+      walletAmountUsed: walletDeduction,
+      couponUsed: appliedCoupon ? appliedCoupon._id : undefined,
       paymentStatus: 'verifying',
       jobOTP: crypto.randomInt(1000, 10000).toString(), // Security: Cryptographically secure OTP
       status: 'verifying_payment'
@@ -1176,6 +1225,10 @@ api.post('/jobs', authenticateToken, async (req, res) => {
       // Rollback: Revert the coupon to 'unused' if the job failed to save (e.g. database timeout)
       if (appliedCoupon) {
         await Coupon.updateOne({ _id: appliedCoupon._id }, { $set: { isUsed: false }, $unset: { usedBy: 1, usedAt: 1 } });
+      }
+      // Rollback: Refund the wallet deduction if job creation fails
+      if (walletDeduction > 0) {
+        await User.findByIdAndUpdate(req.user.userId, { $inc: { walletBalance: walletDeduction } });
       }
       throw saveError; // Pass error to outer catch block to send 500 response
     }
@@ -1416,15 +1469,23 @@ api.put('/jobs/:id/cancel', authenticateToken, async (req, res) => {
     // FIX: Atomic findOneAndUpdate prevents a Time-of-Check to Time-of-Use (TOCTOU) race condition 
     // where an electrician accepts the job at the exact millisecond the customer cancels it.
     const job = await Job.findOneAndUpdate(
-      { _id: req.params.id, customer: req.user.userId, status: { $in: ['searching', 'verifying_payment'] } },
+      { _id: req.params.id, customer: req.user.userId, status: { $in: ['searching', 'verifying_payment', 'assigned'] } },
       { status: 'cancelled' },
       { new: false, runValidators: true } // Returns the document BEFORE the update so we know if a refund is needed
     );
     if (!job) return res.status(404).json({ message: 'Job not found or already assigned' });
 
     // Logic Fix: Refund the customer if they had already paid upfront
-    if (job.status === 'searching' && job.paymentStatus === 'paid') {
+    if (['searching', 'assigned'].includes(job.status) && job.paymentStatus === 'paid') {
       await User.findByIdAndUpdate(req.user.userId, { $inc: { walletBalance: job.estimatedPrice } });
+    }
+    
+    // FIX: Refund the wallet balance deduction and restore the applied coupon
+    if (job.walletAmountUsed && job.walletAmountUsed > 0) {
+      await User.findByIdAndUpdate(req.user.userId, { $inc: { walletBalance: job.walletAmountUsed } });
+    }
+    if (job.couponUsed) {
+      await Coupon.findByIdAndUpdate(job.couponUsed, { $set: { isUsed: false }, $unset: { usedBy: 1, usedAt: 1 } });
     }
 
     // Notify any partially joined or tracking electricians that the job was cancelled
@@ -1620,6 +1681,7 @@ api.put('/admin/users/:id/wallet', authenticateToken, async (req, res) => {
     if (!user) return res.status(404).json({ message: 'User not found' });
     
     io.emit('adminRefresh');
+    await notifyUserRefresh(req.params.id);
     res.status(200).json({ message: 'Wallet balance updated', user });
   } catch (error) {
     res.status(500).json({ message: 'Error updating wallet balance' });
@@ -1637,6 +1699,13 @@ api.put('/admin/jobs/:id/cancel', authenticateToken, async (req, res) => {
     
     if (job.paymentStatus === 'paid' && job.status !== 'cancelled' && job.status !== 'completed') {
        await User.findByIdAndUpdate(job.customer, { $inc: { walletBalance: job.estimatedPrice } });
+    }
+    
+    if (job.walletAmountUsed && job.walletAmountUsed > 0) {
+      await User.findByIdAndUpdate(job.customer, { $inc: { walletBalance: job.walletAmountUsed } });
+    }
+    if (job.couponUsed) {
+      await Coupon.findByIdAndUpdate(job.couponUsed, { $set: { isUsed: false }, $unset: { usedBy: 1, usedAt: 1 } });
     }
     
     io.to(req.params.id).emit('jobCancelled');
@@ -1773,6 +1842,7 @@ api.put('/admin/withdrawals/:id/approve', authenticateToken, async (req, res) =>
     );
     if (!withdrawal) return res.status(404).json({ message: 'Request not found' });
     io.emit('adminRefresh');
+    await notifyUserRefresh(withdrawal.electrician);
     res.status(200).json({ message: 'Withdrawal approved', withdrawal });
   } catch (error) {
     res.status(500).json({ message: 'Error approving withdrawal' });
@@ -1796,6 +1866,7 @@ api.put('/admin/withdrawals/:id/reject', authenticateToken, async (req, res) => 
     await User.findByIdAndUpdate(withdrawal.electrician, { $inc: { walletBalance: withdrawal.amount } }, { runValidators: true });
     
     io.emit('adminRefresh');
+    await notifyUserRefresh(withdrawal.electrician);
     res.status(200).json({ message: 'Withdrawal rejected and refunded successfully', withdrawal });
   } catch (error) {
     res.status(500).json({ message: 'Error rejecting withdrawal' });
@@ -1859,7 +1930,14 @@ api.post('/users/:id/rate', authenticateToken, async (req, res) => {
     }
 
     if (tip > 0) {
-      await User.findByIdAndUpdate(req.user.userId, { $inc: { walletBalance: -tip } });
+      // FIX: Atomic lock to prevent rapidly pushing the balance into the negative
+      const updatedCustomer = await User.findOneAndUpdate(
+        { _id: req.user.userId, walletBalance: { $gte: tip } },
+        { $inc: { walletBalance: -tip } }
+      );
+      if (!updatedCustomer) {
+        return res.status(400).json({ message: 'Insufficient wallet balance to pay the tip.' });
+      }
       await User.findByIdAndUpdate(electrician._id, { $inc: { walletBalance: tip } });
       logSystemEvent('INFO', 'Finance', 'Tip Paid', `Customer ${req.user.userId} tipped ₹${tip} to Electrician ${electrician._id}`);
     }
