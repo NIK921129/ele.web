@@ -884,6 +884,8 @@ function CustomerHome({ user, showToast, onEditProfile }) {
   const [rating, setRating] = useState(0);
   const [hoverRating, setHoverRating] = useState(0);
   const [tipAmount, setTipAmount] = useState(0);
+  const [jobStatus, setJobStatus] = useState(null);
+  const [isSubmittingRating, setIsSubmittingRating] = useState(false);
   const chatContainerRef = useRef(null);
   
   const [currentTab, setCurrentTab] = useState('active');
@@ -929,6 +931,7 @@ function CustomerHome({ user, showToast, onEditProfile }) {
         const job = await fetchJson('/jobs/active');
         if (isMounted && job && job._id) {
           setActiveJobId(job._id);
+          setJobStatus(job.status);
           setSelectedService(job.serviceType);
           setAddress(job.address);
           if (job.location && job.location.coordinates) {
@@ -937,8 +940,10 @@ function CustomerHome({ user, showToast, onEditProfile }) {
           if (job.jobOTP) setJobOTP(job.jobOTP);
           setBookingPrice(job.estimatedPrice);
           setTeamSize(job.teamSize || 1);
+          if (job.electricians && job.electricians.length > 0) {
+            setAssignedElectricians(job.electricians);
+          }
           if (job.status === 'assigned' || job.status === 'in_progress') {
-            setAssignedElectricians(job.electricians || []);
             setIsTeamFull(true);
           } else if (job.status === 'searching') {
             setTeamStatusMessage('Searching for nearby electricians...');
@@ -995,8 +1000,21 @@ function CustomerHome({ user, showToast, onEditProfile }) {
   useEffect(() => {
     if (!activeJobId) return;
 
-    // FIX: Ensure the user rejoins the room if their internet drops and the socket reconnects
-    const joinRoom = () => socket.emit('joinJobRoom', activeJobId);
+    const joinRoom = () => {
+      socket.emit('joinJobRoom', activeJobId);
+      // Sync state to catch up on any missed events during an offline period
+      fetchJson('/jobs/active').then(job => {
+        if (job && job._id) {
+          setJobStatus(job.status);
+          if (job.status === 'assigned' || job.status === 'in_progress') setIsTeamFull(true);
+          if (job.electricians) setAssignedElectricians(job.electricians);
+        } else {
+          // Job disappeared (completed/cancelled) while offline
+          window.location.reload();
+        }
+      }).catch(() => {});
+    };
+
     if (socket.connected) {
       joinRoom(); // Join immediately if already connected
     }
@@ -1016,11 +1034,13 @@ function CustomerHome({ user, showToast, onEditProfile }) {
     const onType = (data) => setTypingUser(data.senderName);
     const onStopType = () => setTypingUser(null);
     const onPay = () => {
+      setJobStatus('searching');
       setTeamStatusMessage('Payment verified! Searching for nearby electricians...');
       showToast('Payment verified by Admin!', 'success');
       sendPush('Payment Verified', 'Admin verified your payment. Searching for electricians.');
     };
     const onAccept = (data) => {
+      setJobStatus('assigned');
       setAssignedElectricians(data.electricians || []);
       setIsTeamFull(true);
       setTeamStatusMessage(''); // Clear progress message
@@ -1042,6 +1062,7 @@ function CustomerHome({ user, showToast, onEditProfile }) {
       showToast('An electrician left the team. Finding a replacement.', 'warning');
     };
     const onStatusUpdate = (data) => {
+      setJobStatus(data.status);
       if (data.status === 'in_progress') {
         setTeamStatusMessage('Service is currently in progress!');
         showToast('Electrician has verified the OTP. Service started.', 'success');
@@ -1049,8 +1070,25 @@ function CustomerHome({ user, showToast, onEditProfile }) {
       }
     };
     const onComplete = () => {
+      setJobStatus('completed');
       setJobCompleted(true);
       sendPush('Job Completed', 'The service has been finished. Please leave a rating!');
+    };
+    const onCancel = () => {
+      showToast('Your job was cancelled by the Admin or System.', 'warning');
+      sendPush('Job Cancelled', 'Your active job has been cancelled.');
+      setActiveJobId(null);
+      setAssignedElectricians([]);
+      setTeamStatusMessage('');
+      setLiveLocation(null);
+      setMessages([]);
+      setIsTeamFull(false);
+      setJobCompleted(false);
+      setShowRating(false);
+      setJobOTP('');
+      setBookingPrice(null);
+      setRating(0);
+      fetchJson('/me').then(res => { if(typeof onUpdateUser === 'function') onUpdateUser(res); }).catch(() => {});
     };
 
     socket.on('electricianLocationChanged', onLoc);
@@ -1063,6 +1101,7 @@ function CustomerHome({ user, showToast, onEditProfile }) {
     socket.on('electricianDropped', onDrop);
     socket.on('jobStatusUpdated', onStatusUpdate);
     socket.on('jobCompleted', onComplete);
+    socket.on('jobCancelled', onCancel);
 
     return () => {
       socket.off('connect', joinRoom);
@@ -1076,6 +1115,7 @@ function CustomerHome({ user, showToast, onEditProfile }) {
       socket.off('jobStatusUpdated', onStatusUpdate);
       socket.off('userTyping', onType);
       socket.off('userStopTyping', onStopType);
+      socket.off('jobCancelled', onCancel);
     };
   }, [activeJobId, showToast, socket]);
 
@@ -1143,13 +1183,15 @@ function CustomerHome({ user, showToast, onEditProfile }) {
         body: { serviceType: selectedService, address, coordinates, estimatedPrice: bookingPrice, teamSize, couponCode: appliedCoupon?.code }
       });
       setActiveJobId(job._id);
+      setJobStatus(job.status);
       setJobOTP(job.jobOTP);
-      setBookingPrice(null);
-      setTeamStatusMessage('Payment submitted. Waiting for Admin verification...');
-      showToast(`Payment registered! Verifying...`, 'success');
-      sendPush('Payment Processing', 'Your payment is being verified by Admin.');
+      setBookingPrice(job.estimatedPrice); // Keep the price stored for the post-payment screen
+      setTeamStatusMessage('Searching for nearby electricians...');
+      showToast(`Booking confirmed! Searching...`, 'success');
+      sendPush('Booking Confirmed', 'Searching for nearby electricians.');
       setJobCompleted(false);
       setIsTeamFull(false);
+      fetchJson('/me').then(res => onUpdateUser(res)).catch(() => {}); // Sync wallet deduction
     } catch (error) {
       showToast(error.message || 'Failed to process payment.', 'error');
     } finally {
@@ -1174,6 +1216,7 @@ function CustomerHome({ user, showToast, onEditProfile }) {
       setJobOTP('');
       setBookingPrice(null);
       setRating(0);
+      fetchJson('/me').then(res => onUpdateUser(res)).catch(() => {}); // Sync wallet refund
       showToast('Job cancelled successfully.', 'success');
       sendPush('Job Cancelled', 'Your service request has been cancelled.');
     } catch (error) {
@@ -1228,17 +1271,23 @@ function CustomerHome({ user, showToast, onEditProfile }) {
 
   const handleCompleteJob = async () => {
     try {
-      await fetchJson(`/jobs/${activeJobId}/complete`, { method: 'PUT' });
-      // Optimistically update the UI to prevent hanging if the socket packet drops
-      setJobCompleted(true);
-      showToast('Job marked as completed. Please rate your experience!', 'success');
-      sendPush('Job Completed', 'Thank you for confirming. Don\'t forget to rate!');
+      const res = await fetchJson(`/jobs/${activeJobId}/complete`, { method: 'PUT' });
+      if (res.status === 'completed') {
+        setJobCompleted(true);
+        setJobStatus('completed');
+        showToast('Job marked as completed. Please rate your experience!', 'success');
+      } else {
+        setJobStatus('payment');
+        showToast('Payment submitted. Waiting for Admin verification...', 'success');
+      }
     } catch (error) {
       showToast(error.message || 'Failed to complete job.', 'error');
     }
   };
 
   const handleSubmitRating = async () => {
+    if (isSubmittingRating) return;
+    setIsSubmittingRating(true);
     try {
       // For now, we'll rate the first electrician in the team. A future update could allow rating each member.
       const electricianId = assignedElectricians[0]?._id;
@@ -1264,8 +1313,11 @@ function CustomerHome({ user, showToast, onEditProfile }) {
       setShowRating(false);
       setRating(0);
       setTipAmount(0);
+      fetchJson('/me').then(res => { if(typeof onUpdateUser === 'function') onUpdateUser(res); }).catch(() => {});
     } catch (error) {
       showToast(error.message || 'Failed to submit rating.', 'error');
+    } finally {
+      setIsSubmittingRating(false);
     }
   };
 
@@ -1305,11 +1357,19 @@ Support: projects.nikunj.singh@gmail.com
   };
 
   const handleRebook = (job) => {
+    if (activeJobId) {
+      showToast('You already have an active booking. Please complete or cancel it first.', 'warning');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
     setSelectedService(job.serviceType);
     setAddress(job.address);
     if (job.location && job.location.coordinates) {
       setCoordinates(job.location.coordinates);
     }
+    setBookingPrice(null);
+    setAppliedCoupon(null);
+    setCouponInput('');
     setCurrentTab('active');
     showToast('Details copied to a new booking!', 'success');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1327,7 +1387,7 @@ Support: projects.nikunj.singh@gmail.com
   };
 
   return (
-    <div className="dashboard-grid">
+    <div className="dashboard-grid" style={{ paddingBottom: '80px' }}>
       <div>
         <div className="delivery-header">
           <div className="info">
@@ -1335,7 +1395,7 @@ Support: projects.nikunj.singh@gmail.com
             <div style={{ position: 'relative', width: '100%' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
                 <i className="fas fa-location-dot" style={{ color: 'var(--primary)', fontSize: '1.2rem' }}></i>
-                <input type="text" value={address} maxLength={250} onChange={(e) => { setAddress(e.target.value); setCoordinates(null); setShowSuggestions(true); }} placeholder="Enter your full address..." style={{ background: 'transparent', border: 'none', outline: 'none', fontWeight: '800', color: 'var(--text-main)', fontSize: '16px', width: '100%' }} />
+                <input type="text" value={address} maxLength={250} onChange={(e) => { setAddress(e.target.value); setCoordinates(null); setShowSuggestions(true); }} placeholder="Enter your full address..." style={{ background: 'transparent', border: 'none', outline: 'none', fontWeight: '800', color: 'var(--text-main)', fontSize: '16px', width: '100%', textOverflow: 'ellipsis' }} />
               </div>
               {suggestions.length > 0 && (
                 <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--surface)', border: '1px solid var(--border-light)', borderRadius: '8px', zIndex: 10, boxShadow: 'var(--shadow-md)', maxHeight: '200px', overflowY: 'auto', marginTop: '8px' }}>
@@ -1463,8 +1523,8 @@ Support: projects.nikunj.singh@gmail.com
             </button>
           ) : !activeJobId && bookingPrice ? (
             <div style={{ marginTop: '16px', padding: '24px', background: 'var(--surface)', borderRadius: '16px', border: '2px solid var(--primary)', textAlign: 'center', boxShadow: 'var(--shadow-md)' }}>
-              <h3 style={{ color: 'var(--text-main)', margin: '0 0 8px 0' }}>Upfront Payment Required</h3>
-              <p style={{ color: 'var(--text-muted)', marginBottom: '16px' }}>To secure your booking, please pay the estimated service fee.</p>
+              <h3 style={{ color: 'var(--text-main)', margin: '0 0 8px 0' }}>Booking Summary</h3>
+              <p style={{ color: 'var(--text-muted)', marginBottom: '16px' }}>Review your service details. Payment will be collected after the job is completed.</p>
               <h2 style={{ fontSize: '2.5rem', color: 'var(--success)', margin: '0 0 4px 0' }}>
                 ₹{finalPrice} {appliedCoupon && <span style={{ fontSize: '1rem', textDecoration: 'line-through', color: 'var(--text-muted)' }}>₹{bookingPrice}</span>}
               </h2>
@@ -1497,13 +1557,8 @@ Support: projects.nikunj.singh@gmail.com
                   </div>
                 )}
               </div>
-              {finalPrice > 0 && (
-                <a href={`upi://pay?pa=9211293576@ptaxis&pn=WATTZEN&am=${Number(finalPrice).toFixed(2)}&cu=INR`} className="btn btn-block" style={{ background: '#10b981', display: 'block', textDecoration: 'none', marginBottom: '12px' }}>
-                  <i className="fas fa-qrcode"></i> Pay via UPI App
-                </a>
-              )}
               <button className="btn-outline btn btn-block" onClick={handleConfirmPayment} disabled={isBooking}>
-                {isBooking ? 'Verifying...' : (finalPrice > 0 ? 'I have completed the payment' : 'Confirm Booking')}
+                {isBooking ? 'Processing...' : 'Confirm Booking'}
               </button>
           <button className="btn" style={{ background: 'transparent', color: 'var(--danger)', marginTop: '12px', boxShadow: 'none', border: '1px solid var(--danger)', padding: '10px' }} onClick={() => { setBookingPrice(null); setAppliedCoupon(null); setCouponInput(''); }}>Cancel Booking</button>
             </div>
@@ -1535,10 +1590,31 @@ Support: projects.nikunj.singh@gmail.com
               <i className="fas fa-check-circle" style={{ color: 'var(--success)', marginBottom: '8px', fontSize: '1.5rem' }}></i>
               <div style={{ fontWeight: 'bold', color: 'var(--success)', textAlign: 'center' }}>Your Team is Assembled!</div>
               
-              {jobOTP && (
+              {jobOTP && jobStatus === 'assigned' && (
                 <div style={{ margin: '16px 0', padding: '12px', background: 'var(--surface)', border: '2px dashed var(--primary)', borderRadius: '8px', textAlign: 'center' }}>
                   <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '4px' }}>Share this 4-Digit OTP with your electrician upon arrival:</div>
                   <div style={{ fontSize: '2rem', fontWeight: 'bold', letterSpacing: '4px', color: 'var(--primary)' }}>{jobOTP}</div>
+                </div>
+              )}
+
+              {jobStatus === 'in_progress' && (
+                <div style={{ margin: '16px 0', padding: '16px', background: 'var(--surface)', border: '2px solid var(--success)', borderRadius: '8px', textAlign: 'center' }}>
+                  <h4 style={{ margin: '0 0 8px 0', color: 'var(--text-main)' }}>Service in Progress</h4>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '12px' }}>Please pay the final amount to complete the job once the electrician is finished.</p>
+                  <h2 style={{ color: 'var(--success)', margin: '0 0 12px 0' }}>₹{bookingPrice}</h2>
+                  {bookingPrice > 0 && (
+                    <a href={`upi://pay?pa=9211293576@ptaxis&pn=WATTZEN&am=${Number(bookingPrice).toFixed(2)}&cu=INR`} className="btn btn-block" style={{ background: '#10b981', display: 'block', textDecoration: 'none', marginBottom: '12px' }}>
+                      <i className="fas fa-qrcode"></i> Pay via UPI App
+                    </a>
+                  )}
+                </div>
+              )}
+
+              {jobStatus === 'payment' && (
+                <div style={{ margin: '16px 0', padding: '16px', background: 'var(--surface)', border: '2px solid var(--warning)', borderRadius: '8px', textAlign: 'center' }}>
+                  <i className="fas fa-clock fa-2x" style={{ color: 'var(--warning)', marginBottom: '12px' }}></i>
+                  <h4 style={{ margin: '0 0 8px 0', color: 'var(--text-main)' }}>Verifying Payment</h4>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>We are confirming your transaction with the Admin. The job will be marked as complete shortly.</p>
                 </div>
               )}
 
@@ -1558,10 +1634,10 @@ Support: projects.nikunj.singh@gmail.com
                     </div>
                 ))}
               </div>
-              <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
-                {!jobCompleted && (
-                  <button className="btn" style={{ flex: 1 }} onClick={handleCompleteJob}>
-                    <i className="fas fa-check-circle"></i> Mark Job as Done
+              <div style={{ display: 'flex', gap: '8px', marginTop: '16px', flexWrap: 'wrap' }}>
+                {!jobCompleted && jobStatus === 'in_progress' && (
+                  <button className="btn" style={{ flex: '1 1 100%' }} onClick={handleCompleteJob}>
+                    <i className="fas fa-check-circle"></i> Pay & Mark Job as Done
                   </button>
                 )}
               <a href={`mailto:projects.nikunj.singh@gmail.com?subject=Emergency%20Support%20-%20Job%20${activeJobId}`} className="btn btn-outline" style={{ padding: '14px', flex: '0 0 auto', borderColor: 'var(--danger)', color: 'var(--danger)', borderRadius: 'var(--radius-btn)' }} title="Contact Support">
@@ -1576,7 +1652,7 @@ Support: projects.nikunj.singh@gmail.com
                   <i className="fas fa-triangle-exclamation"></i>
                 </button>
               </div>
-                {!jobCompleted && (
+                {!jobCompleted && jobStatus !== 'in_progress' && jobStatus !== 'payment' && (
                   <button className="btn-outline" style={{ width: '100%', marginTop: '12px', borderColor: 'var(--danger)', color: 'var(--danger)', padding: '8px', borderRadius: '8px' }} onClick={handleCancelJob}>
                     <i className="fas fa-times"></i> Cancel Job
                   </button>
@@ -1597,13 +1673,19 @@ Support: projects.nikunj.singh@gmail.com
                 <p style={{ margin: '0 0 8px 0', color: 'var(--text-main)', fontWeight: 'bold' }}>Add a Tip (Optional)</p>
                 <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', flexWrap: 'wrap' }}>
                   {[0, 50, 100, 200].map(amt => (
-                    <button key={amt} className={`btn ${tipAmount === amt ? '' : 'btn-outline'}`} style={{ padding: '6px 16px', borderRadius: '20px', borderColor: tipAmount === amt ? 'transparent' : 'var(--primary)', color: tipAmount === amt ? 'white' : 'var(--primary)' }} onClick={() => setTipAmount(amt)}>
+                    <button key={amt} className={`btn ${tipAmount === amt ? '' : 'btn-outline'}`} 
+                      style={{ padding: '6px 16px', borderRadius: '20px', borderColor: tipAmount === amt ? 'transparent' : 'var(--primary)', color: tipAmount === amt ? 'white' : 'var(--primary)', opacity: (user?.walletBalance || 0) < amt ? 0.5 : 1 }} 
+                      onClick={() => setTipAmount(amt)}
+                      disabled={(user?.walletBalance || 0) < amt}>
                       {amt === 0 ? 'No Tip' : `₹${amt}`}
                     </button>
                   ))}
                 </div>
+                {(user?.walletBalance || 0) < 50 && <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '8px' }}><i className="fas fa-info-circle"></i> Recharge wallet to tip.</p>}
               </div>
-              <button className="btn btn-block" onClick={handleSubmitRating} disabled={rating === 0}>Submit Feedback</button>
+              <button className="btn btn-block" onClick={handleSubmitRating} disabled={rating === 0 || isSubmittingRating}>
+                {isSubmittingRating ? 'Submitting...' : 'Submit Feedback'}
+              </button>
             </div>
           ) : (assignedElectricians.length > 0 || liveLocation) && (
             <React.Fragment>
@@ -1893,6 +1975,7 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
         fetchJson('/me').then(res => {
           setWalletBal(res.walletBalance);
           setJobsCompleted(res.jobsCompleted);
+          if (typeof onUpdateUser === 'function') onUpdateUser(res); // Sync global context
         }).catch(() => {});
           
           setActiveJobId(null);
@@ -1954,8 +2037,19 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
 
   useEffect(() => {
     if (isOnline && activeJobId) {
-      // FIX: Ensure the electrician rejoins the room if their internet drops and the socket reconnects
-      const joinRoom = () => socket.emit('joinJobRoom', activeJobId);
+      const joinRoom = () => {
+        socket.emit('joinJobRoom', activeJobId);
+        // Recover lost events after network drop
+        fetchJson('/jobs/active').then(job => {
+          if (job && job._id) {
+            setCurrentJob(job);
+            if (job.status === 'in_progress') setIsTracking(false);
+          } else {
+            window.location.reload();
+          }
+        }).catch(() => {});
+      };
+
       if (socket.connected) {
         joinRoom(); // Join immediately if already connected
       }
@@ -2264,7 +2358,7 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
   };
 
   return (
-    <div className="dashboard-grid">
+    <div className="dashboard-grid" style={{ paddingBottom: '80px' }}>
       <div>
         <div className="card">
           <div className="card-header" style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -2397,6 +2491,20 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
                   </div>
                 </div>
               )}
+              
+              {currentJob?.status === 'in_progress' && (
+                <div style={{ marginTop: '16px', background: 'var(--surface)', padding: '16px', borderRadius: '12px', border: '2px solid var(--success)' }}>
+                  <h4 style={{ color: 'var(--success)', margin: '0 0 8px 0' }}>Service in Progress</h4>
+                  <p style={{ margin: '0', fontSize: '0.9rem', fontWeight: 'bold', color: 'var(--text-main)' }}>Once you finish the work, please ask the customer to pay ₹{currentJob.estimatedPrice} via their app and mark the job as Done.</p>
+                </div>
+              )}
+
+              {currentJob?.status === 'payment' && (
+                <div style={{ marginTop: '16px', background: 'var(--surface)', padding: '16px', borderRadius: '12px', border: '2px solid var(--warning)' }}>
+                  <h4 style={{ color: 'var(--warning)', margin: '0 0 8px 0' }}><i className="fas fa-hourglass-half"></i> Payment Verifying</h4>
+                  <p style={{ margin: '0', fontSize: '0.9rem', color: 'var(--text-main)' }}>The customer has submitted the payment. Waiting for Admin to confirm...</p>
+                </div>
+              )}
               <p style={{ color: 'var(--warning)', marginTop: '16px', fontWeight: 'bold' }}>
                 <i className="fas fa-info-circle"></i> Ask the customer to mark the job as 'Done' on their app when finished to receive your payout.
               </p>
@@ -2406,9 +2514,11 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
                   showToast('SOS Alert Sent!', 'success');
                 }
               }}><i className="fas fa-triangle-exclamation"></i> Emergency SOS</button>
-              <button className="btn-outline" style={{ marginTop: '12px', borderColor: 'var(--warning)', color: 'var(--warning)', padding: '8px 16px', width: '100%', borderRadius: '8px' }} onClick={handleDropJob}>
-                <i className="fas fa-person-walking-arrow-right"></i> Emergency Drop Job
-              </button>
+              {currentJob?.status !== 'in_progress' && currentJob?.status !== 'payment' && (
+                <button className="btn-outline" style={{ marginTop: '12px', borderColor: 'var(--warning)', color: 'var(--warning)', padding: '8px 16px', width: '100%', borderRadius: '8px' }} onClick={handleDropJob}>
+                  <i className="fas fa-person-walking-arrow-right"></i> Emergency Drop Job
+                </button>
+              )}
             </div>
         
         <div style={{ marginTop: '16px', background: 'var(--surface)', border: '1px solid var(--border-light)', borderRadius: '12px', overflow: 'hidden' }}>
@@ -3046,7 +3156,7 @@ function AdminPanel({ user, onLogout, showToast }) {
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
-        <div className="hide-scrollbar" style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '4px', WebkitOverflowScrolling: 'touch', width: '100%' }}>
+        <div className="hide-scrollbar" style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '8px', WebkitOverflowScrolling: 'touch', width: '100%', scrollbarWidth: 'none' }}>
         <TabButton active={activeTab === 'database'} onClick={() => setActiveTab('database')} icon="fa-database" label="Global Database" />
         <TabButton active={activeTab === 'live'} onClick={() => setActiveTab('live')} icon="fa-satellite-dish" label="Live Jobs" />
         <TabButton active={activeTab === 'finance'} onClick={() => setActiveTab('finance')} icon="fa-indian-rupee-sign" label="Finance & Approvals" />
@@ -3268,6 +3378,7 @@ function AdminPanel({ user, onLogout, showToast }) {
                   <div>
                     <strong>{job.serviceType}</strong> - ₹{job.estimatedPrice} {job.originalPrice && job.originalPrice !== job.estimatedPrice ? <span style={{ fontSize: '0.8rem', color: 'var(--warning)' }}>(Coupon Used)</span> : ''} <br/>
                     <small>Customer: {job.customer?.name} ({job.customer?.phone})</small>
+                    <br /><small className="badge" style={{ marginTop: '4px', background: job.status === 'payment' ? 'var(--primary)' : 'var(--warning)', color: 'white' }}>{job.status === 'payment' ? 'Post-Service Payment' : 'Upfront Payment'}</small>
                   </div>
                   <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                     <button className="btn" style={{ background: 'var(--success)' }} onClick={() => handleApprovePayment(job._id)}>Approve Payment</button>

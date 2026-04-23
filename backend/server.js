@@ -359,6 +359,7 @@ const notifyUserRefresh = async (userId) => {
 };
 
 const socketRateLimits = new Map();
+const chatRateLimits = new Map();
 
 io.on('connection', (socket) => {
   // Security: Validate payload types to prevent socket-based crashes or prototype pollution
@@ -419,6 +420,11 @@ io.on('connection', (socket) => {
       return socket.disconnect(true);
     }
 
+    // Security: Chat DDoS protection (Max 2 messages per second)
+    const now = Date.now();
+    if (now - (chatRateLimits.get(socket.id) || 0) < 500) return;
+    chatRateLimits.set(socket.id, now);
+
     if (data && typeof data.jobId === 'string' && data.jobId.length < 50) {
       if (!socket.rooms.has(data.jobId)) return;
       // Security: Enforce types and truncate lengths to prevent NoSQL/payload injection attacks
@@ -445,16 +451,21 @@ io.on('connection', (socket) => {
       logSystemEvent('WARN', 'Safety', 'SOS Triggered', `SOS from ${data.userId} on Job ${data.jobId}`);
       
       // Target ONLY active admins to prevent a platform-wide user panic
-      const sockets = await io.fetchSockets();
-      for (const s of sockets) {
-        if (s.user?.role === 'admin') {
-          s.emit('systemBroadcast', `🚨 EMERGENCY SOS TRIGGERED by ${String(data.role).toUpperCase()} in Job: ${data.jobId} 🚨`);
+      try {
+        const sockets = await io.fetchSockets();
+        for (const s of sockets) {
+          if (s.user?.role === 'admin') {
+            s.emit('systemBroadcast', `🚨 EMERGENCY SOS TRIGGERED by ${String(data.role).toUpperCase()} in Job: ${data.jobId} 🚨`);
+          }
         }
-      }
+      } catch (err) { console.error('SOS Broadcast Error:', err); }
     }
   });
 
-  socket.on('disconnect', () => socketRateLimits.delete(socket.id));
+  socket.on('disconnect', () => {
+    socketRateLimits.delete(socket.id);
+    chatRateLimits.delete(socket.id);
+  });
 });
 
 // Real-time Admin Metrics Broadcaster
@@ -537,6 +548,7 @@ setInterval(() => {
   if (userLoginAttempts.size > 10000) userLoginAttempts.clear();
   if (adminLoginAttempts.size > 10000) adminLoginAttempts.clear();
   if (signupRateLimits.size > 10000) signupRateLimits.clear();
+  if (chatRateLimits.size > 10000) chatRateLimits.clear();
 }, 60 * 60 * 1000); // Clean up every hour
 
 // Background Job Sweeper Logic
@@ -577,12 +589,12 @@ const runStuckJobSweeper = async () => {
   if (!isDbConnected) return;
   try {
     const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const stuckJobs = await Job.find({ status: 'in_progress', updatedAt: { $lt: oneDayAgo } });
+    const stuckJobs = await Job.find({ status: { $in: ['in_progress', 'payment'] }, updatedAt: { $lt: oneDayAgo } });
     for (const job of stuckJobs) {
       try {
         const updatedJob = await Job.findOneAndUpdate(
-          { _id: job._id, status: 'in_progress' },
-          { status: 'completed' },
+          { _id: job._id, status: { $in: ['in_progress', 'payment'] } },
+          { status: 'completed', paymentStatus: 'paid' },
           { new: true }
         );
         if (!updatedJob) continue;
@@ -596,6 +608,7 @@ const runStuckJobSweeper = async () => {
             { $inc: { walletBalance: earningsPerElectrician, jobsCompleted: 1 } }
           );
         }
+        logSystemEvent('WARN', 'Finance', 'Sweeper Auto-Payout', `Job ${job._id} auto-completed. Platform assumed liability for payout.`);
         io.to(job._id.toString()).emit('jobCompleted');
       } catch (innerErr) {
         console.error(`Stuck sweep failed for job ${job._id}:`, innerErr);
@@ -1063,6 +1076,12 @@ api.post('/auth/reset-password', async (req, res) => {
     await user.save();
 
     res.status(200).json({ message: 'Password reset successfully. You can now log in.' });
+
+    // Force logout any existing active sessions to prevent compromised tokens from staying active
+    const sockets = await io.fetchSockets();
+    for (const s of sockets) {
+      if (s.user?.userId === String(user._id)) { s.emit('auth-expired'); s.disconnect(true); }
+    }
   } catch (error) {
     res.status(500).json({ message: 'Internal server error during password reset' });
   }
@@ -1223,13 +1242,14 @@ api.post('/jobs', authenticateToken, async (req, res) => {
       originalPrice: safePrice,
       walletAmountUsed: walletDeduction,
       couponUsed: appliedCoupon ? appliedCoupon._id : undefined,
-      paymentStatus: 'verifying',
+      paymentStatus: 'pending',
       jobOTP: crypto.randomInt(1000, 10000).toString(), // Security: Cryptographically secure OTP
-      status: 'verifying_payment'
+      status: 'searching'
     });
 
     try {
       await newJob.save();
+      io.emit('newJobAvailable', newJob); // Broadcast immediately to electricians
       io.emit('adminRefresh');
       logSystemEvent('INFO', 'JobService', 'Job Created', `Job ${newJob._id} created by ${req.user.userId}`);
       
@@ -1384,6 +1404,17 @@ api.put('/jobs/:id/accept', authenticateToken, async (req, res) => {
       updatedJob.status = 'assigned'; // Keep local state updated for the socket emission
       // Notify everyone in the room (customer and all electricians) that the team is full
       io.to(jobId).emit('jobAccepted', { electricians: updatedJob.electricians, electrician: updatedJob.electricians[0] });
+
+      // Security: Evict eavesdroppers (unauthorized electricians who were browsing the 'searching' state)
+      try {
+        const sockets = await io.in(jobId).fetchSockets();
+        const authorizedUserIds = [updatedJob.customer.toString(), ...updatedJob.electricians.map(e => e._id.toString())];
+        for (const s of sockets) {
+          if (s.user?.role !== 'admin' && !authorizedUserIds.includes(s.user.userId)) {
+            s.leave(jobId);
+          }
+        }
+      } catch(err) { console.error('Socket eviction error:', err); }
       
       // Send automated Custom SMS to the Customer
       try {
@@ -1517,15 +1548,31 @@ api.put('/admin/jobs/:id/verify-payment', authenticateToken, async (req, res) =>
     if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ message: 'Invalid Job ID format' });
     
-    const job = await Job.findOneAndUpdate(
-      { _id: req.params.id, status: 'verifying_payment' }, 
-      { paymentStatus: 'paid', status: 'searching' }, 
-      { new: true, runValidators: true }
-    ).select('-jobOTP -messages'); // Security: Prevent leaking OTP and chat history to all connected sockets
+    const job = await Job.findById(req.params.id).select('-jobOTP -messages'); 
     if (!job) return res.status(404).json({ message: 'Job not found' });
     
-    io.to(req.params.id).emit('paymentVerified');
-    io.emit('newJobAvailable', job); // Now SAFE to alert electricians!
+    if (job.status === 'verifying_payment') {
+      job.paymentStatus = 'paid';
+      job.status = 'searching';
+      await job.save();
+      io.to(req.params.id).emit('paymentVerified');
+      io.emit('newJobAvailable', job);
+    } else if (job.status === 'payment') {
+      job.paymentStatus = 'paid';
+      job.status = 'completed';
+      await job.save();
+      
+      if (job.electricians && job.electricians.length > 0) {
+        const uniqueElectricians = [...new Set(job.electricians.map(e => e.toString()))];
+        const basePayout = job.originalPrice || job.estimatedPrice;
+        const earningsPerElectrician = Math.floor(((basePayout * 0.8) / Math.max(1, uniqueElectricians.length)) * 100) / 100;
+        await User.updateMany({ _id: { $in: uniqueElectricians } }, { $inc: { walletBalance: earningsPerElectrician, jobsCompleted: 1 } });
+      }
+      io.to(req.params.id).emit('jobCompleted');
+    } else {
+      return res.status(400).json({ message: 'Job is not in a payment verification state' });
+    }
+    
     io.emit('adminRefresh');
     res.status(200).json(job);
   } catch (error) {
@@ -1540,9 +1587,10 @@ api.put('/jobs/:id/complete', authenticateToken, async (req, res) => {
     
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ message: 'Invalid Job ID format' });
 
+    // FIX: Customers CANNOT complete a job before the electrician has arrived and verified the OTP ('in_progress')
     const job = await Job.findOneAndUpdate(
-      { _id: req.params.id, customer: req.user.userId, status: { $in: ['assigned', 'in_progress'] } }, // 7. Hardened payout state checks
-      { status: 'completed' },
+      { _id: req.params.id, customer: req.user.userId, status: 'in_progress' }, 
+      { status: 'completed', paymentStatus: 'paid' },
       { new: true, runValidators: true }
     );
     
@@ -1647,6 +1695,12 @@ api.delete('/admin/users/:id/reject', authenticateToken, async (req, res) => {
     
     io.emit('adminRefresh');
     res.status(200).json({ message: 'Electrician application rejected and removed' });
+
+    // Live Socket Eviction
+    const sockets = await io.fetchSockets();
+    for (const s of sockets) {
+      if (s.user?.userId === req.params.id) { s.emit('auth-expired'); s.disconnect(true); }
+    }
   } catch (error) {
     res.status(500).json({ message: 'Error rejecting electrician' });
   }
@@ -1768,7 +1822,7 @@ api.get('/admin/finance', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
     // 12. Performance & Privacy: Do not load messages arrays or OTPs into admin dashboard memory
-    const pendingJobs = await Job.find({ status: 'verifying_payment' }).select('-messages -jobOTP').populate('customer', 'name phone').sort({ createdAt: -1 }).limit(100);
+    const pendingJobs = await Job.find({ status: { $in: ['verifying_payment', 'payment'] } }).select('-messages -jobOTP').populate('customer', 'name phone').sort({ createdAt: -1 }).limit(100);
     const pendingWithdrawals = await Withdrawal.find({ status: 'pending' }).populate('electrician', 'name phone').sort({ createdAt: -1 }).limit(100);
     
     // Financial Stats Aggregations
@@ -1963,6 +2017,7 @@ api.post('/users/:id/rate', authenticateToken, async (req, res) => {
     if (tip > 0) {
       await User.findByIdAndUpdate(electrician._id, { $inc: { walletBalance: tip } });
       logSystemEvent('INFO', 'Finance', 'Tip Paid', `Customer ${req.user.userId} tipped ₹${tip} to Electrician ${electrician._id}`);
+      await notifyUserRefresh(electrician._id);
     }
 
     // Atomic Rating Update using Mongoose Aggregation Pipeline to prevent Lost Update Anomalies
@@ -2046,6 +2101,17 @@ api.post('/admin/security/ban-ip', authenticateToken, async (req, res) => {
     bannedIpsCache.add(ip);
     io.emit('adminRefresh');
     res.status(200).json({ message: `IP ${ip} banned successfully` });
+
+    // Instantly disconnect all active sockets from this IP to prevent evasion
+    const sockets = await io.fetchSockets();
+    for (const s of sockets) {
+      const sIp = s.handshake.address;
+      const clientIp = sIp.startsWith('::ffff:') ? sIp.substring(7) : sIp;
+      if (clientIp === ip) {
+        s.emit('auth-expired');
+        s.disconnect(true);
+      }
+    }
   } catch (error) {
     res.status(500).json({ message: 'Error banning IP' });
   }
@@ -2134,6 +2200,12 @@ api.put('/admin/users/:id/force-password', authenticateToken, async (req, res) =
     
     logSystemEvent('WARN', 'AdminPortal', 'Force Password Reset', `Admin ${req.user.userId} forced password reset for user ${req.params.id}`);
     res.status(200).json({ message: 'Password forcefully updated.' });
+
+    // Force logout any existing active sessions to prevent compromised tokens from staying active
+    const sockets = await io.fetchSockets();
+    for (const s of sockets) {
+      if (s.user?.userId === req.params.id) { s.emit('auth-expired'); s.disconnect(true); }
+    }
   } catch (error) {
     res.status(500).json({ message: 'Error updating password' });
   }
@@ -2201,13 +2273,13 @@ api.put('/admin/jobs/:id/force-complete', authenticateToken, async (req, res) =>
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
     
-    // FIX: Check if the job is already completed to prevent double/infinite payouts to electricians
+    // FIX: Prevent Force Completing a job that hasn't even been accepted by an electrician yet
     const job = await Job.findOneAndUpdate(
-      { _id: req.params.id, status: { $ne: 'completed' } },
-      { status: 'completed' }, 
+      { _id: req.params.id, status: { $in: ['assigned', 'in_progress', 'payment'] } },
+      { status: 'completed', paymentStatus: 'paid' }, 
       { new: true }
     );
-    if (!job) return res.status(404).json({ message: 'Job not found or already completed' });
+    if (!job) return res.status(404).json({ message: 'Job not found, already completed, or no team assigned' });
     
     if (job.electricians && job.electricians.length > 0) {
       const uniqueElectricians = [...new Set(job.electricians.map(e => e.toString()))];
