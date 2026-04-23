@@ -548,18 +548,23 @@ const runGhostJobSweeper = async () => {
     const stuckJobs = await Job.find({ status: { $in: ['verifying_payment', 'searching', 'assigned'] }, updatedAt: { $lt: twoHoursAgo } });
     for (const job of stuckJobs) {
       try {
-        job.status = 'cancelled';
-        await job.save();
-        if (job.paymentStatus === 'paid') {
-          await User.findByIdAndUpdate(job.customer, { $inc: { walletBalance: job.estimatedPrice } });
+        const updatedJob = await Job.findOneAndUpdate(
+          { _id: job._id, status: { $in: ['verifying_payment', 'searching', 'assigned'] } },
+          { status: 'cancelled' },
+          { new: false } // Get the old doc to process refunds accurately
+        );
+        if (!updatedJob) continue;
+
+        if (updatedJob.paymentStatus === 'paid') {
+          await User.findByIdAndUpdate(updatedJob.customer, { $inc: { walletBalance: updatedJob.estimatedPrice } });
         }
-        if (job.walletAmountUsed && job.walletAmountUsed > 0) {
-          await User.findByIdAndUpdate(job.customer, { $inc: { walletBalance: job.walletAmountUsed } });
+        if (updatedJob.walletAmountUsed && updatedJob.walletAmountUsed > 0) {
+          await User.findByIdAndUpdate(updatedJob.customer, { $inc: { walletBalance: updatedJob.walletAmountUsed } });
         }
-        if (job.couponUsed) {
-          await Coupon.findByIdAndUpdate(job.couponUsed, { $set: { isUsed: false }, $unset: { usedBy: 1, usedAt: 1 } });
+        if (updatedJob.couponUsed) {
+          await Coupon.findByIdAndUpdate(updatedJob.couponUsed, { $set: { isUsed: false }, $unset: { usedBy: 1, usedAt: 1 } });
         }
-        io.to(job._id.toString()).emit('jobCancelled');
+        io.to(updatedJob._id.toString()).emit('jobCancelled');
       } catch (innerErr) {
         console.error(`Ghost sweep failed for job ${job._id}:`, innerErr);
       }
@@ -1011,7 +1016,8 @@ api.post('/auth/reset-password', async (req, res) => {
     // 3. Bcrypt Asymmetric DoS Fix: Fetch user BEFORE hitting Twilio to save costs and verify existence
     const user = await User.findOne({ phone: cleanPhone });
     if (!user) {
-      return res.status(404).json({ message: 'Account no longer exists' });
+      // SECURITY: Return generic OTP error to prevent phone number enumeration attacks
+      return res.status(400).json({ message: 'Invalid OTP' });
     }
 
     const targetPhone = cleanPhone.startsWith('+') ? cleanPhone : `+91${cleanPhone}`;
@@ -1926,6 +1932,17 @@ api.post('/users/:id/rate', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'Insufficient wallet balance to pay the tip. Please recharge.' });
     }
 
+    // 1. Tip deduction FIRST to prevent partial transaction lockouts
+    if (tip > 0) {
+      const updatedCustomer = await User.findOneAndUpdate(
+        { _id: req.user.userId, walletBalance: { $gte: tip } },
+        { $inc: { walletBalance: -tip } }
+      );
+      if (!updatedCustomer) {
+        return res.status(400).json({ message: 'Insufficient wallet balance to pay the tip.' });
+      }
+    }
+
     const completedJob = await Job.findOneAndUpdate({
       customer: req.user.userId,
       electricians: req.params.id,
@@ -1936,18 +1953,14 @@ api.post('/users/:id/rate', authenticateToken, async (req, res) => {
     });
 
     if (!completedJob) {
+      // Rollback tip if job rating was already submitted concurrently
+      if (tip > 0) {
+        await User.findByIdAndUpdate(req.user.userId, { $inc: { walletBalance: tip } });
+      }
       return res.status(403).json({ message: 'Forbidden: You can only rate this electrician once after a completed job.' });
     }
 
     if (tip > 0) {
-      // FIX: Atomic lock to prevent rapidly pushing the balance into the negative
-      const updatedCustomer = await User.findOneAndUpdate(
-        { _id: req.user.userId, walletBalance: { $gte: tip } },
-        { $inc: { walletBalance: -tip } }
-      );
-      if (!updatedCustomer) {
-        return res.status(400).json({ message: 'Insufficient wallet balance to pay the tip.' });
-      }
       await User.findByIdAndUpdate(electrician._id, { $inc: { walletBalance: tip } });
       logSystemEvent('INFO', 'Finance', 'Tip Paid', `Customer ${req.user.userId} tipped ₹${tip} to Electrician ${electrician._id}`);
     }

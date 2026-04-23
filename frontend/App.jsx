@@ -378,7 +378,7 @@ function ProfileModal({ user, onClose, onUpdate, showToast, onLogout }) {
 
   return (
     <div className="modal-overlay visible">
-      <div className="modal-content" style={{ width: '90%', maxWidth: '400px', padding: '24px', boxSizing: 'border-box' }}>
+      <div className="modal-content">
         <div className="modal-header"><h3>Edit Profile</h3><button onClick={onClose} style={{ padding: '10px', margin: '-10px' }}>&times;</button></div>
         <form onSubmit={handleSubmit}>
           <div className="form-group anime-form-item"><label>Full Name</label><input type="text" className="form-control" value={name} onChange={e=>setName(e.target.value)} required maxLength="50" /></div>
@@ -611,7 +611,7 @@ function Login({ onLoginSuccess, showToast }) {
         <div className="logo-text">WATT<span>ZEN</span></div>
       </div>
       <div style={{ textAlign: 'center', color: 'var(--primary)', fontWeight: '700', letterSpacing: '1.5px', marginBottom: '32px', fontSize: '0.85rem' }}>POWER YOUR NETWORK</div>
-      <div className="login-card" style={{ width: '100%', maxWidth: '420px', margin: '0 auto', padding: '32px 24px', boxSizing: 'border-box' }}>
+      <div className="login-card" style={{ width: '100%', maxWidth: '420px', margin: '0 auto', boxSizing: 'border-box' }}>
         <h1>{isForgotPassword ? 'Reset Password' : (isLogin ? 'Welcome Back' : 'Create Account')}</h1>
         <p>{isForgotPassword ? 'Enter your details below to recover your account.' : (isLogin ? 'Log in to your account to continue.' : 'Join the best electrician network.')}</p>
         
@@ -1372,7 +1372,7 @@ Support: projects.nikunj.singh@gmail.com
               ))}
             </div>
           </div>
-      <button className="btn" style={{ padding: '10px', borderRadius: '50%', width: '45px', height: '45px', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={handleLocateMe} title="Detect Location" disabled={isLocating}>
+        <button className="btn" style={{ padding: '10px', borderRadius: '50%', width: '48px', height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={handleLocateMe} title="Detect Location" disabled={isLocating}>
         {isLocating ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-crosshairs"></i>}
       </button>
         </div>
@@ -1444,9 +1444,9 @@ Support: projects.nikunj.singh@gmail.com
                 <small style={{ color: 'var(--text-muted)' }}>How many electricians do you need?</small>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'var(--surface)', padding: '6px', borderRadius: '20px', boxShadow: 'var(--shadow-sm)' }}>
-                <button onClick={() => setTeamSize(Math.max(1, teamSize - 1))} style={{ width: '40px', height: '40px', borderRadius: '50%', border: 'none', background: 'var(--secondary)', color: 'var(--text-main)', cursor: 'pointer', fontWeight: 'bold' }}>-</button>
+            <button onClick={() => setTeamSize(Math.max(1, teamSize - 1))} style={{ width: '44px', height: '44px', borderRadius: '50%', border: 'none', background: 'var(--secondary)', color: 'var(--text-main)', cursor: 'pointer', fontWeight: 'bold' }}>-</button>
                 <strong style={{ width: '20px', textAlign: 'center', color: 'var(--primary)' }}>{teamSize}</strong>
-                <button onClick={() => setTeamSize(Math.min(10, teamSize + 1))} style={{ width: '40px', height: '40px', borderRadius: '50%', border: 'none', background: 'var(--primary)', color: 'white', cursor: 'pointer', fontWeight: 'bold' }}>+</button>
+            <button onClick={() => setTeamSize(Math.min(10, teamSize + 1))} style={{ width: '44px', height: '44px', borderRadius: '50%', border: 'none', background: 'var(--primary)', color: 'white', cursor: 'pointer', fontWeight: 'bold' }}>+</button>
               </div>
             </div>
           )}
@@ -1512,7 +1512,7 @@ Support: projects.nikunj.singh@gmail.com
               <div style={{ fontWeight: 'bold' }}>Searching for nearby electricians...</div>
               {teamStatusMessage && <div style={{ fontSize: '0.9rem', color: 'var(--text-main)', marginTop: '8px' }}>{teamStatusMessage}</div>}
               <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginTop: '12px' }}>
-                Tracking Job ID: <span style={{ fontFamily: 'monospace' }}>{activeJobId}</span>
+          Tracking Job ID: <span style={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>{activeJobId}</span>
                 <button onClick={() => { 
                   if (navigator.clipboard) {
                     navigator.clipboard.writeText(`Tracking WATTZEN Job: ${activeJobId}`)
@@ -2347,7 +2347,7 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
                       <p style={{ margin: '4px 0 12px 0', fontSize: '0.9rem', color: 'var(--text-main)' }}>
                         <strong>Location:</strong> <a href={`https://www.openstreetmap.org/?mlat=${job.location?.coordinates?.[1]}&mlon=${job.location?.coordinates?.[0]}#map=16/${job.location?.coordinates?.[1]}/${job.location?.coordinates?.[0]}`} target="_blank" rel="noreferrer" style={{ color: 'var(--primary)', textDecoration: 'none' }}>{job.address} <i className="fas fa-external-link-alt"></i></a>
                       </p>
-                      <p style={{ margin: '0 0 12px 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>Job ID: <span style={{ fontFamily: 'monospace' }}>{job._id}</span></p>
+              <p style={{ margin: '0 0 12px 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>Job ID: <span style={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>{job._id}</span></p>
                       <button className="btn" style={{ width: '100%', background: 'var(--success)', marginTop: '8px' }} onClick={() => handleAcceptJob(job._id)} disabled={!!acceptingJobId}>
                     {acceptingJobId === job._id ? <><i className="fas fa-circle-notch fa-spin" style={{ marginRight: '8px' }}></i>Accepting...</> : 'Accept Job & Start Tracking'}
                       </button>
@@ -3017,7 +3017,7 @@ function AdminPanel({ user, onLogout, showToast }) {
 
   return (
     <div style={{ padding: '0', fontFamily: 'var(--font-family, sans-serif)' }}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', background: 'var(--surface)', padding: '16px 24px', borderRadius: '16px', boxShadow: 'var(--shadow-sm)' }}>
+      <div className="admin-header" style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', background: 'var(--surface)', borderRadius: '16px', boxShadow: 'var(--shadow-sm)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <div style={{ background: 'var(--danger)', color: 'white', padding: '10px', borderRadius: '12px' }}>
             <i className="fas fa-user-shield fa-lg"></i>
@@ -3729,10 +3729,8 @@ function AppContent() {
   const isAuthView = location.pathname === '/' || location.pathname === '/login';
 
   return (
-    <div className="app-container" style={{ 
+    <div className={`app-container ${isAuthView ? 'auth-view' : ''}`} style={{ 
       animation: isAuthView ? 'none' : 'fadeIn 0.5s forwards',
-      maxWidth: isAuthView ? '100%' : '1200px',
-      padding: isAuthView ? '0' : '16px',
       margin: '0 auto'
     }}>
       {isBrowserOffline ? (
@@ -3754,14 +3752,14 @@ function AppContent() {
         <Route path="/customer" element={user?.role === 'customer' ? (
           <React.Fragment>
             <Navbar user={user} onLogout={handleLogout} toggleTheme={toggleTheme} isDarkMode={isDarkMode} onEditProfile={() => setIsProfileModalOpen(true)} />
-            <div style={{ padding: '20px 0', paddingBottom: '90px' }}><CustomerHome user={user} showToast={showToast} onEditProfile={() => setIsProfileModalOpen(true)} onUpdateUser={handleProfileUpdate} /></div>
+            <div style={{ paddingTop: '16px' }}><CustomerHome user={user} showToast={showToast} onEditProfile={() => setIsProfileModalOpen(true)} onUpdateUser={handleProfileUpdate} /></div>
           </React.Fragment>
         ) : <Navigate to="/login" replace />} />
 
         <Route path="/electrician" element={user?.role === 'electrician' ? (
           <React.Fragment>
             <Navbar user={user} onLogout={handleLogout} toggleTheme={toggleTheme} isDarkMode={isDarkMode} onEditProfile={() => setIsProfileModalOpen(true)} />
-            <div style={{ padding: '20px 0', paddingBottom: '90px' }}><ElectricianHome user={user} showToast={showToast} onEditProfile={() => setIsProfileModalOpen(true)} onUpdateUser={handleProfileUpdate} /></div>
+            <div style={{ paddingTop: '16px' }}><ElectricianHome user={user} showToast={showToast} onEditProfile={() => setIsProfileModalOpen(true)} onUpdateUser={handleProfileUpdate} /></div>
           </React.Fragment>
         ) : <Navigate to="/login" replace />} />
 
