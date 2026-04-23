@@ -1437,7 +1437,7 @@ Support: projects.nikunj.singh@gmail.com
             ))}
           </div>
 
-          {selectedServiceObj?.team && (
+          {selectedServiceObj?.team && !bookingPrice && !activeJobId && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center', justifyContent: 'space-between', background: 'var(--secondary)', padding: '16px', borderRadius: '16px', marginTop: '16px', border: '1px dashed var(--primary)' }}>
               <div>
                 <strong style={{ display: 'block', color: 'var(--text-main)' }}>Project Team Required</strong>
@@ -1496,11 +1496,13 @@ Support: projects.nikunj.singh@gmail.com
                   </div>
                 )}
               </div>
-              <a href={`upi://pay?pa=9211293576@ptaxis&pn=WATTZEN&am=${Number(finalPrice)}&cu=INR`} className="btn btn-block" style={{ background: '#10b981', display: 'block', textDecoration: 'none', marginBottom: '12px' }}>
-                <i className="fas fa-qrcode"></i> Pay via UPI App
-              </a>
+              {finalPrice > 0 && (
+                <a href={`upi://pay?pa=9211293576@ptaxis&pn=WATTZEN&am=${Number(finalPrice).toFixed(2)}&cu=INR`} className="btn btn-block" style={{ background: '#10b981', display: 'block', textDecoration: 'none', marginBottom: '12px' }}>
+                  <i className="fas fa-qrcode"></i> Pay via UPI App
+                </a>
+              )}
               <button className="btn-outline btn btn-block" onClick={handleConfirmPayment} disabled={isBooking}>
-                {isBooking ? 'Verifying...' : 'I have completed the payment'}
+                {isBooking ? 'Verifying...' : (finalPrice > 0 ? 'I have completed the payment' : 'Confirm Booking')}
               </button>
           <button className="btn" style={{ background: 'transparent', color: 'var(--danger)', marginTop: '12px', boxShadow: 'none', border: '1px solid var(--danger)', padding: '10px' }} onClick={() => { setBookingPrice(null); setAppliedCoupon(null); setCouponInput(''); }}>Cancel Booking</button>
             </div>

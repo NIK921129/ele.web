@@ -575,12 +575,16 @@ const runStuckJobSweeper = async () => {
     const stuckJobs = await Job.find({ status: 'in_progress', updatedAt: { $lt: oneDayAgo } });
     for (const job of stuckJobs) {
       try {
-        job.status = 'completed';
-        await job.save({ validateModifiedOnly: true }); // 12. Robust ghost saving
+        const updatedJob = await Job.findOneAndUpdate(
+          { _id: job._id, status: 'in_progress' },
+          { status: 'completed' },
+          { new: true }
+        );
+        if (!updatedJob) continue;
         
-        if (job.electricians && job.electricians.length > 0) {
-          const uniqueElectricians = [...new Set(job.electricians.map(e => e.toString()))];
-          const basePayout = job.originalPrice || job.estimatedPrice;
+        if (updatedJob.electricians && updatedJob.electricians.length > 0) {
+          const uniqueElectricians = [...new Set(updatedJob.electricians.map(e => e.toString()))];
+          const basePayout = updatedJob.originalPrice || updatedJob.estimatedPrice;
           const earningsPerElectrician = Math.floor(((basePayout * 0.8) / Math.max(1, uniqueElectricians.length)) * 100) / 100;
           await User.updateMany(
             { _id: { $in: uniqueElectricians } },
@@ -1185,10 +1189,13 @@ api.post('/jobs', authenticateToken, async (req, res) => {
       finalPrice -= walletDeduction;
     }
     if (walletDeduction > 0) {
-      await User.findOneAndUpdate(
+      const deducted = await User.findOneAndUpdate(
         { _id: req.user.userId, walletBalance: { $gte: walletDeduction } },
         { $inc: { walletBalance: -walletDeduction } }
       );
+      if (!deducted) {
+        return res.status(400).json({ message: 'Wallet balance changed during booking. Please try again.' });
+      }
     }
 
     // Security: Strict coordinate validation to prevent MongoDB 2dsphere index crashes
@@ -1694,10 +1701,13 @@ api.put('/admin/jobs/:id/cancel', authenticateToken, async (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ message: 'Invalid Job ID format' });
     
-    const job = await Job.findByIdAndUpdate(req.params.id, { status: 'cancelled' });
-    if (!job) return res.status(404).json({ message: 'Job not found' });
+    const job = await Job.findOneAndUpdate(
+      { _id: req.params.id, status: { $nin: ['cancelled', 'completed'] } }, 
+      { status: 'cancelled' }
+    );
+    if (!job) return res.status(404).json({ message: 'Job not found or already completed/cancelled' });
     
-    if (job.paymentStatus === 'paid' && job.status !== 'cancelled' && job.status !== 'completed') {
+    if (job.paymentStatus === 'paid') {
        await User.findByIdAndUpdate(job.customer, { $inc: { walletBalance: job.estimatedPrice } });
     }
     
