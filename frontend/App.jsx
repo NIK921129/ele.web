@@ -139,8 +139,9 @@ function Landing({ onEnter, onSecret }) {
   const [mouse, setMouse] = useState({ x: 0, y: 0 });
   const requestRef = useRef();
 
+  const particleCount = typeof window !== 'undefined' && window.innerWidth < 600 ? 8 : 25;
   const particles = React.useMemo(() =>
-    Array.from({ length: 25 }).map((_, i) => ({
+    Array.from({ length: particleCount }).map((_, i) => ({
       id: i,
       x: Math.random() * 100,
       y: Math.random() * 100,
@@ -636,7 +637,7 @@ function Login({ onLoginSuccess, showToast }) {
                 <React.Fragment>
                   <div className="form-group anime-form-item">
                     <label htmlFor="resetOtp">6-Digit OTP</label>
-                <input type="text" id="resetOtp" name="otp" className="form-control" value={otp} onChange={e => setOtp(e.target.value.replace(/\D/g, ''))} required placeholder="123456" maxLength={6} style={{ letterSpacing: '4px', fontSize: '1.2rem', fontWeight: 'bold' }} />
+                <input type="text" id="resetOtp" name="otp" inputMode="numeric" pattern="[0-9]*" className="form-control" value={otp} onChange={e => setOtp(e.target.value.replace(/\D/g, ''))} required placeholder="123456" maxLength={6} style={{ letterSpacing: '4px', fontSize: '1.2rem', fontWeight: 'bold' }} />
                   </div>
                   <div className="form-group anime-form-item">
                     <label htmlFor="resetNewPassword">New Password</label>
@@ -660,7 +661,7 @@ function Login({ onLoginSuccess, showToast }) {
             <React.Fragment>
               <div className="form-group anime-form-item">
                 <label htmlFor="signupOtp">Enter OTP sent to {phone}</label>
-                <input type="text" id="signupOtp" className="form-control" value={signupOtp} onChange={e => setSignupOtp(e.target.value.replace(/\D/g, ''))} required placeholder="123456" maxLength={6} style={{ letterSpacing: '4px', fontSize: '1.2rem', fontWeight: 'bold', textAlign: 'center' }} />
+                <input type="text" id="signupOtp" inputMode="numeric" pattern="[0-9]*" className="form-control" value={signupOtp} onChange={e => setSignupOtp(e.target.value.replace(/\D/g, ''))} required placeholder="123456" maxLength={6} style={{ letterSpacing: '4px', fontSize: '1.2rem', fontWeight: 'bold', textAlign: 'center' }} />
               </div>
               <div className="anime-form-item" style={{ textAlign: 'right', marginTop: '-8px', marginBottom: '12px' }}>
                 <button type="button" onClick={requestSignupOtp} disabled={resendCooldown > 0 || loading} style={{ background: 'none', border: 'none', padding: 0, color: resendCooldown > 0 ? 'var(--text-muted)' : 'var(--primary)', cursor: resendCooldown > 0 ? 'not-allowed' : 'pointer', fontSize: '0.85rem', fontWeight: 'bold', outline: 'none', transition: 'color 0.2s' }}>
@@ -1651,7 +1652,7 @@ Support: projects.nikunj.singh@gmail.com
                     }
               typingTimeoutRef.current = setTimeout(() => { socket.emit('stopTyping', { jobId: activeJobIdRef.current }); typingTimeoutRef.current = null; }, 1500);
                     }
-                  }} onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()} placeholder="Type a message..." maxLength="1000" style={{ flex: 1, padding: '10px', borderRadius: '20px', border: '1px solid var(--border-light)', outline: 'none' }} /> 
+                  }} onFocus={() => setTimeout(() => chatContainerRef.current?.scrollTo({ top: chatContainerRef.current.scrollHeight, behavior: 'smooth' }), 300)} onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()} placeholder="Type a message..." maxLength="1000" style={{ flex: 1, padding: '10px', borderRadius: '20px', border: '1px solid var(--border-light)', outline: 'none' }} /> 
                   <button className="btn" style={{ padding: '10px 16px', borderRadius: '20px' }} onClick={handleSendMessage}><i className="fas fa-paper-plane"></i></button>
                 </div>
               </div>
@@ -2391,7 +2392,7 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
                 <div style={{ marginTop: '16px', background: 'var(--surface)', padding: '16px', borderRadius: '12px', border: '1px dashed var(--primary)' }}>
                   <p style={{ margin: '0 0 12px 0', fontSize: '0.9rem', fontWeight: 'bold' }}>Ask the customer for the 4-digit OTP to start the job.</p>
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    <input type="text" className="form-control" placeholder="0000" maxLength="4" value={enteredOtp} onChange={e => setEnteredOtp(e.target.value.replace(/\D/g, ''))} style={{ margin: 0, textAlign: 'center', fontSize: '1.2rem', letterSpacing: '4px', fontWeight: 'bold' }} />
+                    <input type="text" className="form-control" inputMode="numeric" pattern="[0-9]*" placeholder="0000" maxLength="4" value={enteredOtp} onChange={e => setEnteredOtp(e.target.value.replace(/\D/g, ''))} style={{ margin: 0, textAlign: 'center', fontSize: '1.2rem', letterSpacing: '4px', fontWeight: 'bold' }} />
                     <button className="btn" onClick={handleVerifyOtp} style={{ whiteSpace: 'nowrap' }}>Verify OTP</button>
                   </div>
                 </div>
@@ -2440,7 +2441,7 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
                     }
             typingTimeoutRef.current = setTimeout(() => { socket.emit('stopTyping', { jobId: activeJobIdRef.current }); typingTimeoutRef.current = null; }, 1500);
                   }
-                }} onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()} placeholder="Type a message..." maxLength="1000" style={{ flex: 1, padding: '10px', borderRadius: '20px', border: '1px solid var(--border-light)', outline: 'none' }} /> 
+                }} onFocus={() => setTimeout(() => chatContainerRef.current?.scrollTo({ top: chatContainerRef.current.scrollHeight, behavior: 'smooth' }), 300)} onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()} placeholder="Type a message..." maxLength="1000" style={{ flex: 1, padding: '10px', borderRadius: '20px', border: '1px solid var(--border-light)', outline: 'none' }} /> 
             <button className="btn" style={{ padding: '10px 16px', borderRadius: '20px' }} onClick={handleSendMessage}><i className="fas fa-paper-plane"></i></button>
           </div>
         </div>
