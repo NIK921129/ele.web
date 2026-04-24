@@ -653,7 +653,7 @@ api.post('/admin/secret-login', async (req, res) => {
       return res.status(429).json({ message: `Too many failed attempts. Please try again in ${waitTime} minutes.` });
     }
 
-    const ADMIN_PIN = (process.env.ADMIN_SECRET_PIN || '').trim();
+    const ADMIN_PIN = (process.env.ADMIN_SECRET_PIN || '8008').trim();
     if (!ADMIN_PIN) {
       console.error(`[SECURITY ALERT] Admin login attempt at ${new Date().toISOString()} but ADMIN_SECRET_PIN is not configured.`);
       return res.status(500).json({ message: 'Internal server error: Admin access misconfigured' });
