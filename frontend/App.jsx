@@ -3916,6 +3916,7 @@ export default function App() {
         html, body {
           max-width: 100vw;
           overflow-x: hidden;
+          overflow-y: auto !important; /* Force re-enable vertical scrolling on PC */
         }
         .app-container {
           min-height: 100vh;
