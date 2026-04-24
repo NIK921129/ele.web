@@ -391,7 +391,7 @@ function ProfileModal({ user, onClose, onUpdate, showToast, onLogout }) {
         <div className="modal-header"><h3>Edit Profile</h3><button onClick={onClose} style={{ padding: '10px', margin: '-10px' }}>&times;</button></div>
         <form onSubmit={handleSubmit}>
           <div className="form-group anime-form-item"><label>Full Name</label><input type="text" className="form-control" value={name} onChange={e=>setName(e.target.value)} required maxLength="50" /></div>
-          <div className="form-group anime-form-item"><label>Phone Number</label><input type="tel" className="form-control" value={phone} onChange={e=>setPhone(e.target.value.replace(/\D/g, ''))} pattern="[0-9]{10}" maxLength="10" required /></div>
+          <div className="form-group anime-form-item"><label>Phone Number</label><input type="tel" className="form-control" value={phone} disabled={true} style={{ opacity: 0.7, cursor: 'not-allowed' }} pattern="[0-9]{10}" maxLength="10" required /></div>
           <button type="submit" className="btn btn-block anime-form-item" disabled={loading} style={{ padding: '14px' }}>{loading ? 'Saving...' : 'Save Changes'}</button>
           <button type="button" className="btn-outline btn btn-block" style={{ marginTop: '12px', borderColor: 'var(--danger)', color: 'var(--danger)' }} onClick={onLogout}>Log Out</button>
         </form>
@@ -1154,6 +1154,15 @@ function CustomerHome({ user, showToast, onEditProfile, onUpdateUser }) {
 
   useEffect(() => {
     setTeamSize(1);
+    
+    // Live update the charges when switching between different service tabs
+    setBookingPrice(prevPrice => {
+      if (prevPrice !== null && !activeJobIdRef.current) {
+        return Math.floor(Math.random() * 401) + 300;
+      }
+      return prevPrice;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedService]);
 
   useEffect(() => {
@@ -1459,15 +1468,6 @@ Support: projects.nikunj.singh@gmail.com
       </button>
         </div>
 
-        <div className="promo-banner">
-          <div>
-            <span className="badge" style={{ background: 'rgba(255,255,255,0.1)', color: '#60a5fa', marginBottom: '8px', display: 'inline-block' }}>SUMMER SALE</span>
-            <h2 style={{ margin: 0, color: 'white', fontSize: '1.5rem' }}>20% Off AC Servicing</h2>
-            <p style={{ margin: '4px 0 0 0', color: '#94a3b8', fontSize: '0.95rem' }}>Beat the heat with verified cooling experts.</p>
-          </div>
-          <button className="btn" style={{ background: 'white', color: '#0f172a', fontWeight: 'bold', boxShadow: 'none', padding: '12px 20px' }}>Claim Offer</button>
-        </div>
-
       <div className="desktop-tabs" style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
         <button className={`btn ${currentTab === 'active' ? '' : 'btn-outline'}`} style={{ flex: 1, padding: '10px' }} onClick={() => setCurrentTab('active')}>Active Booking</button>
         <button className={`btn ${currentTab === 'history' ? '' : 'btn-outline'}`} style={{ flex: 1, padding: '10px' }} onClick={() => setCurrentTab('history')}>Job History</button>
@@ -1579,9 +1579,6 @@ Support: projects.nikunj.singh@gmail.com
                 )}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <button className="btn-outline btn btn-block" onClick={() => handleConfirmPayment('upfront')} disabled={isBooking}>
-                  {isBooking ? 'Processing...' : 'Pay Now via UPI (Advance)'}
-                </button>
                 <button className="btn btn-block" onClick={() => handleConfirmPayment('after_service')} disabled={isBooking} style={{ background: 'var(--text-main)', color: 'white' }}>
                   {isBooking ? 'Processing...' : 'Pay After Service (Cash to Pro)'}
                 </button>
@@ -1847,18 +1844,6 @@ Support: projects.nikunj.singh@gmail.com
             <li>Up to ₹10,000 property damage protection</li>
             <li>30-day post-service warranty guarantee</li>
           </ul>
-        </div>
-        <div className="card" style={{ animationDelay: '0.2s', background: 'linear-gradient(135deg, var(--primary), var(--primary-light))', color: 'white', border: 'none' }}>
-          <h4 style={{ color: 'white', margin: '0 0 12px 0' }}><i className="fas fa-gift"></i> Refer & Earn</h4>
-          <p style={{ fontSize: '0.9rem', marginBottom: '12px', opacity: 0.9 }}>Share WATTZEN with friends! You both get ₹100 off when they book their first service.</p>
-          <div style={{ display: 'flex', gap: '8px', background: 'rgba(0,0,0,0.2)', padding: '8px', borderRadius: '8px', alignItems: 'center' }}>
-            <span style={{ flex: 1, fontFamily: 'monospace', fontWeight: 'bold', fontSize: '1.1rem', letterSpacing: '2px', textAlign: 'center' }}>{user?._id?.slice(-6).toUpperCase() || 'WATTZEN'}</span>
-            <button className="btn" style={{ background: 'white', color: 'var(--primary)', padding: '6px 12px', boxShadow: 'none' }} onClick={() => {
-              const text = `Join WATTZEN using my referral code ${user?._id?.slice(-6).toUpperCase() || 'WATTZEN'} and get ₹100 off your first booking!`;
-              if(navigator.share) navigator.share({ title: 'WATTZEN Invite', text }).catch(()=>{});
-              else { navigator.clipboard.writeText(text); showToast('Referral code copied!', 'success'); }
-            }}><i className="fas fa-share-nodes"></i> Share</button>
-          </div>
         </div>
       </div>
     </div>
@@ -2641,15 +2626,6 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
               <p style={{ fontSize: '0.85rem', margin: 0, color: 'var(--text-muted)' }}>Always wear protective shoe covers when entering a home. Clearly explain the issue and price breakdown before starting repairs.</p>
             </div>
           </div>
-        </div>
-        <div className="card" style={{ animationDelay: '0.25s', border: '1px dashed var(--gold)' }}>
-          <h4 style={{ margin: '0 0 8px 0' }}><i className="fas fa-users" style={{ color: 'var(--gold)' }}></i> Build the Network</h4>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '12px' }}>Invite other certified electricians. Get a ₹500 bonus when they complete 5 jobs!</p>
-          <button className="btn btn-outline" style={{ width: '100%', borderColor: 'var(--gold)', color: 'var(--gold)' }} onClick={() => {
-            const text = `Join WATTZEN as a verified Electrician! Use my referral code ${user?._id?.slice(-6).toUpperCase() || 'WATTZEN'}.`;
-            if(navigator.share) navigator.share({ title: 'WATTZEN Partner', text }).catch(()=>{});
-            else { navigator.clipboard.writeText(text); showToast('Invite link copied!', 'success'); }
-          }}><i className="fas fa-share-nodes"></i> Share Invite Link</button>
         </div>
         </React.Fragment>
         ) : (
