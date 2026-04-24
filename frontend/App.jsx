@@ -788,11 +788,11 @@ function TrackingMap({ origin, destination }) {
           iconAnchor: [15, 15]
         });
 
-            originMarker.current = window.L.marker([startLat, startLng], { icon: createIcon('C', '#0d9488') }).addTo(mapInstance.current);
+            originMarker.current = window.L.marker([startLat, startLng], { icon: createIcon('C', '#5c8d84') }).addTo(mapInstance.current);
             
             const destLat = destination && destination.length === 2 ? destination[1] : 0;
             const destLng = destination && destination.length === 2 ? destination[0] : 0;
-            destMarker.current = window.L.marker([destLat, destLng], { icon: createIcon('E', '#f59e0b') }).addTo(mapInstance.current);
+            destMarker.current = window.L.marker([destLat, destLng], { icon: createIcon('E', '#f66b02') }).addTo(mapInstance.current);
       }
 
           // Use ResizeObserver to reliably fix the Leaflet "gray tile" rendering glitch in dynamic containers
@@ -1605,7 +1605,7 @@ Support: projects.nikunj.singh@gmail.com
                   <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '12px' }}>Please pay the final amount to complete the job once the electrician is finished.</p>
                   <h2 style={{ color: 'var(--success)', margin: '0 0 12px 0' }}>₹{bookingPrice}</h2>
                   {bookingPrice > 0 && (
-                    <a href={`upi://pay?pa=9211293576@ptaxis&pn=WATTZEN&am=${Number(bookingPrice).toFixed(2)}&cu=INR`} className="btn btn-block" style={{ background: '#10b981', display: 'block', textDecoration: 'none', marginBottom: '12px' }}>
+                    <a href={`upi://pay?pa=9211293576@ptaxis&pn=WATTZEN&am=${Number(bookingPrice).toFixed(2)}&cu=INR`} className="btn btn-block" style={{ background: '#bcd81d', color: '#111', display: 'block', textDecoration: 'none', marginBottom: '12px' }}>
                       <i className="fas fa-qrcode"></i> Pay via UPI App
                     </a>
                   )}
@@ -2173,8 +2173,8 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
           data: {
             labels: last7Days.map(d => d.substring(0, 5)),
             datasets: [{
-              label: 'Earnings (₹)', data: earningsData, borderColor: '#0d9488',
-              backgroundColor: 'rgba(13, 148, 136, 0.2)', fill: true, tension: 0.4
+              label: 'Earnings (₹)', data: earningsData, borderColor: '#5c8d84',
+              backgroundColor: 'rgba(92, 141, 132, 0.2)', fill: true, tension: 0.4
             }]
           },
           options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
@@ -3891,6 +3891,16 @@ function AppContent() {
 export default function App() {
   return (
     <ErrorBoundary>
+      <style>{`
+        :root {
+          --primary: #5c8d84 !important;
+          --primary-light: rgba(92, 141, 132, 0.1) !important;
+          --danger: #d10536 !important;
+          --warning: #f66b02 !important;
+          --success: #bcd81d !important;
+          --gold: #7f7f27 !important;
+        }
+      `}</style>
       <BrowserRouter>
         <AppContent />
       </BrowserRouter>
