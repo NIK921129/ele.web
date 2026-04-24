@@ -243,11 +243,12 @@ function Landing({ onEnter, onSecret }) {
         <div style={{ 
           display: 'inline-flex', 
           padding: '20px', 
-          background: 'rgba(255,255,255,0.05)', 
+          background: 'rgba(255,255,255,0.1)', 
+          backdropFilter: 'blur(10px)',
           borderRadius: '24px', 
           marginBottom: '32px', 
           border: '1px solid rgba(255,255,255,0.1)',
-          boxShadow: '0 0 30px rgba(56, 189, 248, 0.2)'
+          boxShadow: '0 10px 40px rgba(92, 141, 132, 0.3)'
         }}>
           <img src={logoImage} alt="WATTZEN" style={{ width: '100px', height: 'auto' }} />
         </div>
@@ -255,7 +256,7 @@ function Landing({ onEnter, onSecret }) {
         <p className="landing-desc anime-element" style={{ opacity: 0 }}>
           Experience the next generation of electrical services. Instant connections, live tracking, and certified safety — all in one seamless, high-powered space.
         </p>
-        <button className="btn landing-btn anime-element" onClick={onEnter} style={{ opacity: 0 }}>
+        <button className="btn landing-btn anime-element" onClick={onEnter} style={{ opacity: 0, padding: '16px 32px', fontSize: '1.1rem', borderRadius: '30px', background: 'var(--primary)', border: 'none' }}>
           Get Started <i className="fas fa-arrow-right" style={{ marginLeft: '10px' }}></i>
         </button>
       </div>
@@ -620,8 +621,8 @@ function Login({ onLoginSuccess, showToast }) {
         
         {!isForgotPassword && !signupOtpSent && (
         <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
-          <button type="button" className={`btn btn-block ${role === 'customer' ? '' : 'btn-outline'}`} onClick={() => { setRole('customer'); setError(null); setSignupOtp(''); }} style={{ padding: '10px' }}>Customer</button>
-          <button type="button" className={`btn btn-block ${role === 'electrician' ? '' : 'btn-outline'}`} onClick={() => { setRole('electrician'); setError(null); setSignupOtp(''); }} style={{ padding: '10px' }}>Electrician</button>
+          <button type="button" className={`btn btn-block ${role === 'customer' ? '' : 'btn-outline'}`} onClick={() => { setRole('customer'); setError(null); setSignupOtp(''); }} style={{ padding: '12px', borderRadius: '12px' }}>Customer</button>
+          <button type="button" className={`btn btn-block ${role === 'electrician' ? '' : 'btn-outline'}`} onClick={() => { setRole('electrician'); setError(null); setSignupOtp(''); }} style={{ padding: '12px', borderRadius: '12px' }}>Electrician</button>
         </div>
         )}
 
@@ -725,7 +726,7 @@ function Login({ onLoginSuccess, showToast }) {
             </div>
           )}
 
-          <button type="submit" className="btn btn-block anime-form-item" disabled={loading} style={{ marginTop: '10px' }}>
+          <button type="submit" className="btn btn-block anime-form-item" disabled={loading} style={{ marginTop: '14px', padding: '14px', fontSize: '1.05rem', borderRadius: '14px' }}>
             {loading ? 'Processing...' : (isLogin ? 'Log In' : 'Send OTP')}
           </button>
             </React.Fragment>
@@ -1397,7 +1398,7 @@ Support: projects.nikunj.singh@gmail.com
   };
 
   return (
-    <div className="dashboard-grid" style={{ paddingBottom: '80px' }}>
+    <div className="dashboard-grid">
       <div>
         <div className="delivery-header">
           <div className="info">
@@ -1463,10 +1464,10 @@ Support: projects.nikunj.singh@gmail.com
       </div>
 
       {currentTab === 'active' ? (
-        <div className="card">
+        <div className="card" style={{ borderRadius: '24px', boxShadow: 'var(--shadow-lg)' }}>
           <div className="card-header" style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3 style={{ fontSize: '1.4rem', margin: 0 }}><i className="fas fa-hand-sparkles" style={{ marginRight: '8px', color: 'var(--warning)' }}></i> Hello, {user?.name?.split(' ')[0] || 'User'}</h3>
-            <span className="badge" style={{ background: 'var(--gold)', color: '#854d0e', padding: '6px 12px' }}>
+            <span className="badge" style={{ background: 'var(--gold)', color: '#fff', padding: '6px 12px', borderRadius: '20px' }}>
               <i className="fas fa-gem"></i> Premium
             </span>
           </div>
@@ -1614,7 +1615,7 @@ Support: projects.nikunj.singh@gmail.com
                   <h2 style={{ color: 'var(--success)', margin: '0 0 12px 0' }}>₹{bookingPrice}</h2>
                   {bookingPrice > 0 && (
                     <a href={`upi://pay?pa=9211293576@ptaxis&pn=WATTZEN&am=${Number(bookingPrice).toFixed(2)}&cu=INR`} className="btn btn-block" style={{ background: '#bcd81d', color: '#111', display: 'block', textDecoration: 'none', marginBottom: '12px' }}>
-                      <i className="fas fa-qrcode"></i> Pay via UPI App
+                      <i className="fas fa-qrcode" style={{ marginRight: '8px' }}></i> Pay via UPI App
                     </a>
                   )}
                 </div>
@@ -1640,7 +1641,7 @@ Support: projects.nikunj.singh@gmail.com
                           <i className="fas fa-star" style={{ color: 'var(--gold)' }}></i> {e.averageRating ? Number(e.averageRating).toFixed(1) : 'New'} ({e.totalReviews || 0} jobs)
                         </div>
                       </div>
-                      <a href={`tel:${e.phone}`} className="btn btn-outline" style={{ padding: '8px 16px', fontSize: '0.85rem', borderRadius: '20px' }}><i className="fas fa-phone"></i> Call</a>
+                      <a href={`tel:${e.phone}`} className="btn btn-outline" style={{ padding: '8px 16px', fontSize: '0.85rem', borderRadius: '20px', borderColor: 'var(--primary)', color: 'var(--primary)' }}><i className="fas fa-phone"></i> Call</a>
                     </div>
                 ))}
               </div>
@@ -1684,7 +1685,7 @@ Support: projects.nikunj.singh@gmail.com
                 <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', flexWrap: 'wrap' }}>
                   {[0, 50, 100, 200].map(amt => (
                     <button key={amt} className={`btn ${tipAmount === amt ? '' : 'btn-outline'}`} 
-                      style={{ padding: '6px 16px', borderRadius: '20px', borderColor: tipAmount === amt ? 'transparent' : 'var(--primary)', color: tipAmount === amt ? 'white' : 'var(--primary)', opacity: (user?.walletBalance || 0) < amt ? 0.5 : 1 }} 
+                      style={{ padding: '8px 20px', borderRadius: '24px', borderColor: tipAmount === amt ? 'transparent' : 'var(--primary)', color: tipAmount === amt ? 'white' : 'var(--primary)', opacity: (user?.walletBalance || 0) < amt ? 0.5 : 1, fontWeight: 'bold' }} 
                       onClick={() => setTipAmount(amt)}
                       disabled={(user?.walletBalance || 0) < amt}>
                       {amt === 0 ? 'No Tip' : `₹${amt}`}
@@ -1752,7 +1753,7 @@ Support: projects.nikunj.singh@gmail.com
           )}
         </div>
       ) : (
-        <div className="card" style={{ animation: 'fadeInUp 0.4s forwards' }}>
+        <div className="card" style={{ animation: 'fadeInUp 0.4s forwards', borderRadius: '24px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
             <h3 style={{ margin: 0 }}><i className="fas fa-history" style={{ color: 'var(--primary)' }}></i> Your Job History</h3>
             <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '4px' }}>
@@ -2361,9 +2362,9 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
   };
 
   return (
-    <div className="dashboard-grid" style={{ paddingBottom: '80px' }}>
+    <div className="dashboard-grid">
       <div>
-        <div className="card">
+        <div className="card" style={{ borderRadius: '24px', boxShadow: 'var(--shadow-lg)' }}>
           <div className="card-header" style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
               <h3 style={{ fontSize: '1.4rem', margin: 0 }}><i className="fas fa-toolbox" style={{ color: 'var(--primary)' }}></i> Welcome back, {user?.name?.split(' ')[0] || 'User'}</h3>
@@ -2406,13 +2407,13 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
           )}
 
             <div className="inline-stats" style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', marginTop: '16px' }}>
-              <div style={{ flex: '1 1 calc(50% - 8px)', minWidth: '120px', padding: '16px', background: 'var(--secondary)', borderRadius: '16px' }}>
+              <div style={{ flex: '1 1 calc(50% - 8px)', minWidth: '120px', padding: '20px', background: 'var(--secondary)', borderRadius: '20px', border: '1px solid var(--border-light)' }}>
               <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600, textTransform: 'uppercase' }}>WALLET BALANCE</span>
-              <h2 style={{ color: 'var(--success)', fontSize: '2.2rem', margin: '4px 0 0 0' }}>₹{walletBal.toFixed(0)}</h2>
+              <h2 style={{ color: 'var(--success)', fontSize: '2.5rem', margin: '4px 0 0 0' }}>₹{walletBal.toFixed(0)}</h2>
             </div>
-              <div style={{ flex: '1 1 calc(50% - 8px)', minWidth: '120px', padding: '16px', background: 'var(--secondary)', borderRadius: '16px' }}>
+              <div style={{ flex: '1 1 calc(50% - 8px)', minWidth: '120px', padding: '20px', background: 'var(--secondary)', borderRadius: '20px', border: '1px solid var(--border-light)' }}>
               <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600, textTransform: 'uppercase' }}>JOBS COMPLETED</span>
-              <h2 style={{ color: 'var(--text-main)', fontSize: '2.2rem', margin: '4px 0 0 0' }}>{jobsCompleted}</h2>
+              <h2 style={{ color: 'var(--text-main)', fontSize: '2.5rem', margin: '4px 0 0 0' }}>{jobsCompleted}</h2>
             </div>
           </div>
         </div>
@@ -3838,7 +3839,7 @@ function AppContent() {
 
   if (isInitializing) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', width: '100vw' }}>
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100dvh', width: '100vw' }}>
         <i className="fas fa-spinner fa-spin fa-3x" style={{ color: 'var(--primary)' }}></i>
       </div>
     );
@@ -3911,6 +3912,20 @@ export default function App() {
           --success: #bcd81d !important;
           --gold: #7f7f27 !important;
         }
+        /* Mobile Viewport & Window Size Optimizations */
+        html, body {
+          max-width: 100vw;
+          overflow-x: hidden;
+        }
+        .app-container {
+          min-height: 100vh;
+          min-height: 100dvh;
+          display: flex;
+          flex-direction: column;
+        }
+        input, select, textarea { font-size: 16px !important; } /* Prevents iOS auto-zoom */
+        .mobile-bottom-nav { padding-bottom: calc(env(safe-area-inset-bottom) + 8px) !important; }
+        .dashboard-grid { padding-bottom: calc(90px + env(safe-area-inset-bottom)) !important; }
       `}</style>
       <BrowserRouter>
         <AppContent />
