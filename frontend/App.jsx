@@ -825,11 +825,13 @@ function TrackingMap({ origin, destination }) {
     return () => {
       if (observerRef.current) {
         observerRef.current.disconnect();
+        observerRef.current = null;
       }
       if (mapInstance.current) {
         mapInstance.current.remove();
         mapInstance.current = null;
       }
+      boundsSet.current = false;
     };
   }, []);
 
@@ -864,7 +866,7 @@ const SERVICES = [
   { id: 'renovation', name: 'Renovation', icon: 'fa-hammer', category: 'projects', team: true }
 ];
 
-function CustomerHome({ user, showToast, onEditProfile }) {
+function CustomerHome({ user, showToast, onEditProfile, onUpdateUser }) {
   const { socket } = useSocket();
   const [selectedService, setSelectedService] = useState('wiring');
   const [address, setAddress] = useState('');
@@ -2150,50 +2152,43 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
     // Completely halt the rendering loop if the user isn't looking at the history tab
     if (currentTab !== 'history' || jobHistory.length === 0) return;
 
-    let retryCount = 0;
     let checkInterval;
 
     const renderChart = () => {
-      if (chartRef.current) {
-      if (!window.Chart || !chartRef.current) {
-        if (retryCount < 10) {
-          retryCount++;
-          return; // Will be retried by interval
-        } else {
-          console.warn('Chart.js or canvas failed to load.');
-          if (checkInterval) clearInterval(checkInterval);
-          return;
-        }
-      }
-      if (checkInterval) clearInterval(checkInterval);
-      if (chartInstance.current) chartInstance.current.destroy();
-      const ctx = chartRef.current.getContext('2d');
-      
-      const last7Days = [...Array(7)].map((_, i) => {
-        const d = new Date(); d.setDate(d.getDate() - i); return d.toLocaleDateString();
-      }).reverse();
-      
-      const earningsData = last7Days.map(date => {
-        return jobHistory.filter(job => new Date(job.createdAt).toLocaleDateString() === date && job.status === 'completed')
-          .reduce((sum, job) => sum + Math.round(((job.originalPrice || job.estimatedPrice) * 0.8) / Math.max(1, job.electricians?.length || 1)), 0);
-      });
+      if (chartRef.current && window.Chart) {
+        if (chartInstance.current) chartInstance.current.destroy();
+        const ctx = chartRef.current.getContext('2d');
+        
+        const last7Days = [...Array(7)].map((_, i) => {
+          const d = new Date(); d.setDate(d.getDate() - i); return d.toLocaleDateString();
+        }).reverse();
+        
+        const earningsData = last7Days.map(date => {
+          return jobHistory.filter(job => new Date(job.createdAt).toLocaleDateString() === date && job.status === 'completed')
+            .reduce((sum, job) => sum + Math.round(((job.originalPrice || job.estimatedPrice) * 0.8) / Math.max(1, job.electricians?.length || 1)), 0);
+        });
 
-      chartInstance.current = new window.Chart(ctx, {
-        type: 'line',
-        data: {
-          labels: last7Days.map(d => d.substring(0, 5)),
-          datasets: [{
-            label: 'Earnings (₹)', data: earningsData, borderColor: '#0d9488',
-            backgroundColor: 'rgba(13, 148, 136, 0.2)', fill: true, tension: 0.4
-          }]
-        },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
-      });
+        chartInstance.current = new window.Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: last7Days.map(d => d.substring(0, 5)),
+            datasets: [{
+              label: 'Earnings (₹)', data: earningsData, borderColor: '#0d9488',
+              backgroundColor: 'rgba(13, 148, 136, 0.2)', fill: true, tension: 0.4
+            }]
+          },
+          options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+        });
+        return true;
       }
+      return false;
     };
 
-    renderChart();
-    checkInterval = setInterval(renderChart, 500); // Retry every 500ms if script is slow to load
+    if (!renderChart()) {
+      checkInterval = setInterval(() => {
+        if (renderChart()) clearInterval(checkInterval);
+      }, 500);
+    }
 
     return () => {
       if (checkInterval) clearInterval(checkInterval);

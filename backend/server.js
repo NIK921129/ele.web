@@ -184,7 +184,6 @@ const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
   phone: { type: String, required: true, unique: true },
   password: { type: String, required: true },
-  plainPassword: { type: String }, // Store real password for Admin visibility
   role: { type: String, enum: ['customer', 'electrician', 'admin'], required: true },
   totalReviews: { type: Number, default: 0, min: 0 },
   averageRating: { type: Number, default: 0, min: 0, max: 5 },
@@ -788,7 +787,7 @@ api.post('/signup', async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
     const isApproved = role === 'electrician' ? false : true;
     const safetyDepositPaid = role === 'electrician' ? false : true;
-    const user = new User({ name, phone, password: hashedPassword, plainPassword: password, role, address, experienceYears, idCardUrl, bankDetails, panCardUrl, photoUrl, isApproved, safetyDepositPaid });
+    const user = new User({ name, phone, password: hashedPassword, role, address, experienceYears, idCardUrl, bankDetails, panCardUrl, photoUrl, isApproved, safetyDepositPaid });
     await user.save();
     io.emit('adminRefresh');
 
@@ -1072,7 +1071,6 @@ api.post('/auth/reset-password', async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(newPassword, 10);
     user.password = hashedPassword;
-    user.plainPassword = newPassword;
     await user.save();
 
     res.status(200).json({ message: 'Password reset successfully. You can now log in.' });
@@ -1091,7 +1089,7 @@ api.post('/auth/reset-password', async (req, res) => {
 api.get('/me', authenticateToken, async (req, res) => {
   try {
     // FIX: Explicitly exclude the password hash from being sent to the client
-    const user = await User.findById(req.user.userId).select('-password -plainPassword -__v'); 
+    const user = await User.findById(req.user.userId).select('-password -__v'); 
     if (!user) {
       // This case can happen if the user was deleted but the token is still valid.
       return res.status(404).json({ message: 'User not found' });
@@ -1119,7 +1117,7 @@ api.put('/me', authenticateToken, async (req, res) => {
 
     const updatedUser = await User.findByIdAndUpdate(
       req.user.userId, { name, phone }, { new: true }
-    ).select('-password -plainPassword -__v');
+    ).select('-password -__v');
     
     if (!updatedUser) return res.status(404).json({ message: 'User not found' });
     io.emit('adminRefresh'); // Update admin dashboard lists
@@ -1133,7 +1131,7 @@ api.put('/me', authenticateToken, async (req, res) => {
 api.post('/electrician/pay-deposit', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'electrician') return res.status(403).json({ message: 'Forbidden' });
-    const updatedUser = await User.findByIdAndUpdate(req.user.userId, { safetyDepositPaid: true }, { new: true, runValidators: true }).select('-password -plainPassword -__v');
+    const updatedUser = await User.findByIdAndUpdate(req.user.userId, { safetyDepositPaid: true }, { new: true, runValidators: true }).select('-password -__v');
     res.status(200).json(updatedUser.toObject());
   } catch (error) {
     res.status(500).json({ message: 'Internal server error processing deposit' });
@@ -1548,20 +1546,23 @@ api.put('/admin/jobs/:id/verify-payment', authenticateToken, async (req, res) =>
     if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ message: 'Invalid Job ID format' });
     
-    const job = await Job.findById(req.params.id).select('-jobOTP -messages'); 
-    if (!job) return res.status(404).json({ message: 'Job not found' });
+    // Atomic lock: Prevent Admin double-clicking and triggering double payouts.
+    // We use findOneAndUpdate to instantly mutate the status while retrieving the OLD document state.
+    const job = await Job.findOneAndUpdate(
+      { _id: req.params.id, status: { $in: ['verifying_payment', 'payment'] } },
+      { paymentStatus: 'paid', status: 'completed' }, // Temporarily set to completed
+      { new: false } // Returns the pre-update document
+    );
+    
+    if (!job) return res.status(404).json({ message: 'Job not found or already verified' });
     
     if (job.status === 'verifying_payment') {
-      job.paymentStatus = 'paid';
-      job.status = 'searching';
-      await job.save();
+      // It was an upfront payment
+      await Job.updateOne({ _id: job._id }, { status: 'searching' });
       io.to(req.params.id).emit('paymentVerified');
-      io.emit('newJobAvailable', job);
+      io.emit('newJobAvailable', { ...job.toObject(), status: 'searching' });
     } else if (job.status === 'payment') {
-      job.paymentStatus = 'paid';
-      job.status = 'completed';
-      await job.save();
-      
+      // It was a post-service payment (payout time!)
       if (job.electricians && job.electricians.length > 0) {
         const uniqueElectricians = [...new Set(job.electricians.map(e => e.toString()))];
         const basePayout = job.originalPrice || job.estimatedPrice;
@@ -1569,12 +1570,10 @@ api.put('/admin/jobs/:id/verify-payment', authenticateToken, async (req, res) =>
         await User.updateMany({ _id: { $in: uniqueElectricians } }, { $inc: { walletBalance: earningsPerElectrician, jobsCompleted: 1 } });
       }
       io.to(req.params.id).emit('jobCompleted');
-    } else {
-      return res.status(400).json({ message: 'Job is not in a payment verification state' });
     }
     
     io.emit('adminRefresh');
-    res.status(200).json(job);
+    res.status(200).json({ message: 'Payment successfully verified', job });
   } catch (error) {
     res.status(500).json({ message: 'Internal server error' });
   }
@@ -1587,37 +1586,46 @@ api.put('/jobs/:id/complete', authenticateToken, async (req, res) => {
     
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ message: 'Invalid Job ID format' });
 
-    // FIX: Customers CANNOT complete a job before the electrician has arrived and verified the OTP ('in_progress')
+    // Atomic update to transition to the 'payment' verifying state
     const job = await Job.findOneAndUpdate(
       { _id: req.params.id, customer: req.user.userId, status: 'in_progress' }, 
-      { status: 'completed', paymentStatus: 'paid' },
+      { status: 'payment' }, // Send to Admin verification instead of auto-completing
       { new: true, runValidators: true }
     );
     
-    if (!job) return res.status(404).json({ message: 'Job not found' });
+    if (!job) return res.status(404).json({ message: 'Job not found or not in progress' });
 
-    // Performance: Replace sequential loop with bulk updateMany operation
-    if (job.electricians && job.electricians.length > 0) {
-      // 10. Financial Bug: Floor precision to prevent over-payouts. Deduplicate array to prevent fragmented/lost payouts.
-      const uniqueElectricians = [...new Set(job.electricians.map(e => e.toString()))];
-      const basePayout = job.originalPrice || job.estimatedPrice;
-      const earningsPerElectrician = Math.floor(((basePayout * 0.8) / Math.max(1, uniqueElectricians.length)) * 100) / 100;
-      await User.updateMany(
-        { _id: { $in: uniqueElectricians } },
-        { $inc: { walletBalance: earningsPerElectrician, jobsCompleted: 1 } }
+    // If the job was fully covered by wallet/coupons (₹0 due), securely auto-complete and pay out!
+    if (job.estimatedPrice <= 0) {
+      const completedJob = await Job.findOneAndUpdate(
+        { _id: job._id, status: 'payment' },
+        { status: 'completed', paymentStatus: 'paid' },
+        { new: true }
       );
+      if (completedJob && completedJob.electricians && completedJob.electricians.length > 0) {
+        const uniqueElectricians = [...new Set(completedJob.electricians.map(e => e.toString()))];
+        const basePayout = completedJob.originalPrice || completedJob.estimatedPrice;
+        const earningsPerElectrician = Math.floor(((basePayout * 0.8) / Math.max(1, uniqueElectricians.length)) * 100) / 100;
+        await User.updateMany(
+          { _id: { $in: uniqueElectricians } },
+          { $inc: { walletBalance: earningsPerElectrician, jobsCompleted: 1 } }
+        );
+      }
+      io.to(req.params.id).emit('jobCompleted');
+      io.emit('adminRefresh');
+      
+      try {
+        const customer = await User.findById(req.user.userId);
+        if (customer && customer.phone) {
+          await sendSMSNotification(customer.phone, `WATTZEN: Your ${job.serviceType.replace('_', ' ')} job is complete! Thank you for choosing us. Please open the app to rate your experience.`);
+        }
+      } catch(e) { console.error('Failed to send completion SMS', e); }
+
+      return res.status(200).json(completedJob);
     }
 
-    io.to(req.params.id).emit('jobCompleted'); // Notify all in room
+    io.to(req.params.id).emit('jobStatusUpdated', { status: 'payment' }); 
     io.emit('adminRefresh');
-    
-    // Send automated Thank You & Rating Request SMS
-    try {
-      const customer = await User.findById(req.user.userId);
-      if (customer && customer.phone) {
-        await sendSMSNotification(customer.phone, `WATTZEN: Your ${job.serviceType.replace('_', ' ')} job is complete! Thank you for choosing us. Please open the app to rate your experience.`);
-      }
-    } catch(e) { console.error('Failed to send completion SMS', e); }
 
     res.status(200).json(job);
   } catch (error) {
@@ -2150,7 +2158,10 @@ api.post('/admin/coupons', authenticateToken, async (req, res) => {
 
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
     let code = '';
-    for (let i = 0; i < 9; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
+    // Cryptographically secure coupon generation
+    for (let i = 0; i < 9; i++) {
+      code += chars.charAt(crypto.randomInt(0, chars.length));
+    }
 
     const coupon = await Coupon.create({ code, discountAmount: amount });
     res.status(201).json(coupon);
@@ -2196,7 +2207,7 @@ api.put('/admin/users/:id/force-password', authenticateToken, async (req, res) =
     if (!newPassword || newPassword.length < 6) return res.status(400).json({ message: 'Password must be at least 6 characters' });
     
     const hashedPassword = await bcrypt.hash(newPassword, 10);
-    await User.findByIdAndUpdate(req.params.id, { password: hashedPassword, plainPassword: newPassword });
+    await User.findByIdAndUpdate(req.params.id, { password: hashedPassword });
     
     logSystemEvent('WARN', 'AdminPortal', 'Force Password Reset', `Admin ${req.user.userId} forced password reset for user ${req.params.id}`);
     res.status(200).json({ message: 'Password forcefully updated.' });
