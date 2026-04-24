@@ -714,7 +714,7 @@ function Login({ onLoginSuccess, showToast }) {
           <div className="form-group anime-form-item">
             <label htmlFor="loginPassword">Password</label>
             <div className="input-icon-wrapper">
-              <input type={showPassword ? "text" : "password"} id="loginPassword" name="password" className="form-control" value={password} onChange={e => setPassword(e.target.value)} required placeholder="••••••••" />
+              <input type={showPassword ? "text" : "password"} id="loginPassword" name="password" className="form-control" value={password} onChange={e => setPassword(e.target.value)} required placeholder="••••••••" maxLength="100" />
             <i className={`fas ${showPassword ? 'fa-eye-slash' : 'fa-eye'} action-icon`} role="button" tabIndex="0" aria-label="Toggle password visibility" onClick={() => setShowPassword(!showPassword)} onKeyDown={(e) => { if(e.key === 'Enter' || e.key === ' ') setShowPassword(!showPassword); }}></i>
             </div>
           </div>
@@ -767,6 +767,8 @@ function TrackingMap({ origin, destination }) {
     const initMap = () => {
       if (!window.L) return false;
       if (!mapRef.current) return true; // Stop trying to initialize if component unmounted
+      // Strict Mode Double-Mount Protection
+      if (mapRef.current._leaflet_id) return true;
 
       if (!mapInstance.current) {
             const startLat = origin && origin.length === 2 ? origin[1] : 0;
@@ -990,10 +992,16 @@ function CustomerHome({ user, showToast, onEditProfile, onUpdateUser }) {
   }, [address, showSuggestions]);
 
   const handleSelectSuggestion = (place) => {
-    setAddress(place.display_name);
-    setCoordinates([parseFloat(place.lon), parseFloat(place.lat)]);
-    setSuggestions([]);
-    setShowSuggestions(false);
+    const lat = parseFloat(place.lat);
+    const lon = parseFloat(place.lon);
+    if (!isNaN(lat) && !isNaN(lon)) {
+      setAddress(place.display_name);
+      setCoordinates([lon, lat]);
+      setSuggestions([]);
+      setShowSuggestions(false);
+    } else {
+      showToast('Invalid coordinates received from map provider.', 'error');
+    }
   };
 
   const currentServices = SERVICES.filter(s => s.category === activeCategory);
@@ -1384,7 +1392,7 @@ Support: projects.nikunj.singh@gmail.com
     if (!address || !coordinates) return showToast('Please select a valid location first.', 'warning');
     const updated = { ...savedAddresses, [type]: { address, coordinates } };
     setSavedAddresses(updated);
-    localStorage.setItem('wattzen_saved_addresses', JSON.stringify(updated));
+    try { localStorage.setItem('wattzen_saved_addresses', JSON.stringify(updated)); } catch(e) { console.warn('Storage full'); }
     showToast(`Address saved as ${type}!`, 'success');
   };
 
@@ -2879,6 +2887,7 @@ function AdminPanel({ user, onLogout, showToast }) {
     if (!window.confirm('Ghost Login: You will be logged into this user account immediately. Continue?')) return;
     try {
       const res = await fetchJson(`/admin/users/${id}/impersonate`, { method: 'POST' });
+      if (res.user.role === 'admin') throw new Error('Cannot impersonate another master admin account.');
       localStorage.setItem('token', res.token);
       localStorage.setItem('user', JSON.stringify(res.user));
       window.location.href = `/${res.user.role}`; // Hard reload to switch session context
@@ -3145,7 +3154,7 @@ function AdminPanel({ user, onLogout, showToast }) {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '12px', marginBottom: '24px' }}>
         <MetricCard icon="fa-users" title="Total Users" value={currentData.length.toLocaleString()} trend={`${totalCustomers} Customers, ${totalElectricians} Electricians`} color="var(--primary)" />
-        <MetricCard icon="fa-plug" title="Live Connections" value={systemMetrics.clientsCount.toLocaleString()} trend="Active socket users right now" color="var(--warning)" />
+        <MetricCard icon="fa-plug" title="Live Connections" value={(systemMetrics?.clientsCount || 0).toLocaleString()} trend="Active socket users right now" color="var(--warning)" />
         <MetricCard icon="fa-sack-dollar" title="Gross Revenue" value={`₹${(financeData.stats?.totalRevenue || 0).toLocaleString()}`} trend="From all completed jobs" color="var(--success)" />
         <MetricCard icon="fa-server" title="Server Uptime" value={formatUptime(systemStatus.uptime)} trend={systemStatus.dbConnected ? "Database Connected" : "Database Offline"} color={systemStatus.dbConnected ? "var(--success)" : "var(--danger)"} />
       </div>
@@ -3209,6 +3218,7 @@ function AdminPanel({ user, onLogout, showToast }) {
                     </tr>
                   ) : filteredDB.map((row, idx) => {
                     const calcStatus = (r) => r.walletBalance > 0 || r.jobsCompleted > 0 ? 'Active' : 'New';
+                  const displayStatus = row.status || calcStatus(row);
                     return (
                       <tr key={row._id} style={{ borderBottom: '1px solid var(--border-light)', background: idx % 2 === 0 ? 'transparent' : 'var(--secondary)' }}>
                       <td style={{ padding: '14px 16px', fontFamily: 'monospace', fontWeight: 'bold' }}>{row._id}</td>
@@ -3221,8 +3231,8 @@ function AdminPanel({ user, onLogout, showToast }) {
                         </div>
                       </td>
                       <td style={{ padding: '14px 16px' }}>
-                        <span style={{ color: calcStatus(row) === 'New' ? 'var(--warning)' : 'var(--success)', fontWeight: 600 }}>
-                          • {row.status || calcStatus(row)}
+                      <span style={{ color: displayStatus === 'New' || displayStatus === 'Offline' ? 'var(--warning)' : 'var(--success)', fontWeight: 600 }}>
+                        • {displayStatus}
                         </span>
                         <div style={{ marginTop: '8px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                           <button className="btn btn-outline" style={{ padding: '6px 12px', fontSize: '0.8rem', color: 'var(--text-main)', borderColor: 'var(--border-light)' }} onClick={() => handleImpersonate(row._id)} title="Login as User">
@@ -3627,7 +3637,8 @@ function AppContent() {
 
   // CONSOLIDATED HANDLERS: These must only be declared once and BEFORE useEffects that depend on them.
   const showToast = React.useCallback((message, type = 'success') => {
-    const id = Date.now();
+    // Cryptographic randomness to prevent React key collision if multiple toasts fire concurrently
+    const id = Date.now() + Math.random().toString(36).substring(2, 9);
     setToasts((prev) => [...prev, { id, message, type }]);
     setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4000);
   }, []);
