@@ -288,7 +288,7 @@ function Navbar({ user, onLogout, toggleTheme, isDarkMode, onEditProfile }) {
         <div className="logo-text">WATT<span>ZEN</span></div>
       </div>
       <div className="profile-badge">
-        <button onClick={toggleTheme} title="Toggle Theme" style={{ border: 'none', background: 'var(--secondary)', width: '42px', height: '42px', borderRadius: '50%', cursor: 'pointer', color: 'var(--text-main)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border-light)' }}>
+        <button onClick={toggleTheme} title="Toggle Theme" style={{ background: 'var(--secondary)', width: '42px', height: '42px', borderRadius: '50%', cursor: 'pointer', color: 'var(--text-main)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border-light)' }}>
           <i className={`fas ${isDarkMode ? 'fa-sun' : 'fa-moon'}`} style={{ fontSize: '1.2rem' }}></i>
         </button>
         <div className="notification-icon" style={{ position: 'relative', cursor: 'pointer' }} onClick={() => setShowDropdown(!showDropdown)}>
@@ -880,6 +880,7 @@ function CustomerHome({ user, showToast, onEditProfile, onUpdateUser }) {
   const [chatInput, setChatInput] = useState('');
   const [activeJobId, setActiveJobId] = useState(null);
   const [bookingPrice, setBookingPrice] = useState(null);
+  const [paymentType, setPaymentType] = useState('upfront');
   const [isBooking, setIsBooking] = useState(false);
   const [assignedElectricians, setAssignedElectricians] = useState([]);
   const [jobCompleted, setJobCompleted] = useState(false);
@@ -942,6 +943,7 @@ function CustomerHome({ user, showToast, onEditProfile, onUpdateUser }) {
           if (job.location && job.location.coordinates) {
             setCoordinates(job.location.coordinates);
           }
+          if (job.paymentType) setPaymentType(job.paymentType);
           if (job.jobOTP) setJobOTP(job.jobOTP);
           setBookingPrice(job.estimatedPrice);
           setTeamSize(job.teamSize || 1);
@@ -1186,14 +1188,15 @@ function CustomerHome({ user, showToast, onEditProfile, onUpdateUser }) {
     }
   };
 
-  const handleConfirmPayment = async () => {
+  const handleConfirmPayment = async (selectedPaymentType) => {
     setIsBooking(true);
     try {
       const job = await fetchJson('/jobs', {
         method: 'POST',
-        body: { serviceType: selectedService, address, coordinates, estimatedPrice: bookingPrice, teamSize, couponCode: appliedCoupon?.code }
+        body: { serviceType: selectedService, address, coordinates, estimatedPrice: bookingPrice, teamSize, couponCode: appliedCoupon?.code, paymentType: selectedPaymentType }
       });
       setActiveJobId(job._id);
+      setPaymentType(selectedPaymentType);
       setJobStatus(job.status);
       setJobOTP(job.jobOTP);
       setBookingPrice(job.estimatedPrice); // Keep the price stored for the post-payment screen
@@ -1568,9 +1571,14 @@ Support: projects.nikunj.singh@gmail.com
                   </div>
                 )}
               </div>
-              <button className="btn-outline btn btn-block" onClick={handleConfirmPayment} disabled={isBooking}>
-                {isBooking ? 'Processing...' : 'Confirm Booking'}
-              </button>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <button className="btn-outline btn btn-block" onClick={() => handleConfirmPayment('upfront')} disabled={isBooking}>
+                  {isBooking ? 'Processing...' : 'Pay Now via UPI (Advance)'}
+                </button>
+                <button className="btn btn-block" onClick={() => handleConfirmPayment('after_service')} disabled={isBooking} style={{ background: 'var(--text-main)', color: 'white' }}>
+                  {isBooking ? 'Processing...' : 'Pay After Service (Cash to Pro)'}
+                </button>
+              </div>
           <button className="btn" style={{ background: 'transparent', color: 'var(--danger)', marginTop: '12px', boxShadow: 'none', border: '1px solid var(--danger)', padding: '10px' }} onClick={() => { setBookingPrice(null); setAppliedCoupon(null); setCouponInput(''); }}>Cancel Booking</button>
             </div>
           ) : !isTeamFull ? (
@@ -1611,12 +1619,20 @@ Support: projects.nikunj.singh@gmail.com
               {jobStatus === 'in_progress' && (
                 <div style={{ margin: '16px 0', padding: '16px', background: 'var(--surface)', border: '2px solid var(--success)', borderRadius: '8px', textAlign: 'center' }}>
                   <h4 style={{ margin: '0 0 8px 0', color: 'var(--text-main)' }}>Service in Progress</h4>
-                  <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '12px' }}>Please pay the final amount to complete the job once the electrician is finished.</p>
-                  <h2 style={{ color: 'var(--success)', margin: '0 0 12px 0' }}>₹{bookingPrice}</h2>
-                  {bookingPrice > 0 && (
-                    <a href={`upi://pay?pa=9211293576@ptaxis&pn=WATTZEN&am=${Number(bookingPrice).toFixed(2)}&cu=INR`} className="btn btn-block" style={{ background: '#bcd81d', color: '#111', display: 'block', textDecoration: 'none', marginBottom: '12px' }}>
-                      <i className="fas fa-qrcode" style={{ marginRight: '8px' }}></i> Pay via UPI App
-                    </a>
+                  {paymentType === 'after_service' ? (
+                    <React.Fragment>
+                      <p style={{ color: 'var(--danger)', fontSize: '0.95rem', marginBottom: '12px', fontWeight: 'bold' }}>Please pay ₹{bookingPrice} directly to the electrician in Cash or UPI once the job is finished.</p>
+                    </React.Fragment>
+                  ) : (
+                    <React.Fragment>
+                      <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '12px' }}>Please pay the final amount to complete the job once the electrician is finished.</p>
+                      <h2 style={{ color: 'var(--success)', margin: '0 0 12px 0' }}>₹{bookingPrice}</h2>
+                      {bookingPrice > 0 && (
+                        <a href={`upi://pay?pa=9211293576@ptaxis&pn=WATTZEN&am=${Number(bookingPrice).toFixed(2)}&cu=INR`} className="btn btn-block" style={{ background: '#bcd81d', color: '#111', display: 'block', textDecoration: 'none', marginBottom: '12px' }}>
+                          <i className="fas fa-qrcode" style={{ marginRight: '8px' }}></i> Pay via UPI App
+                        </a>
+                      )}
+                    </React.Fragment>
                   )}
                 </div>
               )}
@@ -1873,6 +1889,10 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
   const [enteredOtp, setEnteredOtp] = useState('');
   const realCoordsRef = useRef([77.5946, 12.9716]); // Fallback to Bangalore, dynamically updated
   
+  const [rechargeAmount, setRechargeAmount] = useState('');
+  const [rechargeScreenshot, setRechargeScreenshot] = useState('');
+  const [isRecharging, setIsRecharging] = useState(false);
+  
   const mounted = useRef(true);
   useEffect(() => { return () => { mounted.current = false; }; }, []);
   const activeJobIdRef = useRef(activeJobId);
@@ -1890,6 +1910,21 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
   const isTeamWaiting = isTeamJob && jobStatus === 'searching' && currentTeamSize < teamSize;
   const isJobActive = jobStatus === 'assigned' || jobStatus === 'in_progress';
   const hasArrived = isJobActive && !isTracking; // Simplified logic for arrival
+
+  const handleRechargeDocUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas'); const MAX_DIMENSION = 800; let { width, height } = img;
+        if (width > height && width > MAX_DIMENSION) { height *= MAX_DIMENSION / width; width = MAX_DIMENSION; } else if (height > MAX_DIMENSION) { width *= MAX_DIMENSION / height; height = MAX_DIMENSION; }
+        canvas.width = width; canvas.height = height; canvas.getContext('2d').drawImage(img, 0, 0, width, height); setRechargeScreenshot(canvas.toDataURL('image/jpeg', 0.6));
+      };
+      img.src = ev.target.result;
+    }; reader.readAsDataURL(file);
+  };
 
   const handlePayDeposit = async () => {
     try {
@@ -2092,7 +2127,8 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
   useEffect(() => {
     let pollInterval;
     let isMounted = true;
-    if (isOnline && !currentJob && isApproved && safetyDepositPaid) {
+    // Stop polling for jobs entirely if balance drops below ₹500
+    if (isOnline && !currentJob && isApproved && safetyDepositPaid && walletBal >= 500) {
       const checkJobs = async () => {
         try {
           const coords = realCoordsRef.current;
@@ -2127,7 +2163,7 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
         socket.off('newJobAvailable', handleNewJob);
       };
     } 
-  }, [isOnline, currentJob, isApproved, safetyDepositPaid, socket]);
+  }, [isOnline, currentJob, isApproved, safetyDepositPaid, walletBal, socket]);
 
   useEffect(() => {
     if (chatContainerRef.current) {
@@ -2361,6 +2397,19 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
     }
   };
 
+  const handleRechargeSubmit = async () => {
+    if (!rechargeAmount || !rechargeScreenshot) return;
+    setIsRecharging(true);
+    try {
+      await fetchJson('/electrician/recharge', { method: 'POST', body: { amount: rechargeAmount, screenshotBase64: rechargeScreenshot } });
+      showToast('Recharge request submitted. Awaiting admin approval.', 'success');
+      setRechargeAmount('');
+      setRechargeScreenshot('');
+    } catch(err) {
+      showToast(err.message, 'error');
+    } finally { setIsRecharging(false); }
+  };
+
   return (
     <div className="dashboard-grid">
       <div>
@@ -2375,6 +2424,7 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
               onClick={() => { 
                 if (!user?.safetyDepositPaid) return showToast('Please pay the safety deposit first.', 'warning');
                 if (!user?.isApproved) return showToast('Admin verification pending. You cannot go online yet.', 'warning');
+                if (walletBal < 500) return showToast('Low Wallet Balance. Please recharge at least ₹500 to go online.', 'warning');
                 if (isOnline && activeJobId) return showToast('Cannot go offline while on an active job.', 'warning'); 
                 setIsOnline(!isOnline); 
                 // Request Push Notification access on user interaction to prevent browser blocking
@@ -2499,7 +2549,11 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
               {currentJob?.status === 'in_progress' && (
                 <div style={{ marginTop: '16px', background: 'var(--surface)', padding: '16px', borderRadius: '12px', border: '2px solid var(--success)' }}>
                   <h4 style={{ color: 'var(--success)', margin: '0 0 8px 0' }}>Service in Progress</h4>
-                  <p style={{ margin: '0', fontSize: '0.9rem', fontWeight: 'bold', color: 'var(--text-main)' }}>Once you finish the work, please ask the customer to pay ₹{currentJob.estimatedPrice} via their app and mark the job as Done.</p>
+                  {currentJob?.paymentType === 'after_service' ? (
+                    <p style={{ margin: '0', fontSize: '0.95rem', fontWeight: 'bold', color: 'var(--danger)' }}>Collect ₹{currentJob.estimatedPrice} from the customer in Cash or UPI. Ask them to mark the job as Done.</p>
+                  ) : (
+                    <p style={{ margin: '0', fontSize: '0.9rem', fontWeight: 'bold', color: 'var(--text-main)' }}>Once you finish the work, please ask the customer to pay ₹{currentJob.estimatedPrice} via their app and mark the job as Done.</p>
+                  )}
                 </div>
               )}
 
@@ -2639,6 +2693,25 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
             {walletBal >= 500 ? 'Request Bank Withdrawal' : 'Balance too low'}
           </button>
         </div>
+        
+        <div className="earnings-card" style={{ animationDelay: '0.15s', marginTop: '16px', background: 'linear-gradient(145deg, #1e293b 0%, #020617 100%)' }}>
+          <i className="fas fa-bolt" style={{ color: 'var(--warning)' }}></i> <strong>Recharge Wallet</strong>
+          <p style={{ fontSize: '0.8rem', opacity: 0.8, marginTop: '4px', marginBottom: '12px' }}>Maintain a minimum ₹500 balance to accept jobs. We deduct 20% commission on cash jobs.</p>
+          <input type="number" placeholder="Enter Amount (₹)" className="form-control" style={{ marginBottom: '8px', background: 'rgba(255,255,255,0.1)', color: 'white', border: '1px solid rgba(255,255,255,0.2)' }} value={rechargeAmount} onChange={e=>setRechargeAmount(e.target.value)} min="1" />
+          {rechargeAmount >= 100 && (
+            <a href={`upi://pay?pa=9211293576@ptaxis&pn=WATTZEN&am=${rechargeAmount}&cu=INR`} target="_blank" rel="noreferrer" className="btn btn-block" style={{ background: '#bcd81d', color: '#111', marginBottom: '8px', textDecoration: 'none', display: 'block', textAlign: 'center' }}>
+              <i className="fas fa-qrcode"></i> Pay ₹{rechargeAmount} via UPI
+            </a>
+          )}
+          <div style={{ marginBottom: '12px' }}>
+            <label style={{ fontSize: '0.8rem', display: 'block', marginBottom: '4px' }}>Upload Payment Screenshot:</label>
+            <input type="file" accept="image/*" onChange={handleRechargeDocUpload} className="form-control" style={{ padding: '8px', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', color: 'white' }} />
+            {rechargeScreenshot && <div style={{ fontSize: '0.8rem', color: 'var(--success)', marginTop: '4px' }}><i className="fas fa-check-circle"></i> Screenshot attached</div>}
+          </div>
+          <button className="btn btn-block" onClick={handleRechargeSubmit} disabled={!rechargeAmount || !rechargeScreenshot || isRecharging} style={{ background: (rechargeAmount && rechargeScreenshot) ? 'var(--primary)' : 'rgba(255,255,255,0.2)' }}>
+            {isRecharging ? 'Submitting...' : 'I have paid, Submit Proof'}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -2731,6 +2804,8 @@ function AdminPanel({ user, onLogout, showToast }) {
   const [useMockData, setUseMockData] = useState(false);
   const [mockData, setMockData] = useState([]);
   const [systemStatus, setSystemStatus] = useState({ uptime: 0, dbConnected: false });
+  const [payoutPage, setPayoutPage] = useState(1);
+  const [payoutData, setPayoutData] = useState({ logs: [], totalPages: 1, page: 1 });
   
   const [liveActiveJobs, setLiveActiveJobs] = useState([]);
   const [systemMetrics, setSystemMetrics] = useState({ clientsCount: 0 });
@@ -2739,27 +2814,36 @@ function AdminPanel({ user, onLogout, showToast }) {
   const mounted = useRef(true);
   useEffect(() => { return () => { mounted.current = false; }; }, []);
 
+  const fetchPayoutLogs = React.useCallback(async (page = 1) => {
+    try {
+      const data = await fetchJson(`/admin/finance/payout-logs?page=${page}&limit=10`);
+      if (mounted.current) {
+        setPayoutData(data);
+        setPayoutPage(data.page || 1);
+      }
+    } catch (e) { showToast('Failed to load payout logs', 'error'); }
+  }, [showToast]);
+
   const fetchDashboardData = React.useCallback(async () => {
     try {
       setIsLoading(true);
-      const users = await fetchJson('/admin/users');
-      setLiveData(Array.isArray(users) ? users : []);
-      const fin = await fetchJson('/admin/finance');
-      setFinanceData(fin && Array.isArray(fin.pendingJobs) ? fin : { pendingJobs: [], pendingWithdrawals: [], stats: {}, recentCompletedJobs: [], withdrawalLogs: [] });
-      const banned = await fetchJson('/admin/security/banned-ips');
-      setBannedIps(Array.isArray(banned) ? banned : []);
-      const coups = await fetchJson('/admin/coupons');
-      setCouponsData(Array.isArray(coups) ? coups : []);
-      const logs = await fetchJson('/admin/logs');
-      setSystemLogs(Array.isArray(logs) ? logs : []);
-      const archives = await fetchJson('/admin/archives/users');
-      setArchivedUsers(Array.isArray(archives) ? archives : []);
-      const health = await fetchJson('/health');
-      setSystemStatus(health || { uptime: 0, dbConnected: false });
-      const activeJ = await fetchJson('/admin/live-jobs');
-      setLiveActiveJobs(Array.isArray(activeJ) ? activeJ : []);
-      const sys = await fetchJson('/admin/system-status');
-      setIsMaintenanceMode(sys.maintenanceMode);
+      // BUG FIX: Massively speed up the Admin dashboard by fetching all tabs in parallel instead of sequentially
+      const results = await Promise.allSettled([
+        fetchJson('/admin/users'), fetchJson('/admin/finance'), fetchJson('/admin/security/banned-ips'),
+        fetchJson('/admin/coupons'), fetchJson('/admin/logs'), fetchJson('/admin/archives/users'),
+        fetchJson('/health'), fetchJson('/admin/live-jobs'), fetchJson('/admin/system-status')
+      ]);
+      if (mounted.current) {
+        setLiveData(results[0].status === 'fulfilled' && Array.isArray(results[0].value) ? results[0].value : []);
+        setFinanceData(results[1].status === 'fulfilled' && results[1].value ? results[1].value : { pendingJobs: [], pendingWithdrawals: [], pendingRecharges: [], stats: {}, recentCompletedJobs: [], withdrawalLogs: [] });
+        setBannedIps(results[2].status === 'fulfilled' && Array.isArray(results[2].value) ? results[2].value : []);
+        setCouponsData(results[3].status === 'fulfilled' && Array.isArray(results[3].value) ? results[3].value : []);
+        setSystemLogs(results[4].status === 'fulfilled' && Array.isArray(results[4].value) ? results[4].value : []);
+        setArchivedUsers(results[5].status === 'fulfilled' && Array.isArray(results[5].value) ? results[5].value : []);
+        setSystemStatus(results[6].status === 'fulfilled' && results[6].value ? results[6].value : { uptime: 0, dbConnected: false });
+        setLiveActiveJobs(results[7].status === 'fulfilled' && Array.isArray(results[7].value) ? results[7].value : []);
+        setIsMaintenanceMode(results[8].status === 'fulfilled' && results[8].value ? results[8].value.maintenanceMode : false);
+      }
     } catch (error) {
       showToast(`Failed to fetch dashboard data: ${error.message}`, 'error');
       console.error('Dashboard error:', error);
@@ -2771,6 +2855,7 @@ function AdminPanel({ user, onLogout, showToast }) {
 
   useEffect(() => {
     fetchDashboardData();
+    fetchPayoutLogs(1);
     setMockData(generateMockUsers());
 
     const handleAdminRefresh = () => fetchDashboardData();
@@ -2783,7 +2868,7 @@ function AdminPanel({ user, onLogout, showToast }) {
       socket.off('adminRefresh', handleAdminRefresh);
       socket.off('adminMetrics', handleMetrics);
     };
-  }, [socket, fetchDashboardData]);
+  }, [socket, fetchDashboardData, fetchPayoutLogs]);
 
   // Anime.js Dashboard Entrance Animation
   useEffect(() => {
@@ -2949,6 +3034,20 @@ function AdminPanel({ user, onLogout, showToast }) {
     }
   };
 
+  const handleApproveRecharge = async (id) => {
+    try {
+      await fetchJson(`/admin/recharges/${id}/approve`, { method: 'PUT' });
+      showToast('Recharge approved.', 'success');
+    } catch(e) { showToast(e.message, 'error'); }
+  };
+  const handleRejectRecharge = async (id) => {
+    if (!window.confirm('Reject this wallet recharge request?')) return;
+    try {
+      await fetchJson(`/admin/recharges/${id}/reject`, { method: 'PUT' });
+      showToast('Recharge rejected.', 'success');
+    } catch(e) { showToast(e.message, 'error'); }
+  };
+
   const handleRejectWithdrawal = async (id) => {
     if (!window.confirm('Are you sure you want to reject this withdrawal? The funds will be refunded back to the electrician\'s wallet.')) return;
     try {
@@ -3110,6 +3209,23 @@ function AdminPanel({ user, onLogout, showToast }) {
     try {
       const res = await fetchJson('/admin/toggle-maintenance', { method: 'POST' });
       setIsMaintenanceMode(res.maintenanceMode);
+      showToast(res.message, 'success');
+    } catch(e) { showToast(e.message, 'error'); }
+  };
+
+  const handleClearLogs = async () => {
+    if (!window.confirm('Are you sure you want to completely erase all system event logs? This action cannot be undone.')) return;
+    try {
+      await fetchJson('/admin/logs', { method: 'DELETE' });
+      showToast('System logs cleared.', 'success');
+      fetchDashboardData();
+    } catch(e) { showToast(e.message, 'error'); }
+  };
+
+  const handleForceLogoutAll = async () => {
+    if (!window.confirm('WARNING: This will instantly log out every active customer and electrician on the platform. Are you sure you want to proceed?')) return;
+    try {
+      const res = await fetchJson('/admin/force-logout-all', { method: 'POST' });
       showToast(res.message, 'success');
     } catch(e) { showToast(e.message, 'error'); }
   };
@@ -3412,6 +3528,25 @@ function AdminPanel({ user, onLogout, showToast }) {
               ))}
             </div>
 
+            <h3 style={{ color: 'var(--text-main)', marginBottom: '16px', marginTop: '32px' }}><i className="fas fa-wallet"></i> Pending Wallet Recharges</h3>
+            <div style={{ display: 'grid', gap: '12px' }}>
+              {(financeData.pendingRecharges || []).length === 0 && <p style={{ color: 'var(--text-muted)' }}>No pending wallet recharges.</p>}
+              {(financeData.pendingRecharges || []).map(req => (
+                <div key={req._id} style={{ background: 'var(--secondary)', padding: '16px', borderRadius: '12px', display: 'flex', flexWrap: 'wrap', gap: '12px', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <strong>Electrician: {req.electrician?.name}</strong> <br/>
+                    <small>Phone: {req.electrician?.phone}</small>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                    <strong style={{ fontSize: '1.2rem', color: 'var(--success)' }}>+₹{req.amount}</strong>
+                    <button className="btn btn-outline" onClick={() => setPreviewImage({ url: req.screenshotUrl, title: 'Payment Screenshot' })}>View Screenshot</button>
+                    <button className="btn" style={{ background: 'var(--success)' }} onClick={() => handleApproveRecharge(req._id)}>Approve</button>
+                    <button className="btn btn-outline" style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }} onClick={() => handleRejectRecharge(req._id)}>Reject</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', marginTop: '32px' }}>
               <h3 style={{ color: 'var(--text-main)', margin: 0 }}><i className="fas fa-file-invoice-dollar"></i> Completed Job Revenue Logs</h3>
               <button className="btn btn-outline" style={{ borderColor: 'var(--primary)', color: 'var(--primary)', padding: '6px 12px' }} onClick={handleDownloadReport} disabled={isDownloading}>
@@ -3461,7 +3596,7 @@ function AdminPanel({ user, onLogout, showToast }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {(financeData.withdrawalLogs || []).length === 0 ? <tr><td colSpan="5" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>No payout history.</td></tr> : (financeData.withdrawalLogs || []).map(log => (
+                  {(payoutData.logs || []).length === 0 ? <tr><td colSpan="5" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>No payout history.</td></tr> : (payoutData.logs || []).map(log => (
                     <tr key={log._id} style={{ borderBottom: '1px solid var(--border-light)' }}>
                       <td style={{ padding: '14px 16px' }}>{new Date(log.updatedAt).toLocaleString()}</td>
                       <td style={{ padding: '14px 16px', fontWeight: 'bold' }}>{log.electrician?.name || 'N/A'}</td>
@@ -3474,6 +3609,13 @@ function AdminPanel({ user, onLogout, showToast }) {
                   ))}
                 </tbody>
               </table>
+              {(payoutData.logs || []).length > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', borderTop: '1px solid var(--border-light)' }}>
+                  <button className="btn btn-outline" disabled={payoutPage <= 1} onClick={() => fetchPayoutLogs(payoutPage - 1)} style={{ padding: '8px 16px' }}><i className="fas fa-chevron-left"></i> Previous</button>
+                  <span style={{ fontWeight: 'bold', color: 'var(--text-muted)', fontSize: '0.9rem' }}>Page {payoutData.page} of {payoutData.totalPages}</span>
+                  <button className="btn btn-outline" disabled={payoutPage >= payoutData.totalPages} onClick={() => fetchPayoutLogs(payoutPage + 1)} style={{ padding: '8px 16px' }}>Next <i className="fas fa-chevron-right"></i></button>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -3591,7 +3733,13 @@ function AdminPanel({ user, onLogout, showToast }) {
           </div>
         )}
         {activeTab === 'logs' && (
-          <div style={{ background: '#0f172a', color: '#e2e8f0', minHeight: '500px', padding: '16px', overflowX: 'auto' }}>
+          <div style={{ background: '#0f172a', color: '#e2e8f0', minHeight: '500px', padding: '16px', overflowX: 'auto', borderRadius: '12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #1e293b', paddingBottom: '12px' }}>
+              <h3 style={{ margin: 0, color: 'white' }}><i className="fas fa-terminal"></i> Live System Event Logs</h3>
+              <button className="btn btn-outline" style={{ borderColor: '#ef4444', color: '#ef4444', padding: '6px 12px' }} onClick={handleClearLogs}>
+                <i className="fas fa-trash-alt"></i> Clear Logs
+              </button>
+            </div>
             {systemLogs.length === 0 ? <p style={{ color: '#64748b' }}>No system logs available.</p> : systemLogs.map((log) => (
               <div key={log._id} style={{ marginBottom: '10px', display: 'flex', gap: '16px', paddingBottom: '10px', borderBottom: '1px dashed #1e293b', minWidth: '600px' }}>
                 <span style={{ color: '#64748b' }}>[{new Date(log.createdAt).toLocaleTimeString()}]</span>
@@ -3611,6 +3759,14 @@ function AdminPanel({ user, onLogout, showToast }) {
               <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '16px' }}>Enabling Maintenance Mode will instantly lock out all Customers and Electricians. Ongoing jobs may be disrupted. Use only for critical database upgrades.</p>
               <button className="btn" style={{ background: isMaintenanceMode ? 'var(--success)' : 'var(--danger)' }} onClick={handleToggleMaintenance}>
                 <i className={`fas ${isMaintenanceMode ? 'fa-play' : 'fa-power-off'}`}></i> {isMaintenanceMode ? 'Turn Maintenance Mode OFF (Restore Access)' : 'Enable Maintenance Mode (Lock Platform)'}
+              </button>
+            </div>
+            
+            <div style={{ background: 'var(--secondary)', padding: '20px', borderRadius: '12px', border: '1px dashed var(--danger)', marginBottom: '24px' }}>
+              <h4 style={{ color: 'var(--danger)', margin: '0 0 12px 0' }}>Global Session Termination</h4>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '16px' }}>Instantly disconnect and log out every single active customer and electrician across the entire platform. (Admins will not be logged out).</p>
+              <button className="btn" style={{ background: 'var(--danger)', color: 'white' }} onClick={handleForceLogoutAll}>
+                <i className="fas fa-skull-crossbones"></i> Force Logout All Users
               </button>
             </div>
           </div>
@@ -3911,6 +4067,13 @@ export default function App() {
           --warning: #f66b02 !important;
           --success: #bcd81d !important;
           --gold: #7f7f27 !important;
+        }
+        /* Fix: Global button styling to cleanly lock interaction on disabled buttons */
+        .btn:disabled, .btn-outline:disabled {
+          opacity: 0.6 !important;
+          cursor: not-allowed !important;
+          transform: none !important;
+          box-shadow: none !important;
         }
         /* Mobile Viewport & Window Size Optimizations */
         .app-container {

@@ -187,7 +187,7 @@ const userSchema = new mongoose.Schema({
   role: { type: String, enum: ['customer', 'electrician', 'admin'], required: true },
   totalReviews: { type: Number, default: 0, min: 0 },
   averageRating: { type: Number, default: 0, min: 0, max: 5 },
-  walletBalance: { type: Number, default: 0, min: 0 }, // DB-level lock against negative balances
+  walletBalance: { type: Number, default: 0 }, // Allowed to drop negative if commission deductions exceed balance
   jobsCompleted: { type: Number, default: 0, min: 0 },
   address: { type: String },
   experienceYears: { type: Number },
@@ -220,6 +220,7 @@ const jobSchema = new mongoose.Schema({
   originalPrice: { type: Number, min: 0 },
   walletAmountUsed: { type: Number, default: 0 }, // Track applied wallet balance for correct refunds
   couponUsed: { type: mongoose.Schema.Types.ObjectId, ref: 'Coupon' }, // Track used coupon for rollback
+  paymentType: { type: String, enum: ['upfront', 'after_service'], default: 'upfront' }, // Track Cash/UPI collected by electrician vs platform
   currentTeamSize: { type: Number, default: 0, min: 0 }, 
   teamSize: { type: Number, default: 1, min: 1 },
   jobOTP: { type: String },
@@ -252,6 +253,13 @@ const withdrawalSchema = new mongoose.Schema({
 
 withdrawalSchema.index({ status: 1 }); // Optimize admin pending withdrawals query
 withdrawalSchema.index({ electrician: 1, createdAt: -1 }); // Optimize future user history lookups
+
+const walletRechargeSchema = new mongoose.Schema({
+  electrician: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  amount: { type: Number, required: true, min: 1 },
+  screenshotUrl: { type: String, required: true }, // Base64 image
+  status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' }
+}, { timestamps: true });
 
 const bannedIpSchema = new mongoose.Schema({
   ip: { type: String, required: true, unique: true },
@@ -294,6 +302,7 @@ const systemLogSchema = new mongoose.Schema({
 const User = mongoose.model('User', userSchema);
 const Job = mongoose.model('Job', jobSchema);
 const Withdrawal = mongoose.model('Withdrawal', withdrawalSchema);
+const WalletRecharge = mongoose.model('WalletRecharge', walletRechargeSchema);
 const BannedIP = mongoose.model('BannedIP', bannedIpSchema);
 const Coupon = mongoose.model('Coupon', couponSchema);
 const SystemLog = mongoose.model('SystemLog', systemLogSchema);
@@ -1176,7 +1185,7 @@ api.post('/jobs', authenticateToken, async (req, res) => {
     // 9. Security: Enforce string limits to prevent large payload attacks
     const serviceType = String(req.body.serviceType || '').trim().substring(0, 50);
     const trimmedAddress = String(req.body.address || '').trim().substring(0, 250);
-    const { coordinates, estimatedPrice, teamSize, couponCode } = req.body;
+    const { coordinates, estimatedPrice, teamSize, couponCode, paymentType } = req.body;
     if (!serviceType || !trimmedAddress) return res.status(400).json({ message: 'Service type and valid address required' });
 
     // 10. DDoS Protection: Limit active jobs per customer to prevent database spam
@@ -1239,6 +1248,7 @@ api.post('/jobs', authenticateToken, async (req, res) => {
       estimatedPrice: finalPrice,
       originalPrice: safePrice,
       walletAmountUsed: walletDeduction,
+      paymentType: paymentType === 'after_service' ? 'after_service' : 'upfront',
       couponUsed: appliedCoupon ? appliedCoupon._id : undefined,
       paymentStatus: 'pending',
       jobOTP: crypto.randomInt(1000, 10000).toString(), // Security: Cryptographically secure OTP
@@ -1313,6 +1323,9 @@ api.get('/jobs/available', authenticateToken, async (req, res) => {
     if (req.user.role === 'electrician' && (!u.isApproved || !u.safetyDepositPaid)) {
       return res.status(403).json({ message: 'Account onboarding incomplete.' });
     }
+    if (req.user.role === 'electrician' && u.walletBalance < 500) {
+      return res.status(403).json({ message: 'Low wallet balance. Please recharge at least ₹500 to receive jobs.' });
+    }
 
     const { latitude, longitude, maxDistance = 10 } = req.query;
     // Ensure we don't return team jobs that this electrician has already joined OR jobs that are already full
@@ -1368,6 +1381,10 @@ api.put('/jobs/:id/accept', authenticateToken, async (req, res) => {
       if (!u) return res.status(401).json({ message: 'Account deleted or rejected.' });
       if (!u.isApproved || !u.safetyDepositPaid) {
         return res.status(403).json({ message: 'Account onboarding incomplete.' });
+      }
+      // Reject acceptance if wallet drops below mandatory reserve
+      if (u.walletBalance < 500) {
+        return res.status(403).json({ message: 'Low wallet balance. Please recharge at least ₹500 to accept jobs.' });
       }
     }
 
@@ -1595,21 +1612,31 @@ api.put('/jobs/:id/complete', authenticateToken, async (req, res) => {
     
     if (!job) return res.status(404).json({ message: 'Job not found or not in progress' });
 
-    // If the job was fully covered by wallet/coupons (₹0 due), securely auto-complete and pay out!
-    if (job.estimatedPrice <= 0) {
-      const completedJob = await Job.findOneAndUpdate(
-        { _id: job._id, status: 'payment' },
-        { status: 'completed', paymentStatus: 'paid' },
-        { new: true }
-      );
-      if (completedJob && completedJob.electricians && completedJob.electricians.length > 0) {
-        const uniqueElectricians = [...new Set(completedJob.electricians.map(e => e.toString()))];
-        const basePayout = completedJob.originalPrice || completedJob.estimatedPrice;
-        const earningsPerElectrician = Math.floor(((basePayout * 0.8) / Math.max(1, uniqueElectricians.length)) * 100) / 100;
-        await User.updateMany(
-          { _id: { $in: uniqueElectricians } },
-          { $inc: { walletBalance: earningsPerElectrician, jobsCompleted: 1 } }
-        );
+    // If job was fully covered by wallet OR the electrician was paid directly in Cash/UPI by the customer
+    if (job.estimatedPrice <= 0 || job.paymentType === 'after_service') {
+      job.status = 'completed';
+      job.paymentStatus = 'paid';
+      await job.save();
+
+      if (job.electricians && job.electricians.length > 0) {
+        const uniqueElectricians = [...new Set(job.electricians.map(e => e.toString()))];
+        const basePayout = job.originalPrice || job.estimatedPrice;
+        
+        if (job.paymentType === 'after_service') {
+          // Electrician kept 100% of the cash. Platform deducts 20% commission directly from their wallet reserve.
+          const commissionPerElectrician = Math.floor(((basePayout * 0.20) / Math.max(1, uniqueElectricians.length)) * 100) / 100;
+          await User.updateMany(
+            { _id: { $in: uniqueElectricians } },
+            { $inc: { walletBalance: -commissionPerElectrician, jobsCompleted: 1 } }
+          );
+        } else {
+          // Upfront payment fully covered (₹0 due), Platform pays Electrician their 80% cut.
+          const earningsPerElectrician = Math.floor(((basePayout * 0.80) / Math.max(1, uniqueElectricians.length)) * 100) / 100;
+          await User.updateMany(
+            { _id: { $in: uniqueElectricians } },
+            { $inc: { walletBalance: earningsPerElectrician, jobsCompleted: 1 } }
+          );
+        }
       }
       io.to(req.params.id).emit('jobCompleted');
       io.emit('adminRefresh');
@@ -1621,7 +1648,7 @@ api.put('/jobs/:id/complete', authenticateToken, async (req, res) => {
         }
       } catch(e) { console.error('Failed to send completion SMS', e); }
 
-      return res.status(200).json(completedJob);
+      return res.status(200).json(job);
     }
 
     io.to(req.params.id).emit('jobStatusUpdated', { status: 'payment' }); 
@@ -1631,6 +1658,45 @@ api.put('/jobs/:id/complete', authenticateToken, async (req, res) => {
   } catch (error) {
     res.status(500).json({ message: 'Internal server error' });
   }
+});
+
+// POST /api/electrician/recharge - Submit manual wallet recharge proof
+api.post('/electrician/recharge', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'electrician') return res.status(403).json({ message: 'Forbidden' });
+    const { amount, screenshotBase64 } = req.body;
+    if (!amount || !screenshotBase64) return res.status(400).json({ message: 'Amount and payment screenshot are required' });
+
+    const recharge = await WalletRecharge.create({
+      electrician: req.user.userId,
+      amount: Number(amount),
+      screenshotUrl: screenshotBase64
+    });
+    io.emit('adminRefresh');
+    res.status(201).json({ message: 'Recharge request submitted successfully', recharge });
+  } catch (error) {
+    res.status(500).json({ message: 'Internal server error processing recharge' });
+  }
+});
+
+// PUT /api/admin/recharges/:id/approve & reject
+api.put('/admin/recharges/:id/:action', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    if (!['approve', 'reject'].includes(req.params.action)) return res.status(400).json({ message: 'Invalid action' });
+
+    const statusToSet = req.params.action === 'approve' ? 'approved' : 'rejected';
+    const recharge = await WalletRecharge.findOneAndUpdate({ _id: req.params.id, status: 'pending' }, { status: statusToSet }, { new: true });
+    if (!recharge) return res.status(404).json({ message: 'Recharge request not found or already processed' });
+
+    if (statusToSet === 'approved') {
+      await User.findByIdAndUpdate(recharge.electrician, { $inc: { walletBalance: recharge.amount } });
+    }
+    
+    io.emit('adminRefresh');
+    await notifyUserRefresh(recharge.electrician);
+    res.status(200).json({ message: `Recharge successfully ${statusToSet}` });
+  } catch (error) { res.status(500).json({ message: 'Internal server error processing recharge action' }); }
 });
 
 // GET /api/admin/users - Admin fetch all users
@@ -1832,6 +1898,7 @@ api.get('/admin/finance', authenticateToken, async (req, res) => {
     // 12. Performance & Privacy: Do not load messages arrays or OTPs into admin dashboard memory
     const pendingJobs = await Job.find({ status: { $in: ['verifying_payment', 'payment'] } }).select('-messages -jobOTP').populate('customer', 'name phone').sort({ createdAt: -1 }).limit(100);
     const pendingWithdrawals = await Withdrawal.find({ status: 'pending' }).populate('electrician', 'name phone').sort({ createdAt: -1 }).limit(100);
+    const pendingRecharges = await WalletRecharge.find({ status: 'pending' }).populate('electrician', 'name phone').sort({ createdAt: -1 }).limit(100);
     
     // Financial Stats Aggregations
     const revAgg = await Job.aggregate([
@@ -1853,15 +1920,58 @@ api.get('/admin/finance', authenticateToken, async (req, res) => {
       .populate('customer', 'name')
       .populate('electricians', 'name')
       .sort({ createdAt: -1 }).limit(100);
-      
-    const withdrawalLogs = await Withdrawal.find({ status: { $ne: 'pending' } })
-      .populate('electrician', 'name phone')
-      .sort({ updatedAt: -1 }).limit(100);
 
-    res.status(200).json({ pendingJobs, pendingWithdrawals, stats: { totalRevenue, totalProfit, totalPayouts, grossMargin: '20%' }, recentCompletedJobs, withdrawalLogs });
+    // Payout logs removed from this heavy main payload to be handled via the new paginated endpoint
+    res.status(200).json({ pendingJobs, pendingWithdrawals, pendingRecharges, stats: { totalRevenue, totalProfit, totalPayouts, grossMargin: '20%' }, recentCompletedJobs, withdrawalLogs: [] });
   } catch (error) {
     res.status(500).json({ message: 'Server error fetching finance records' });
   }
+});
+
+// GET /api/admin/finance/payout-logs - Paginated Payout History
+api.get('/admin/finance/payout-logs', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.max(1, Math.min(100, parseInt(req.query.limit) || 10));
+    const skip = (page - 1) * limit;
+
+    const logs = await Withdrawal.find({ status: { $ne: 'pending' } })
+      .populate('electrician', 'name phone')
+      .sort({ updatedAt: -1 })
+      .skip(skip)
+      .limit(limit);
+      
+    const total = await Withdrawal.countDocuments({ status: { $ne: 'pending' } });
+    res.status(200).json({ logs, page, totalPages: Math.ceil(total / limit), total });
+  } catch (error) { res.status(500).json({ message: 'Error fetching payout logs' }); }
+});
+
+// DELETE /api/admin/logs - Admin clears all system logs
+api.delete('/admin/logs', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    await SystemLog.deleteMany({});
+    res.status(200).json({ message: 'All system event logs cleared.' });
+  } catch (error) { res.status(500).json({ message: 'Error clearing logs' }); }
+});
+
+// POST /api/admin/force-logout-all - Admin forcefully terminates all user sessions
+api.post('/admin/force-logout-all', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+    const sockets = await io.fetchSockets();
+    let count = 0;
+    for (const s of sockets) {
+      if (s.user && s.user.role !== 'admin') { // Spare the admins
+        s.emit('auth-expired');
+        s.disconnect(true);
+        count++;
+      }
+    }
+    logSystemEvent('WARN', 'AdminPortal', 'Global Force Logout', `Admin ${req.user.userId} forcefully disconnected ${count} active sessions.`);
+    res.status(200).json({ message: `Successfully terminated ${count} active user sessions.` });
+  } catch (error) { res.status(500).json({ message: 'Error terminating sessions' }); }
 });
 
 // POST /api/withdrawals - Request withdrawal
