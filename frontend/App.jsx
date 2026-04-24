@@ -851,29 +851,29 @@ function TrackingMap({ origin, destination }) {
 // --- Customer Dashboard Component ---
 const SERVICES = [
   // Repairs
-  { id: 'wiring', name: 'Wiring', icon: 'fa-plug-circle-bolt', category: 'repairs' },
-  { id: 'switch', name: 'Switches', icon: 'fa-toggle-on', category: 'repairs' },
-  { id: 'fan_repair', name: 'Fans', icon: 'fa-fan', category: 'repairs' },
-  { id: 'mcb', name: 'MCB/Fuse', icon: 'fa-bolt', category: 'repairs' },
-  { id: 'short_circuit', name: 'Shorts', icon: 'fa-fire-flame-curved', category: 'repairs' },
-  { id: 'meter', name: 'Meters', icon: 'fa-gauge-high', category: 'repairs' },
-  { id: 'earthing', name: 'Earthing', icon: 'fa-plug-circle-minus', category: 'repairs' },
+  { id: 'wiring', name: 'Wiring', icon: 'fa-plug-circle-bolt', category: 'repairs', basePrice: 400 },
+  { id: 'switch', name: 'Switches', icon: 'fa-toggle-on', category: 'repairs', basePrice: 350 },
+  { id: 'fan_repair', name: 'Fans', icon: 'fa-fan', category: 'repairs', basePrice: 380 },
+  { id: 'mcb', name: 'MCB/Fuse', icon: 'fa-bolt', category: 'repairs', basePrice: 450 },
+  { id: 'short_circuit', name: 'Shorts', icon: 'fa-fire-flame-curved', category: 'repairs', basePrice: 500 },
+  { id: 'meter', name: 'Meters', icon: 'fa-gauge-high', category: 'repairs', basePrice: 420 },
+  { id: 'earthing', name: 'Earthing', icon: 'fa-plug-circle-minus', category: 'repairs', basePrice: 480 },
   // Appliances
-  { id: 'ac', name: 'AC Setup', icon: 'fa-snowflake', category: 'appliances' },
-  { id: 'tv', name: 'TV Mount', icon: 'fa-tv', category: 'appliances' },
-  { id: 'fridge', name: 'Fridge', icon: 'fa-temperature-low', category: 'appliances' },
-  { id: 'water_purifier', name: 'RO Filter', icon: 'fa-faucet-drip', category: 'appliances' },
-  { id: 'chimney', name: 'Chimney', icon: 'fa-fire-burner', category: 'appliances' },
-  { id: 'geyser', name: 'Geyser', icon: 'fa-hot-tub-person', category: 'appliances' },
-  { id: 'washing_machine', name: 'Washers', icon: 'fa-shirt', category: 'appliances' },
-  { id: 'microwave', name: 'Microwave', icon: 'fa-kitchen-set', category: 'appliances' },
-  { id: 'ev', name: 'EV Charger', icon: 'fa-charging-station', category: 'appliances' },
-  { id: 'smart', name: 'Smart Hub', icon: 'fa-house-signal', category: 'appliances' },
+  { id: 'ac', name: 'AC Setup', icon: 'fa-snowflake', category: 'appliances', basePrice: 500 },
+  { id: 'tv', name: 'TV Mount', icon: 'fa-tv', category: 'appliances', basePrice: 350 },
+  { id: 'fridge', name: 'Fridge', icon: 'fa-temperature-low', category: 'appliances', basePrice: 400 },
+  { id: 'water_purifier', name: 'RO Filter', icon: 'fa-faucet-drip', category: 'appliances', basePrice: 380 },
+  { id: 'chimney', name: 'Chimney', icon: 'fa-fire-burner', category: 'appliances', basePrice: 450 },
+  { id: 'geyser', name: 'Geyser', icon: 'fa-hot-tub-person', category: 'appliances', basePrice: 480 },
+  { id: 'washing_machine', name: 'Washers', icon: 'fa-shirt', category: 'appliances', basePrice: 420 },
+  { id: 'microwave', name: 'Microwave', icon: 'fa-kitchen-set', category: 'appliances', basePrice: 350 },
+  { id: 'ev', name: 'EV Charger', icon: 'fa-charging-station', category: 'appliances', basePrice: 500 },
+  { id: 'smart', name: 'Smart Hub', icon: 'fa-house-signal', category: 'appliances', basePrice: 400 },
   // Projects
-  { id: 'home_wiring', name: 'Home Wiring', icon: 'fa-house-chimney', category: 'projects', team: true },
-  { id: 'commercial', name: 'Commercial', icon: 'fa-building', category: 'projects', team: true },
-  { id: 'solar', name: 'Solar Panel', icon: 'fa-solar-panel', category: 'projects', team: true },
-  { id: 'renovation', name: 'Renovation', icon: 'fa-hammer', category: 'projects', team: true }
+  { id: 'home_wiring', name: 'Home Wiring', icon: 'fa-house-chimney', category: 'projects', team: true, basePrice: 500 },
+  { id: 'commercial', name: 'Commercial', icon: 'fa-building', category: 'projects', team: true, basePrice: 500 },
+  { id: 'solar', name: 'Solar Panel', icon: 'fa-solar-panel', category: 'projects', team: true, basePrice: 500 },
+  { id: 'renovation', name: 'Renovation', icon: 'fa-hammer', category: 'projects', team: true, basePrice: 450 }
 ];
 
 function CustomerHome({ user, showToast, onEditProfile, onUpdateUser }) {
@@ -1158,7 +1158,8 @@ function CustomerHome({ user, showToast, onEditProfile, onUpdateUser }) {
     // Live update the charges when switching between different service tabs
     setBookingPrice(prevPrice => {
       if (prevPrice !== null && !activeJobIdRef.current) {
-        return Math.floor(Math.random() * 401) + 300;
+        const serviceObj = SERVICES.find(s => s.id === selectedService);
+        return serviceObj?.basePrice || 350;
       }
       return prevPrice;
     });
@@ -1184,8 +1185,8 @@ function CustomerHome({ user, showToast, onEditProfile, onUpdateUser }) {
   const handleInitiateBooking = () => {
     if (!address) return showToast('Please enter your full address to book a service.', 'warning');
     if (!coordinates) return showToast('Please select a valid address from the dropdown or use GPS.', 'warning');
-    // Generate random price 300 - 700 per electrician needed
-    const price = (Math.floor(Math.random() * 401) + 300) * teamSize;
+    const serviceObj = SERVICES.find(s => s.id === selectedService);
+    const price = (serviceObj?.basePrice || 350) * teamSize;
     setBookingPrice(price);
   };
 
