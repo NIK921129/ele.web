@@ -3913,20 +3913,23 @@ export default function App() {
           --gold: #7f7f27 !important;
         }
         /* Mobile Viewport & Window Size Optimizations */
-        html, body {
+        html, body, #root {
           max-width: 100vw;
-          overflow-x: hidden;
+          overflow-x: hidden !important;
           overflow-y: auto !important; /* Force re-enable vertical scrolling on PC */
+          height: auto !important;
         }
         .app-container {
           min-height: 100vh;
           min-height: 100dvh;
+          height: auto !important;
           display: flex;
           flex-direction: column;
+          overflow-x: hidden !important;
         }
         input, select, textarea { font-size: 16px !important; } /* Prevents iOS auto-zoom */
         .mobile-bottom-nav { padding-bottom: calc(env(safe-area-inset-bottom) + 8px) !important; }
-        .dashboard-grid { padding-bottom: calc(90px + env(safe-area-inset-bottom)) !important; }
+        .dashboard-grid { padding-bottom: calc(90px + env(safe-area-inset-bottom)) !important; height: auto !important; overflow: visible !important; }
       `}</style>
       <BrowserRouter>
         <AppContent />
