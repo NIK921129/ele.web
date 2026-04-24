@@ -18,7 +18,7 @@ const BASE_URL = import.meta.env.VITE_API_URL || (isLocal ? `http://${window.loc
 const API_BASE_URL = `${BASE_URL}/api`;
 
 async function fetchJson(url, options = {}, retries = 2) {
-  const token = localStorage.getItem('token');
+  const token = safeStorage.getItem('token');
   const isFormData = options.body instanceof FormData;
   const headers = { ...options.headers };
   const fetchOptions = { ...options }; // Create a shallow copy to prevent mutating the original object
@@ -513,7 +513,7 @@ function Login({ onLoginSuccess, showToast }) {
       });
 
       if (userData && userData.token && userData.user) {
-        localStorage.setItem('token', userData.token);
+        safeStorage.setItem('token', userData.token);
         onLoginSuccess(userData.user, userData.user.role);
       } else {
         throw new Error('Invalid response from server: Missing token or user data');
@@ -911,7 +911,7 @@ function CustomerHome({ user, showToast, onEditProfile, onUpdateUser }) {
   const [appliedCoupon, setAppliedCoupon] = useState(null);
   const [isApplyingCoupon, setIsApplyingCoupon] = useState(false);
   const [savedAddresses, setSavedAddresses] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('wattzen_saved_addresses')) || {}; }
+    try { return JSON.parse(safeStorage.getItem('wattzen_saved_addresses')) || {}; }
     catch { return {}; }
   });
   
@@ -1393,7 +1393,7 @@ Support: projects.nikunj.singh@gmail.com
     if (!address || !coordinates) return showToast('Please select a valid location first.', 'warning');
     const updated = { ...savedAddresses, [type]: { address, coordinates } };
     setSavedAddresses(updated);
-    try { localStorage.setItem('wattzen_saved_addresses', JSON.stringify(updated)); } catch(e) { console.warn('Storage full'); }
+    safeStorage.setItem('wattzen_saved_addresses', JSON.stringify(updated));
     showToast(`Address saved as ${type}!`, 'success');
   };
 
@@ -1437,7 +1437,7 @@ Support: projects.nikunj.singh@gmail.com
                       const updated = { ...savedAddresses };
                       delete updated[type];
                       setSavedAddresses(updated);
-                      localStorage.setItem('wattzen_saved_addresses', JSON.stringify(updated));
+                      safeStorage.setItem('wattzen_saved_addresses', JSON.stringify(updated));
                     }} title={`Remove ${type}`}></i>
                   )}
                 </div>
@@ -2889,8 +2889,8 @@ function AdminPanel({ user, onLogout, showToast }) {
     try {
       const res = await fetchJson(`/admin/users/${id}/impersonate`, { method: 'POST' });
       if (res.user.role === 'admin') throw new Error('Cannot impersonate another master admin account.');
-      localStorage.setItem('token', res.token);
-      localStorage.setItem('user', JSON.stringify(res.user));
+      safeStorage.setItem('token', res.token);
+      safeStorage.setItem('user', JSON.stringify(res.user));
       window.location.href = `/${res.user.role}`; // Hard reload to switch session context
     } catch(e) { showToast(e.message, 'error'); }
   };
@@ -3626,7 +3626,7 @@ function AdminPanel({ user, onLogout, showToast }) {
 function AppContent() {
   const { socket, isConnected } = useSocket();
   const [user, setUser] = useState(null);
-  const [isDarkMode, setIsDarkMode] = useState(() => localStorage.getItem('wattzen_theme') === 'dark');
+  const [isDarkMode, setIsDarkMode] = useState(() => safeStorage.getItem('wattzen_theme') === 'dark');
   const [toasts, setToasts] = useState([]);
   const [isInitializing, setIsInitializing] = useState(true);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
@@ -3647,7 +3647,7 @@ function AppContent() {
   const handleLoginSuccess = (userData, role) => {
     const userWithRole = { ...userData, role };
     setUser(userWithRole);
-    localStorage.setItem('user', JSON.stringify(userWithRole));
+    safeStorage.setItem('user', JSON.stringify(userWithRole));
     // Request push notification permission upon explicit user login
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission();
@@ -3659,12 +3659,12 @@ function AppContent() {
     // Merge with existing user data to prevent partial API responses from wiping local fields (like walletBalance)
     const userWithRole = { ...user, ...updatedUser, role: user.role };
     setUser(userWithRole);
-    localStorage.setItem('user', JSON.stringify(userWithRole));
+    safeStorage.setItem('user', JSON.stringify(userWithRole));
   };
 
   const handleLogout = React.useCallback(() => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    safeStorage.removeItem('token');
+    safeStorage.removeItem('user');
     setUser(null);
     if (socket.connected) socket.disconnect(); // Prevent zombie socket connections on account switch
     navigate('/login');
@@ -3676,7 +3676,7 @@ function AppContent() {
   const toggleTheme = () => {
     setIsDarkMode(prev => {
       const next = !prev;
-      localStorage.setItem('wattzen_theme', next ? 'dark' : 'light');
+      safeStorage.setItem('wattzen_theme', next ? 'dark' : 'light');
       return next;
     });
   };
@@ -3722,7 +3722,7 @@ function AppContent() {
 
   useEffect(() => {
     const handleAuthExpired = () => {
-      if (!localStorage.getItem('token')) return; // 6. Prevent double auth-expired toasts/loops
+      if (!safeStorage.getItem('token')) return; // 6. Prevent double auth-expired toasts/loops
       showToast('Session expired. Please log in again.', 'warning');
       sendPush('Session Expired', 'Your secure session has expired. Please log in again.');
         handleLogoutRef.current();
@@ -3734,7 +3734,7 @@ function AppContent() {
   useEffect(() => {
     let isMounted = true;
     const validateSession = async () => {
-      const token = localStorage.getItem('token');
+      const token = safeStorage.getItem('token');
       if (!token) {
         if (location.pathname !== '/' && location.pathname !== '/login') {
           navigate('/login');
@@ -3752,7 +3752,7 @@ function AppContent() {
         if (freshUser && freshUser._id) {
           const userWithRole = { ...freshUser, role: freshUser.role };
           setUser(userWithRole);
-          localStorage.setItem('user', JSON.stringify(userWithRole));
+          safeStorage.setItem('user', JSON.stringify(userWithRole));
           
           // Redirect logged-in users away from auth pages, or if they try accessing the wrong role dashboard
           if (location.pathname === '/' || location.pathname === '/login' || !location.pathname.startsWith(`/${freshUser.role}`)) {
@@ -3783,8 +3783,8 @@ function AppContent() {
   useEffect(() => {
     if (user) {
       // Always ensure the token is up to date when the user state changes
-      socket.auth = { token: localStorage.getItem('token') };
-      const handleReconnectAttempt = () => { socket.auth = { token: localStorage.getItem('token') }; };
+      socket.auth = { token: safeStorage.getItem('token') };
+      const handleReconnectAttempt = () => { socket.auth = { token: safeStorage.getItem('token') }; };
       
       if (!socket.connected) {
         socket.connect();
@@ -3826,10 +3826,10 @@ function AppContent() {
     if (!pwd) return;
     try {
       const data = await fetchJson('/admin/secret-login', { method: 'POST', body: { password: pwd.trim() } });
-      localStorage.setItem('token', data.token);
+      safeStorage.setItem('token', data.token);
       const userWithRole = { ...data.user, role: 'admin' };
       setUser(userWithRole);
-      localStorage.setItem('user', JSON.stringify(userWithRole));
+      safeStorage.setItem('user', JSON.stringify(userWithRole));
       navigate('/admin');
       showToast('Master Access Granted', 'success');
     } catch(e) {
@@ -3913,23 +3913,16 @@ export default function App() {
           --gold: #7f7f27 !important;
         }
         /* Mobile Viewport & Window Size Optimizations */
-        html, body, #root {
-          max-width: 100vw;
-          overflow-x: hidden !important;
-          overflow-y: auto !important; /* Force re-enable vertical scrolling on PC */
-          height: auto !important;
-        }
         .app-container {
           min-height: 100vh;
           min-height: 100dvh;
-          height: auto !important;
           display: flex;
           flex-direction: column;
-          overflow-x: hidden !important;
+          overflow-x: hidden; /* Encapsulate horizontal overflow without breaking window scroll */
         }
         input, select, textarea { font-size: 16px !important; } /* Prevents iOS auto-zoom */
         .mobile-bottom-nav { padding-bottom: calc(env(safe-area-inset-bottom) + 8px) !important; }
-        .dashboard-grid { padding-bottom: calc(90px + env(safe-area-inset-bottom)) !important; height: auto !important; overflow: visible !important; }
+        .dashboard-grid { padding-bottom: calc(90px + env(safe-area-inset-bottom)) !important; }
       `}</style>
       <BrowserRouter>
         <AppContent />

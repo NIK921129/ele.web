@@ -35,8 +35,10 @@ class ErrorBoundary extends React.Component {
   };
 
   handleClearCache = () => {
-    localStorage.clear();
-    sessionStorage.clear();
+    try {
+      localStorage.clear();
+      sessionStorage.clear();
+    } catch(e) {}
     window.location.href = '/';
   };
 
