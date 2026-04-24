@@ -2223,7 +2223,8 @@ api.post('/admin/security/ban-ip', authenticateToken, async (req, res) => {
     // Instantly disconnect all active sockets from this IP to prevent evasion
     const sockets = await io.fetchSockets();
     for (const s of sockets) {
-      const sIp = s.handshake.address;
+      const forwardedFor = s.handshake.headers['x-forwarded-for'];
+      const sIp = forwardedFor ? forwardedFor.split(',')[0].trim() : s.handshake.address;
       const clientIp = sIp.startsWith('::ffff:') ? sIp.substring(7) : sIp;
       if (clientIp === ip) {
         s.emit('auth-expired');

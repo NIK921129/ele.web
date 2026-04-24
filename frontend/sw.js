@@ -38,9 +38,9 @@ self.addEventListener('fetch', event => {
     caches.match(event.request).then(response => {
       return response || fetch(event.request);
     }).catch(() => {
-      // Fallback for offline un-cached pages
+      // Fallback for offline un-cached pages (SPA Routing)
       if (event.request.mode === 'navigate') {
-        return caches.match('/');
+        return caches.match('/index.html');
       }
     })
   );

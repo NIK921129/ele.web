@@ -5,6 +5,13 @@ import logoImage from './wmremove-transformed.png';
 import { useSocket } from './SocketContext.jsx';
 import ErrorBoundary from './ErrorBoundary.jsx';
 
+// Safe wrapper for localStorage to prevent crashes in incognito/private browser modes
+const safeStorage = {
+  getItem: (key) => { try { return window.localStorage.getItem(key); } catch (e) { return null; } },
+  setItem: (key, value) => { try { window.localStorage.setItem(key, value); } catch (e) {} },
+  removeItem: (key) => { try { window.localStorage.removeItem(key); } catch (e) {} }
+};
+
 // ==========================================
 // 1. API & SOCKET UTILITIES
 // ==========================================
