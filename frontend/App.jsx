@@ -193,6 +193,7 @@ function Landing({ onEnter, onSecret }) {
   useEffect(() => {
     let checkInterval;
     let isMounted = true;
+    let attempts = 0;
     const triggerAnim = () => {
       if (!isMounted) return true;
       if (typeof window !== 'undefined' && window.anime) {
@@ -214,7 +215,12 @@ function Landing({ onEnter, onSecret }) {
       }
       return false;
     };
-    if (!triggerAnim()) checkInterval = setInterval(() => { if (triggerAnim()) clearInterval(checkInterval); }, 200);
+    if (!triggerAnim()) {
+      checkInterval = setInterval(() => { 
+        attempts++;
+        if (triggerAnim() || attempts > 25) clearInterval(checkInterval); 
+      }, 200);
+    }
     return () => { 
       isMounted = false;
       if (checkInterval) clearInterval(checkInterval); 
@@ -372,6 +378,7 @@ function ProfileModal({ user, onClose, onUpdate, showToast, onLogout }) {
   useEffect(() => {
     let checkInterval;
     let isMounted = true;
+    let attempts = 0;
     const triggerAnim = () => {
       if (!isMounted) return true;
       if (typeof window !== 'undefined' && window.anime) {
@@ -380,7 +387,12 @@ function ProfileModal({ user, onClose, onUpdate, showToast, onLogout }) {
       }
       return false;
     };
-    if (!triggerAnim()) checkInterval = setInterval(() => { if (triggerAnim()) clearInterval(checkInterval); }, 200);
+    if (!triggerAnim()) {
+      checkInterval = setInterval(() => { 
+        attempts++;
+        if (triggerAnim() || attempts > 25) clearInterval(checkInterval); 
+      }, 200);
+    }
     return () => { 
       isMounted = false;
       if (checkInterval) clearInterval(checkInterval); 
@@ -393,12 +405,6 @@ function ProfileModal({ user, onClose, onUpdate, showToast, onLogout }) {
       <div className="modal-content">
         <div className="modal-header"><h3>Edit Profile</h3><button onClick={onClose} style={{ padding: '10px', margin: '-10px' }}>&times;</button></div>
         <form onSubmit={handleSubmit}>
-          {user?.walletBalance !== undefined && (
-            <div className="form-group anime-form-item" style={{ background: 'var(--primary-light)', padding: '12px', borderRadius: '12px', border: '1px solid var(--primary)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <label style={{ margin: 0, color: 'var(--primary)' }}><i className="fas fa-wallet"></i> Wallet Balance</label>
-              <strong style={{ fontSize: '1.2rem', color: 'var(--primary)' }}>₹{user.walletBalance?.toFixed(0) || 0}</strong>
-            </div>
-          )}
           <div className="form-group anime-form-item"><label>Full Name</label><input type="text" className="form-control" value={name} onChange={e=>setName(e.target.value)} required maxLength="50" /></div>
           <div className="form-group anime-form-item"><label>Phone Number</label><input type="tel" className="form-control" value={phone} disabled={true} style={{ opacity: 0.7, cursor: 'not-allowed' }} pattern="[0-9]{10}" maxLength="10" required /></div>
           <button type="submit" className="btn btn-block anime-form-item" disabled={loading} style={{ padding: '14px' }}>{loading ? 'Saving...' : 'Save Changes'}</button>
@@ -595,6 +601,7 @@ function Login({ onLoginSuccess, showToast }) {
   useEffect(() => {
     let checkInterval;
     let isMounted = true;
+    let attempts = 0;
     const triggerAnim = () => {
       if (!isMounted) return true;
       if (typeof window !== 'undefined' && window.anime) {
@@ -603,7 +610,12 @@ function Login({ onLoginSuccess, showToast }) {
       }
       return false;
     };
-    if (!triggerAnim()) checkInterval = setInterval(() => { if (triggerAnim()) clearInterval(checkInterval); }, 200);
+    if (!triggerAnim()) {
+      checkInterval = setInterval(() => { 
+        attempts++;
+        if (triggerAnim() || attempts > 25) clearInterval(checkInterval); 
+      }, 200);
+    }
     return () => { 
       isMounted = false;
       if (checkInterval) clearInterval(checkInterval); 
@@ -793,7 +805,9 @@ function TrackingMap({ origin, destination }) {
             
         mapInstance.current = window.L.map(mapRef.current, {
           zoomControl: true,
-          attributionControl: false
+          attributionControl: false,
+          dragging: !isMobileDevice, // Prevent map from trapping vertical scroll on mobile
+          tap: !isMobileDevice       // Prevent double-tap zooming issues on mobile touch targets
             }).setView([startLat, startLng], 14);
 
         window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -2916,6 +2930,7 @@ function AdminPanel({ user, onLogout, showToast }) {
   // Anime.js Dashboard Entrance Animation
   useEffect(() => {
     let checkInterval;
+    let attempts = 0;
     const triggerAnim = () => {
       if (typeof window !== 'undefined' && window.anime) {
         window.anime({ targets: '.admin-metric-card', translateY: [30, 0], opacity: [0, 1], delay: window.anime && typeof window.anime.stagger === 'function' ? window.anime.stagger(150) : 0, duration: 800, easing: 'easeOutCubic' });
@@ -2923,7 +2938,12 @@ function AdminPanel({ user, onLogout, showToast }) {
       }
       return false;
     };
-    if (!triggerAnim()) checkInterval = setInterval(() => { if (triggerAnim()) clearInterval(checkInterval); }, 200);
+    if (!triggerAnim()) {
+      checkInterval = setInterval(() => { 
+        attempts++;
+        if (triggerAnim() || attempts > 25) clearInterval(checkInterval); 
+      }, 200);
+    }
     return () => { if (checkInterval) clearInterval(checkInterval); };
   }, []);
 

@@ -66,13 +66,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// 10. Global Error Handler for all Express errors to prevent leaking HTML stack traces
-app.use((err, req, res, next) => {
-  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) return res.status(400).json({ message: 'Invalid JSON payload format' });
-  console.error('[Server Error]', err);
-  res.status(err.status || 500).json({ message: 'Internal Server Error' });
-});
-
 // Add a request logger to verify if the frontend is reaching the backend
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url} - Origin: ${req.headers.origin}`);
@@ -1218,10 +1211,16 @@ api.post('/jobs', authenticateToken, async (req, res) => {
       return res.status(429).json({ message: 'Maximum limit of 3 active jobs reached. Please complete or cancel an existing job.' });
     }
 
-    // Security: Strictly enforce min and max bounds to prevent Schema Validation 500 crashes
+    // Security: Prevent Price Tampering by maintaining a definitive price map on the backend
+    const SERVICE_PRICES = {
+      'wiring': 400, 'switch': 350, 'fan_repair': 380, 'mcb': 450, 'short_circuit': 500, 'meter': 420, 'earthing': 480,
+      'ac': 500, 'tv': 350, 'fridge': 400, 'water_purifier': 380, 'chimney': 450, 'geyser': 480, 'washing_machine': 420, 'microwave': 350, 'ev': 500, 'smart': 400,
+      'home_wiring': 500, 'commercial': 500, 'solar': 500, 'renovation': 450
+    };
+
     const safeTeamSize = Math.max(1, Math.min(10, Number(teamSize) || 1));
-    const basePrice = safeTeamSize * 299;
-    const safePrice = Math.min(1000000, Math.max(basePrice, Number(estimatedPrice) || basePrice)); // 3. Pricing Exploitation Vector
+    const serviceBasePrice = SERVICE_PRICES[serviceType] || 299;
+    const safePrice = safeTeamSize * serviceBasePrice;
     
     let finalPrice = safePrice;
     let appliedCoupon = null;
@@ -2513,6 +2512,14 @@ api.put('/admin/users/bulk-approve', authenticateToken, async (req, res) => {
 });
 
 app.use('/api', api);
+
+// 10. Global Error Handler MUST be defined at the absolute bottom to catch API router crashes
+// This prevents HTML stack traces from leaking to the frontend during unexpected Node.js exceptions
+app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) return res.status(400).json({ message: 'Invalid JSON payload format' });
+  console.error('[Server Error]', err);
+  res.status(err.status || 500).json({ message: 'Internal Server Error' });
+});
 
 // Export the Express API for Vercel Serverless Functions
 module.exports = app;
