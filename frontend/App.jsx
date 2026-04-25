@@ -6,10 +6,11 @@ import { useSocket } from './SocketContext.jsx';
 import ErrorBoundary from './ErrorBoundary.jsx';
 
 // Safe wrapper for localStorage to prevent crashes in incognito/private browser modes
+const memoryStorage = {};
 const safeStorage = {
-  getItem: (key) => { try { return window.localStorage.getItem(key); } catch (e) { return null; } },
-  setItem: (key, value) => { try { window.localStorage.setItem(key, value); } catch (e) {} },
-  removeItem: (key) => { try { window.localStorage.removeItem(key); } catch (e) {} }
+  getItem: (key) => { try { return window.localStorage.getItem(key) || memoryStorage[key] || null; } catch (e) { return memoryStorage[key] || null; } },
+  setItem: (key, value) => { try { window.localStorage.setItem(key, value); } catch (e) {} memoryStorage[key] = value; },
+  removeItem: (key) => { try { window.localStorage.removeItem(key); } catch (e) {} delete memoryStorage[key]; }
 };
 
 // ==========================================
@@ -392,6 +393,12 @@ function ProfileModal({ user, onClose, onUpdate, showToast, onLogout }) {
       <div className="modal-content">
         <div className="modal-header"><h3>Edit Profile</h3><button onClick={onClose} style={{ padding: '10px', margin: '-10px' }}>&times;</button></div>
         <form onSubmit={handleSubmit}>
+          {user?.walletBalance !== undefined && (
+            <div className="form-group anime-form-item" style={{ background: 'var(--primary-light)', padding: '12px', borderRadius: '12px', border: '1px solid var(--primary)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <label style={{ margin: 0, color: 'var(--primary)' }}><i className="fas fa-wallet"></i> Wallet Balance</label>
+              <strong style={{ fontSize: '1.2rem', color: 'var(--primary)' }}>₹{user.walletBalance?.toFixed(0) || 0}</strong>
+            </div>
+          )}
           <div className="form-group anime-form-item"><label>Full Name</label><input type="text" className="form-control" value={name} onChange={e=>setName(e.target.value)} required maxLength="50" /></div>
           <div className="form-group anime-form-item"><label>Phone Number</label><input type="tel" className="form-control" value={phone} disabled={true} style={{ opacity: 0.7, cursor: 'not-allowed' }} pattern="[0-9]{10}" maxLength="10" required /></div>
           <button type="submit" className="btn btn-block anime-form-item" disabled={loading} style={{ padding: '14px' }}>{loading ? 'Saving...' : 'Save Changes'}</button>
@@ -1601,7 +1608,17 @@ Support: projects.nikunj.singh@gmail.com
                       .then(() => showToast('Tracking ID copied!', 'success'))
                       .catch(() => showToast('Failed to copy Tracking ID.', 'error'));
                   } else {
-                    showToast('Clipboard access denied by browser.', 'error');
+                    try {
+                      const textArea = document.createElement("textarea");
+                      textArea.value = `Tracking WATTZEN Job: ${activeJobId}`;
+                      document.body.appendChild(textArea);
+                      textArea.select();
+                      document.execCommand("copy");
+                      document.body.removeChild(textArea);
+                      showToast('Tracking ID copied!', 'success');
+                    } catch (err) {
+                      showToast('Clipboard access denied by browser.', 'error');
+                    }
                   }
                 }} style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', padding: '4px' }} title="Copy Tracking ID">
                   <i className="fas fa-copy"></i>

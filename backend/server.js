@@ -350,6 +350,10 @@ io.use((socket, next) => {
   if (!token) return next(new Error('Authentication error: Missing token'));
   try {
     socket.user = jwt.verify(token, JWT_SECRET, { issuer: 'wattzen-api' });
+    // Securely segregate admin traffic into a dedicated room
+    if (socket.user.role === 'admin') {
+      socket.join('sysAdminRoom');
+    }
     next();
   } catch (err) {
     next(new Error('Authentication error: Invalid token'));
@@ -485,7 +489,7 @@ io.on('connection', (socket) => {
 // Real-time Admin Metrics Broadcaster
 setInterval(() => {
   if (io && io.engine) {
-    io.emit('adminMetrics', { clientsCount: io.engine.clientsCount });
+    io.to('sysAdminRoom').emit('adminMetrics', { clientsCount: io.engine.clientsCount });
   }
 }, 5000);
 
