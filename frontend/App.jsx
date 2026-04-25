@@ -24,6 +24,8 @@ const isLocal = typeof window !== 'undefined' && (window.location.hostname === '
 const BASE_URL = import.meta.env.VITE_API_URL || (isLocal ? `http://${window.location.hostname}:5000` : 'https://voltflow-backend.onrender.com');
 const API_BASE_URL = `${BASE_URL}/api`;
 
+const isMobileDevice = typeof navigator !== 'undefined' && /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
 async function fetchJson(url, options = {}, retries = 2) {
   const token = safeStorage.getItem('token');
   const isFormData = options.body instanceof FormData;
@@ -1642,9 +1644,11 @@ Support: projects.nikunj.singh@gmail.com
                               style={{ width: '120px', height: '120px', display: 'block' }} 
                             />
                           </div>
-                          <a href={`upi://pay?pa=9211293576@ptaxis&pn=WATTZEN&am=${Number(bookingPrice).toFixed(2)}&cu=INR`} className="btn btn-block" style={{ background: '#bcd81d', color: '#111', display: 'block', textDecoration: 'none', fontWeight: 'bold' }}>
-                            <i className="fas fa-external-link-alt" style={{ marginRight: '8px' }}></i> Open UPI App on Phone
-                          </a>
+                          {isMobileDevice && (
+                            <a href={`upi://pay?pa=9211293576@ptaxis&pn=WATTZEN&am=${Number(bookingPrice).toFixed(2)}&cu=INR`} className="btn btn-block" style={{ background: '#bcd81d', color: '#111', display: 'block', textDecoration: 'none', fontWeight: 'bold' }}>
+                              <i className="fas fa-external-link-alt" style={{ marginRight: '8px' }}></i> Open UPI App on Phone
+                            </a>
+                          )}
                         </div>
                       )}
                     </React.Fragment>
@@ -2707,12 +2711,22 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
               <p style={{ margin: '0 0 8px 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>Or pay to UPI ID:</p>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
                 <code style={{ flex: 1, padding: '10px', background: 'rgba(0,0,0,0.3)', borderRadius: '4px', color: 'var(--success)', fontSize: '1.1rem', letterSpacing: '1px', textAlign: 'left' }}>9211293576@ptaxis</code>
-                <button className="btn btn-outline" style={{ padding: '10px 14px', borderColor: 'var(--border-light)', color: 'white' }} onClick={() => { navigator.clipboard.writeText('9211293576@ptaxis'); showToast('UPI ID copied!', 'success'); }} title="Copy UPI ID"><i className="fas fa-copy"></i></button>
+                <button className="btn btn-outline" style={{ padding: '10px 14px', borderColor: 'var(--border-light)', color: 'white' }} onClick={() => { 
+                  if (navigator.clipboard) { 
+                    navigator.clipboard.writeText('9211293576@ptaxis')
+                      .then(() => showToast('UPI ID copied!', 'success'))
+                      .catch(() => showToast('Failed to copy', 'error')); 
+                  } else { 
+                    showToast('Clipboard access denied by browser.', 'error'); 
+                  } 
+                }} title="Copy UPI ID"><i className="fas fa-copy"></i></button>
               </div>
               
-              <a href={`upi://pay?pa=9211293576@ptaxis&pn=WATTZEN&am=${rechargeAmount}&cu=INR`} className="btn btn-block" style={{ background: '#bcd81d', color: '#111', textDecoration: 'none', display: 'block', textAlign: 'center', fontWeight: 'bold' }}>
-                <i className="fas fa-external-link-alt"></i> Open UPI App on Phone
-              </a>
+              {isMobileDevice && (
+                <a href={`upi://pay?pa=9211293576@ptaxis&pn=WATTZEN&am=${rechargeAmount}&cu=INR`} className="btn btn-block" style={{ background: '#bcd81d', color: '#111', textDecoration: 'none', display: 'block', textAlign: 'center', fontWeight: 'bold' }}>
+                  <i className="fas fa-external-link-alt"></i> Open UPI App on Phone
+                </a>
+              )}
             </div>
           )}
           <div style={{ marginBottom: '12px' }}>
@@ -3823,12 +3837,15 @@ function AppContent() {
     navigate(`/${role}`);
   };
 
-  const handleProfileUpdate = (updatedUser) => {
-    // Merge with existing user data to prevent partial API responses from wiping local fields (like walletBalance)
-    const userWithRole = { ...user, ...updatedUser, role: user.role };
-    setUser(userWithRole);
-    safeStorage.setItem('user', JSON.stringify(userWithRole));
-  };
+  const handleProfileUpdate = React.useCallback((updatedUser) => {
+    // Use functional state updates to prevent stale closures overriding live wallet balances
+    setUser(prev => {
+      if (!prev) return prev;
+      const userWithRole = { ...prev, ...updatedUser, role: prev.role };
+      safeStorage.setItem('user', JSON.stringify(userWithRole));
+      return userWithRole;
+    });
+  }, []);
 
   const handleLogout = React.useCallback(() => {
     safeStorage.removeItem('token');

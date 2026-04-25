@@ -456,6 +456,11 @@ io.on('connection', (socket) => {
   });
   socket.on('triggerSOS', async (data) => {
     if (data && typeof data.jobId === 'string') {
+      // Prevent Database Flood DoS from malicious SOS spam
+      const now = Date.now();
+      if (now - (sosRateLimits.get(socket.id) || 0) < 60000) return;
+      sosRateLimits.set(socket.id, now);
+
       logSystemEvent('WARN', 'Safety', 'SOS Triggered', `SOS from ${data.userId} on Job ${data.jobId}`);
       
       // Target ONLY active admins to prevent a platform-wide user panic
@@ -473,6 +478,7 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     socketRateLimits.delete(socket.id);
     chatRateLimits.delete(socket.id);
+    sosRateLimits.delete(socket.id);
   });
 });
 
@@ -520,6 +526,8 @@ const userLoginAttempts = new Map();
 const signupRateLimits = new Map();
 // Rate limiter for job OTP verification
 const jobOtpAttempts = new Map();
+// Rate limiter for SOS triggers
+const sosRateLimits = new Map();
 
 // Rate limiter to prevent SMS API abuse and spam
 const otpRateLimits = new Map();
@@ -542,6 +550,12 @@ setInterval(() => {
       signupRateLimits.delete(ip);
     }
   }
+  for (const [key, record] of jobOtpAttempts.entries()) {
+    if (now > record.lockUntil) jobOtpAttempts.delete(key);
+  }
+  for (const [id, lockTime] of sosRateLimits.entries()) {
+    if (now > lockTime) sosRateLimits.delete(id);
+  }
   
   // Clean up expired OTPs and Rate Limits to prevent memory leaks (OOM)
   for (const [phone, expTime] of otpRateLimits.entries()) {
@@ -557,6 +571,7 @@ setInterval(() => {
   if (adminLoginAttempts.size > 10000) adminLoginAttempts.clear();
   if (signupRateLimits.size > 10000) signupRateLimits.clear();
   if (chatRateLimits.size > 10000) chatRateLimits.clear();
+  if (sosRateLimits.size > 10000) sosRateLimits.clear();
 }, 60 * 60 * 1000); // Clean up every hour
 
 // Background Job Sweeper Logic
@@ -610,11 +625,20 @@ const runStuckJobSweeper = async () => {
         if (updatedJob.electricians && updatedJob.electricians.length > 0) {
           const uniqueElectricians = [...new Set(updatedJob.electricians.map(e => e.toString()))];
           const basePayout = updatedJob.originalPrice || updatedJob.estimatedPrice;
-          const earningsPerElectrician = Math.floor(((basePayout * 0.8) / Math.max(1, uniqueElectricians.length)) * 100) / 100;
-          await User.updateMany(
-            { _id: { $in: uniqueElectricians } },
-            { $inc: { walletBalance: earningsPerElectrician, jobsCompleted: 1 } }
-          );
+          
+          if (updatedJob.paymentType === 'after_service') {
+            const commissionPerElectrician = Math.floor(((basePayout * 0.20) / Math.max(1, uniqueElectricians.length)) * 100) / 100;
+            await User.updateMany(
+              { _id: { $in: uniqueElectricians } },
+              { $inc: { walletBalance: -commissionPerElectrician, jobsCompleted: 1 } }
+            );
+          } else {
+            const earningsPerElectrician = Math.floor(((basePayout * 0.80) / Math.max(1, uniqueElectricians.length)) * 100) / 100;
+            await User.updateMany(
+              { _id: { $in: uniqueElectricians } },
+              { $inc: { walletBalance: earningsPerElectrician, jobsCompleted: 1 } }
+            );
+          }
         }
         logSystemEvent('WARN', 'Finance', 'Sweeper Auto-Payout', `Job ${job._id} auto-completed. Platform assumed liability for payout.`);
         io.to(job._id.toString()).emit('jobCompleted');
@@ -726,6 +750,10 @@ api.post('/signup', async (req, res) => {
     const bankDetails = String(req.body.bankDetails || '').trim().substring(0, 250);
     const panCardUrl = String(req.body.panCardBase64 || '');
     const photoUrl = String(req.body.photoBase64 || '');
+
+    if (idCardUrl.length > 3000000 || panCardUrl.length > 3000000 || photoUrl.length > 3000000) {
+      return res.status(400).json({ message: 'Document file sizes are too large. Please compress images before uploading.' });
+    }
 
     if (!name || !phone || !password || !role) return res.status(400).json({ message: 'Basic fields are required' });
     if (role === 'electrician' && (!address || !experienceYears || !idCardUrl || !bankDetails || !panCardUrl || !photoUrl)) {
@@ -1114,18 +1142,10 @@ api.put('/me', authenticateToken, async (req, res) => {
   try {
     // 8. Security: Typecast to prevent object injection
     const name = String(req.body.name || '').trim().substring(0, 50);
-    const phone = String(req.body.phone || '').trim().substring(0, 15);
-    if (!name || !phone) return res.status(400).json({ message: 'Name and phone are required' });
-    
-    const phoneRegex = /^\d{10}$/;
-    if (!phoneRegex.test(phone)) return res.status(400).json({ message: 'Invalid phone number format. Must be 10 digits.' });
-
-    // Ensure the new phone isn't already taken by another account
-    const existing = await User.findOne({ phone, _id: { $ne: req.user.userId } });
-    if (existing) return res.status(400).json({ message: 'Phone number already in use' });
+    if (!name) return res.status(400).json({ message: 'Name is required' });
 
     const updatedUser = await User.findByIdAndUpdate(
-      req.user.userId, { name, phone }, { new: true }
+      req.user.userId, { name }, { new: true } // Prevent unverified phone number changes
     ).select('-password -__v');
     
     if (!updatedUser) return res.status(404).json({ message: 'User not found' });
@@ -1151,8 +1171,8 @@ api.post('/electrician/pay-deposit', authenticateToken, async (req, res) => {
 api.delete('/me', authenticateToken, async (req, res) => {
   try {
     // 5. Security: Prevent Account Deletion Fraud (escaping active jobs)
-    const activeCustomerJobs = await Job.countDocuments({ customer: req.user.userId, status: { $in: ['verifying_payment', 'searching', 'assigned', 'in_progress'] } });
-    const activeElectricianJobs = await Job.countDocuments({ electricians: req.user.userId, status: { $in: ['searching', 'assigned', 'in_progress'] } });
+    const activeCustomerJobs = await Job.countDocuments({ customer: req.user.userId, status: { $in: ['verifying_payment', 'searching', 'assigned', 'in_progress', 'payment'] } });
+    const activeElectricianJobs = await Job.countDocuments({ electricians: req.user.userId, status: { $in: ['searching', 'assigned', 'in_progress', 'payment'] } });
     if (activeCustomerJobs > 0 || activeElectricianJobs > 0) {
       return res.status(400).json({ message: 'Cannot delete account with active jobs. Please complete or cancel them first.' });
     }
@@ -1473,11 +1493,16 @@ api.put('/jobs/:id/verify-otp', authenticateToken, async (req, res) => {
     
     // 4. Job OTP Brute Force Protection
     const attemptKey = `${req.user.userId}_${req.params.id}`;
-    const attempts = jobOtpAttempts.get(attemptKey) || 0;
-    if (attempts >= 5) return res.status(429).json({ message: 'Too many invalid attempts. Contact support.' });
+    const attemptRecord = jobOtpAttempts.get(attemptKey) || { count: 0, lockUntil: 0 };
+    if (Date.now() < attemptRecord.lockUntil) {
+      const wait = Math.ceil((attemptRecord.lockUntil - Date.now()) / 60000);
+      return res.status(429).json({ message: `Too many invalid attempts. Try again in ${wait} minutes.` });
+    }
 
     if (job.jobOTP !== String(otp).trim()) {
-      jobOtpAttempts.set(attemptKey, attempts + 1);
+      attemptRecord.count += 1;
+      if (attemptRecord.count >= 5) { attemptRecord.lockUntil = Date.now() + 15 * 60 * 1000; attemptRecord.count = 0; }
+      jobOtpAttempts.set(attemptKey, attemptRecord);
       return res.status(400).json({ message: 'Invalid OTP code' });
     }
     jobOtpAttempts.delete(attemptKey);
@@ -1603,20 +1628,21 @@ api.put('/jobs/:id/complete', authenticateToken, async (req, res) => {
     
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ message: 'Invalid Job ID format' });
 
-    // Atomic update to transition to the 'payment' verifying state
-    const job = await Job.findOneAndUpdate(
-      { _id: req.params.id, customer: req.user.userId, status: 'in_progress' }, 
-      { status: 'payment' }, // Send to Admin verification instead of auto-completing
-      { new: true, runValidators: true }
-    );
-    
-    if (!job) return res.status(404).json({ message: 'Job not found or not in progress' });
+    // 1. Prevent Double-Payout Race Condition: Determine if the job can bypass Admin Verification BEFORE mutating state
+    const jobCheck = await Job.findOne({ _id: req.params.id, customer: req.user.userId, status: 'in_progress' });
+    if (!jobCheck) return res.status(404).json({ message: 'Job not found or not in progress' });
+
+    let job;
 
     // If job was fully covered by wallet OR the electrician was paid directly in Cash/UPI by the customer
-    if (job.estimatedPrice <= 0 || job.paymentType === 'after_service') {
-      job.status = 'completed';
-      job.paymentStatus = 'paid';
-      await job.save();
+    if (jobCheck.estimatedPrice <= 0 || jobCheck.paymentType === 'after_service') {
+      // Atomic auto-completion (bypasses 'payment' state to prevent Admin force-complete overlaps)
+      job = await Job.findOneAndUpdate(
+        { _id: req.params.id, status: 'in_progress' },
+        { status: 'completed', paymentStatus: 'paid' },
+        { new: true, runValidators: true }
+      );
+      if (!job) return res.status(404).json({ message: 'Job status changed concurrently.' });
 
       if (job.electricians && job.electricians.length > 0) {
         const uniqueElectricians = [...new Set(job.electricians.map(e => e.toString()))];
@@ -1651,6 +1677,14 @@ api.put('/jobs/:id/complete', authenticateToken, async (req, res) => {
       return res.status(200).json(job);
     }
 
+    // Atomic transition to verification queue
+    job = await Job.findOneAndUpdate(
+      { _id: req.params.id, status: 'in_progress' },
+      { status: 'payment' },
+      { new: true, runValidators: true }
+    );
+    if (!job) return res.status(404).json({ message: 'Job status changed concurrently.' });
+
     io.to(req.params.id).emit('jobStatusUpdated', { status: 'payment' }); 
     io.emit('adminRefresh');
 
@@ -1666,6 +1700,7 @@ api.post('/electrician/recharge', authenticateToken, async (req, res) => {
     if (req.user.role !== 'electrician') return res.status(403).json({ message: 'Forbidden' });
     const { amount, screenshotBase64 } = req.body;
     if (!amount || !screenshotBase64) return res.status(400).json({ message: 'Amount and payment screenshot are required' });
+    if (String(screenshotBase64).length > 3000000) return res.status(400).json({ message: 'Screenshot file size too large.' });
 
     const recharge = await WalletRecharge.create({
       electrician: req.user.userId,
@@ -2406,8 +2441,14 @@ api.put('/admin/jobs/:id/force-complete', authenticateToken, async (req, res) =>
     if (job.electricians && job.electricians.length > 0) {
       const uniqueElectricians = [...new Set(job.electricians.map(e => e.toString()))];
       const basePayout = job.originalPrice || job.estimatedPrice;
-      const earningsPerElectrician = Math.floor(((basePayout * 0.8) / Math.max(1, uniqueElectricians.length)) * 100) / 100;
-      await User.updateMany({ _id: { $in: uniqueElectricians } }, { $inc: { walletBalance: earningsPerElectrician, jobsCompleted: 1 } });
+      
+      if (job.paymentType === 'after_service') {
+        const commissionPerElectrician = Math.floor(((basePayout * 0.20) / Math.max(1, uniqueElectricians.length)) * 100) / 100;
+        await User.updateMany({ _id: { $in: uniqueElectricians } }, { $inc: { walletBalance: -commissionPerElectrician, jobsCompleted: 1 } });
+      } else {
+        const earningsPerElectrician = Math.floor(((basePayout * 0.80) / Math.max(1, uniqueElectricians.length)) * 100) / 100;
+        await User.updateMany({ _id: { $in: uniqueElectricians } }, { $inc: { walletBalance: earningsPerElectrician, jobsCompleted: 1 } });
+      }
     }
     io.to(req.params.id).emit('jobCompleted');
     io.emit('adminRefresh');
