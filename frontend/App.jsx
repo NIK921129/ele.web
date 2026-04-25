@@ -1633,9 +1633,19 @@ Support: projects.nikunj.singh@gmail.com
                       <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '12px' }}>Please pay the final amount to complete the job once the electrician is finished.</p>
                       <h2 style={{ color: 'var(--success)', margin: '0 0 12px 0' }}>₹{bookingPrice}</h2>
                       {bookingPrice > 0 && (
-                        <a href={`upi://pay?pa=9211293576@ptaxis&pn=WATTZEN&am=${Number(bookingPrice).toFixed(2)}&cu=INR`} className="btn btn-block" style={{ background: '#bcd81d', color: '#111', display: 'block', textDecoration: 'none', marginBottom: '12px' }}>
-                          <i className="fas fa-qrcode" style={{ marginRight: '8px' }}></i> Pay via UPI App
-                        </a>
+                        <div style={{ background: 'rgba(255,255,255,0.05)', padding: '16px', borderRadius: '8px', border: '1px dashed var(--primary)', marginBottom: '12px' }}>
+                          <p style={{ margin: '0 0 12px 0', fontSize: '0.85rem' }}>Scan QR Code with any UPI App:</p>
+                          <div style={{ background: 'white', padding: '8px', display: 'inline-block', borderRadius: '8px', marginBottom: '12px' }}>
+                            <img 
+                              src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(`upi://pay?pa=9211293576@ptaxis&pn=WATTZEN&am=${Number(bookingPrice).toFixed(2)}&cu=INR`)}`} 
+                              alt="UPI QR Code" 
+                              style={{ width: '120px', height: '120px', display: 'block' }} 
+                            />
+                          </div>
+                          <a href={`upi://pay?pa=9211293576@ptaxis&pn=WATTZEN&am=${Number(bookingPrice).toFixed(2)}&cu=INR`} className="btn btn-block" style={{ background: '#bcd81d', color: '#111', display: 'block', textDecoration: 'none', fontWeight: 'bold' }}>
+                            <i className="fas fa-external-link-alt" style={{ marginRight: '8px' }}></i> Open UPI App on Phone
+                          </a>
+                        </div>
                       )}
                     </React.Fragment>
                   )}
@@ -2682,10 +2692,28 @@ function ElectricianHome({ user, showToast, onEditProfile, onUpdateUser }) {
           <i className="fas fa-bolt" style={{ color: 'var(--warning)' }}></i> <strong>Recharge Wallet</strong>
           <p style={{ fontSize: '0.8rem', opacity: 0.8, marginTop: '4px', marginBottom: '12px' }}>Maintain a minimum ₹500 balance to accept jobs. We deduct 20% commission on cash jobs.</p>
           <input type="number" placeholder="Enter Amount (₹)" className="form-control" style={{ marginBottom: '8px', background: 'rgba(255,255,255,0.1)', color: 'white', border: '1px solid rgba(255,255,255,0.2)' }} value={rechargeAmount} onChange={e=>setRechargeAmount(e.target.value)} min="1" />
-          {rechargeAmount >= 100 && (
-            <a href={`upi://pay?pa=9211293576@ptaxis&pn=WATTZEN&am=${rechargeAmount}&cu=INR`} target="_blank" rel="noreferrer" className="btn btn-block" style={{ background: '#bcd81d', color: '#111', marginBottom: '8px', textDecoration: 'none', display: 'block', textAlign: 'center' }}>
-              <i className="fas fa-qrcode"></i> Pay ₹{rechargeAmount} via UPI
-            </a>
+          {Number(rechargeAmount) > 0 && (
+            <div style={{ background: 'rgba(255,255,255,0.05)', padding: '16px', borderRadius: '8px', marginBottom: '12px', border: '1px dashed var(--primary)', textAlign: 'center' }}>
+              <p style={{ margin: '0 0 12px 0', fontSize: '0.9rem', color: 'white' }}>Scan QR to pay <strong>₹{rechargeAmount}</strong></p>
+              
+              <div style={{ background: 'white', padding: '8px', display: 'inline-block', borderRadius: '8px', marginBottom: '16px' }}>
+                <img 
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(`upi://pay?pa=9211293576@ptaxis&pn=WATTZEN&am=${rechargeAmount}&cu=INR`)}`} 
+                  alt="UPI QR Code" 
+                  style={{ width: '150px', height: '150px', display: 'block' }} 
+                />
+              </div>
+
+              <p style={{ margin: '0 0 8px 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>Or pay to UPI ID:</p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+                <code style={{ flex: 1, padding: '10px', background: 'rgba(0,0,0,0.3)', borderRadius: '4px', color: 'var(--success)', fontSize: '1.1rem', letterSpacing: '1px', textAlign: 'left' }}>9211293576@ptaxis</code>
+                <button className="btn btn-outline" style={{ padding: '10px 14px', borderColor: 'var(--border-light)', color: 'white' }} onClick={() => { navigator.clipboard.writeText('9211293576@ptaxis'); showToast('UPI ID copied!', 'success'); }} title="Copy UPI ID"><i className="fas fa-copy"></i></button>
+              </div>
+              
+              <a href={`upi://pay?pa=9211293576@ptaxis&pn=WATTZEN&am=${rechargeAmount}&cu=INR`} className="btn btn-block" style={{ background: '#bcd81d', color: '#111', textDecoration: 'none', display: 'block', textAlign: 'center', fontWeight: 'bold' }}>
+                <i className="fas fa-external-link-alt"></i> Open UPI App on Phone
+              </a>
+            </div>
           )}
           <div style={{ marginBottom: '12px' }}>
             <label style={{ fontSize: '0.8rem', display: 'block', marginBottom: '4px' }}>Upload Payment Screenshot:</label>
